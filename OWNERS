@@ -1,22 +1,8 @@
 approvers:
-- andyzhangx
-- feiskyer
-- nilo19
-- MartinForReal
-- lzhecheng
-- jwtty
+- JoelSpeed
+- elmiko
+- lobziik
+- Fedosin
 
-reviewers:
-- andyzhangx
-- feiskyer
-- nilo19
-- MartinForReal
-- lzhecheng
-- jwtty
-
-emeritus_approvers:
-- brendandburns
-- karataliu
-- khenidak
-- ritazh
-
+component: "Cloud Compute"
+subcomponent: "Cloud Controller Manager"
