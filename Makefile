@@ -446,3 +446,9 @@ LINTER_VERSION = v1.60.1
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
 	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
+
+## --------------------------------------
+## Openshift specific include
+## --------------------------------------
+
+include openshift.mk
