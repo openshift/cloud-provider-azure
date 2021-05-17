@@ -387,25 +387,11 @@ cloud-build-prerequisites:
 	apk add --no-cache jq
 
 .PHONY: release-staging
-release-staging: ## Release the cloud provider images.
-ifeq ($(CLOUD_BUILD_IMAGE),ccm)
-	ENABLE_GIT_COMMAND=$(ENABLE_GIT_COMMAND) $(MAKE) build-all-ccm-images push-multi-arch-controller-manager-image
-else
-	ENABLE_GIT_COMMAND=$(ENABLE_GIT_COMMAND) $(MAKE) cloud-build-prerequisites build-all-node-images push-multi-arch-node-manager-image
-endif
+release-staging:
+	ENABLE_GIT_COMMANDS=false IMAGE_REGISTRY=$(STAGING_REGISTRY) $(MAKE) build-images push-images
+
 ## --------------------------------------
-##@ Deploy clusters
+## Openshift specific include
 ## --------------------------------------
 
-.PHONY: deploy-cluster
-deploy-cluster:
-	hack/deploy-cluster-capz.sh
-
-##@ Tools
-
-LINTER = $(shell pwd)/bin/golangci-lint
-LINTER_VERSION = v1.51.2
-.PHONY: golangci-lint
-golangci-lint:  ## Download golangci-lint locally if necessary.
-	@echo "Installing golangci-lint"
-	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
+include openshift.mk

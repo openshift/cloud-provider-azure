@@ -2,7 +2,9 @@
 !.git
 !cloud-controller-manager
 !Makefile
-!hack/pkg-config.sh
+!openshift.mk
+!openshift-hack
+!hack
 !vendor
 !cmd
 !pkg
