@@ -3,3 +3,6 @@ approvers:
 - Danil-Grigorev
 - elmiko
 - lobziik
+
+component: "Cloud Compute"
+subcomponent: "Cloud Controller Manager"
