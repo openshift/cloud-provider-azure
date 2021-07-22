@@ -20,6 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+
+	"github.com/golang/mock/gomock"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/zoneclient/mockzoneclient"
+
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
 
@@ -172,7 +177,7 @@ func TestGetConfigFromSecret(t *testing.T) {
 				assert.NoError(t, err, test.name)
 			}
 
-			real, err := az.getConfigFromSecret()
+			real, err := az.GetConfigFromSecret()
 			if test.expectErr {
 				assert.Error(t, err, test.name)
 				return
@@ -185,6 +190,9 @@ func TestGetConfigFromSecret(t *testing.T) {
 }
 
 func TestInitializeCloudFromSecret(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	emptyConfig := &Config{}
 	unknownConfigTypeConfig := getTestConfig()
 	unknownConfigTypeConfig.CloudConfigType = "UnknownConfigType"
@@ -271,8 +279,45 @@ func TestInitializeCloudFromSecret(t *testing.T) {
 				assert.NoError(t, err, test.name)
 			}
 
+			mockZoneClient := mockzoneclient.NewMockInterface(ctrl)
+			mockZoneClient.EXPECT().GetZones(gomock.Any(), gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).MaxTimes(1)
+			az.ZoneClient = mockZoneClient
+
 			err := az.InitializeCloudFromSecret()
 			assert.Equal(t, test.expectErr, err != nil)
+		})
+	}
+}
+
+func TestConfigSecretMetadata(t *testing.T) {
+	for _, testCase := range []struct {
+		description                                                         string
+		secretName, secretNamespace, cloudConfigKey                         string
+		expectedsecretName, expectedSsecretNamespace, expectedClouConfigKey string
+	}{
+		{
+			description:              "configSecretMetadata should set the secret metadata from the given parameters",
+			secretName:               "cloud-provider-config",
+			secretNamespace:          "123456",
+			cloudConfigKey:           "azure.json",
+			expectedsecretName:       "cloud-provider-config",
+			expectedSsecretNamespace: "123456",
+			expectedClouConfigKey:    "azure.json",
+		},
+		{
+			description:              "configSecretMetadata should set the secret metadata from the default values",
+			expectedsecretName:       consts.DefaultCloudProviderConfigSecName,
+			expectedSsecretNamespace: consts.DefaultCloudProviderConfigSecNamespace,
+			expectedClouConfigKey:    consts.DefaultCloudProviderConfigSecKey,
+		},
+	} {
+		t.Run(testCase.description, func(t *testing.T) {
+			az := &Cloud{}
+			az.configSecretMetadata(testCase.secretName, testCase.secretNamespace, testCase.cloudConfigKey)
+
+			assert.Equal(t, testCase.expectedsecretName, az.SecretName)
+			assert.Equal(t, testCase.expectedSsecretNamespace, az.SecretNamespace)
+			assert.Equal(t, testCase.expectedClouConfigKey, az.CloudConfigKey)
 		})
 	}
 }

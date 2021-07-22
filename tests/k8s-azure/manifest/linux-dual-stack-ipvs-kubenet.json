@@ -16,8 +16,7 @@
                 "kubeProxyMode": "ipvs",
                 "networkPlugin": "kubenet",
                 "apiServerConfig": {
-                    "--feature-gates": "IPv6DualStack=true",
-                    "--service-account-issuer": "https://kubernetes.default.svc.cluster.local"
+                    "--feature-gates": "IPv6DualStack=true"
                 },
                 "kubeletConfig": {
                     "--feature-gates": "IPv6DualStack=true",
@@ -36,9 +35,9 @@
             }
         },
         "masterProfile": {
-            "count": 1,
+            "count": 3,
             "dnsPrefix": "{dnsPrefix}",
-            "vmSize": "Standard_DS3_v2",
+            "vmSize": "Standard_DS2_v2",
             "distro": "aks-ubuntu-16.04"
         },
         "agentPoolProfiles": [

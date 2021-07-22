@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 
 	v1 "k8s.io/api/core/v1"
@@ -193,8 +193,12 @@ func getProtocolsFromKubernetesProtocol(protocol v1.Protocol) (*network.Transpor
 		transportProto = network.TransportProtocolUDP
 		securityProto = network.SecurityRuleProtocolUDP
 		return &transportProto, &securityProto, nil, nil
+	case v1.ProtocolSCTP:
+		transportProto = network.TransportProtocolAll
+		securityProto = network.SecurityRuleProtocolAsterisk
+		return &transportProto, &securityProto, nil, nil
 	default:
-		return &transportProto, &securityProto, &probeProto, fmt.Errorf("only TCP and UDP are supported for Azure LoadBalancers")
+		return &transportProto, &securityProto, &probeProto, fmt.Errorf("only TCP, UDP and SCTP are supported for Azure LoadBalancers")
 	}
 
 }
@@ -240,9 +244,9 @@ func getIPConfigByIPFamily(nic network.Interface, IPv6 bool) (*network.Interface
 
 	var ipVersion network.IPVersion
 	if IPv6 {
-		ipVersion = network.IPv6
+		ipVersion = network.IPVersionIPv6
 	} else {
-		ipVersion = network.IPv4
+		ipVersion = network.IPVersionIPv4
 	}
 	for _, ref := range *nic.IPConfigurations {
 		if ref.PrivateIPAddress != nil && ref.PrivateIPAddressVersion == ipVersion {
@@ -352,18 +356,21 @@ func (az *Cloud) serviceOwnsFrontendIP(fip network.FrontendIPConfiguration, serv
 			return false, isPrimaryService, nil
 		}
 
-		if pip != nil && pip.ID != nil && pip.PublicIPAddressPropertiesFormat != nil && pip.IPAddress != nil {
-			if strings.EqualFold(*pip.ID, *fip.PublicIPAddress.ID) {
+		if pip != nil &&
+			pip.ID != nil &&
+			pip.PublicIPAddressPropertiesFormat != nil &&
+			pip.IPAddress != nil &&
+			fip.FrontendIPConfigurationPropertiesFormat != nil &&
+			fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress != nil {
+			if strings.EqualFold(to.String(pip.ID), to.String(fip.PublicIPAddress.ID)) {
 				klog.V(4).Infof("serviceOwnsFrontendIP: found secondary service %s of the frontend IP config %s", service.Name, *fip.Name)
 
 				return true, isPrimaryService, nil
 			}
 			klog.V(4).Infof("serviceOwnsFrontendIP: the public IP with ID %s is being referenced by other service with public IP address %s", *pip.ID, *pip.IPAddress)
-
-			return false, isPrimaryService, nil
 		}
 
-		return false, isPrimaryService, fmt.Errorf("serviceOwnsFrontendIP: wrong parameters")
+		return false, isPrimaryService, nil
 	}
 
 	// for internal secondary service the private IP address on the frontend IP config should be checked
@@ -494,6 +501,7 @@ func (as *availabilitySet) GetInstanceIDByNodeName(name string) (string, error) 
 
 	machine, err = as.getVirtualMachine(types.NodeName(name), azcache.CacheReadTypeUnsafe)
 	if errors.Is(err, cloudprovider.InstanceNotFound) {
+		klog.Warningf("Unable to find node %s: %v", name, cloudprovider.InstanceNotFound)
 		return "", cloudprovider.InstanceNotFound
 	}
 	if err != nil {
@@ -540,6 +548,20 @@ func (as *availabilitySet) GetPowerStatusByNodeName(name string) (powerState str
 	return vmPowerStateStopped, nil
 }
 
+// GetProvisioningStateByNodeName returns the provisioningState for the specified node.
+func (as *availabilitySet) GetProvisioningStateByNodeName(name string) (provisioningState string, err error) {
+	vm, err := as.getVirtualMachine(types.NodeName(name), azcache.CacheReadTypeDefault)
+	if err != nil {
+		return provisioningState, err
+	}
+
+	if vm.VirtualMachineProperties == nil || vm.VirtualMachineProperties.ProvisioningState == nil {
+		return provisioningState, nil
+	}
+
+	return to.String(vm.VirtualMachineProperties.ProvisioningState), nil
+}
+
 // GetNodeNameByProviderID gets the node name by provider ID.
 func (as *availabilitySet) GetNodeNameByProviderID(providerID string) (types.NodeName, error) {
 	// NodeName is part of providerID for standard instances.
@@ -564,6 +586,7 @@ func (as *availabilitySet) GetInstanceTypeByNodeName(name string) (string, error
 
 // GetZoneByNodeName gets availability zone for the specified node. If the node is not running
 // with availability zone, then it returns fault domain.
+// for details, refer to https://kubernetes-sigs.github.io/cloud-provider-azure/topics/availability-zones/#node-labels
 func (as *availabilitySet) GetZoneByNodeName(name string) (cloudprovider.Zone, error) {
 	vm, err := as.getVirtualMachine(types.NodeName(name), azcache.CacheReadTypeUnsafe)
 	if err != nil {
@@ -983,9 +1006,12 @@ func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backend
 	for i := range ipConfigurationIDs {
 		ipConfigurationID := ipConfigurationIDs[i]
 		nodeName, _, err := as.GetNodeNameByIPConfigurationID(ipConfigurationID)
-		if err != nil {
+		if err != nil && !errors.Is(err, cloudprovider.InstanceNotFound) {
 			klog.Errorf("Failed to GetNodeNameByIPConfigurationID(%s): %v", ipConfigurationID, err)
 			allErrs = append(allErrs, err)
+			continue
+		}
+		if nodeName == "" {
 			continue
 		}
 
@@ -1062,6 +1088,11 @@ func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backend
 }
 
 func getAvailabilitySetNameByID(asID string) (string, error) {
+	// for standalone VM
+	if asID == "" {
+		return "", nil
+	}
+
 	matches := vmasIDRE.FindStringSubmatch(asID)
 	if len(matches) != 2 {
 		return "", fmt.Errorf("getAvailabilitySetNameByID: failed to parse the VMAS ID %s", asID)
@@ -1113,7 +1144,8 @@ func (as *availabilitySet) GetNodeNameByIPConfigurationID(ipConfigurationID stri
 
 	vm, err := as.getVirtualMachine(types.NodeName(vmName), azcache.CacheReadTypeDefault)
 	if err != nil {
-		return "", "", fmt.Errorf("cannot get the virtual machine by node name %s", vmName)
+		klog.Errorf("Unable to get the virtual machine by node name %s: %v", vmName, err)
+		return "", "", err
 	}
 	asID := ""
 	if vm.VirtualMachineProperties != nil && vm.AvailabilitySet != nil {
@@ -1125,7 +1157,7 @@ func (as *availabilitySet) GetNodeNameByIPConfigurationID(ipConfigurationID stri
 
 	asName, err := getAvailabilitySetNameByID(asID)
 	if err != nil {
-		return "", "", fmt.Errorf("cannot get the availability set name by the availability set ID %s", asID)
+		return "", "", fmt.Errorf("cannot get the availability set name by the availability set ID %s: %v", asID, err)
 	}
 	return vmName, strings.ToLower(asName), nil
 }
@@ -1172,7 +1204,7 @@ func (as *availabilitySet) getAvailabilitySetByNodeName(nodeName string, crt azc
 	}
 
 	if result == nil {
-		klog.Warningf("failed to find the vmas of node %s", nodeName)
+		klog.Warningf("Unable to find node %s: %v", nodeName, cloudprovider.InstanceNotFound)
 		return nil, cloudprovider.InstanceNotFound
 	}
 

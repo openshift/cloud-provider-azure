@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -72,6 +72,7 @@ func (az *Cloud) getVirtualMachine(nodeName types.NodeName, crt azcache.AzureCac
 	}
 
 	if cachedVM == nil {
+		klog.Warningf("Unable to find node %s: %v", nodeName, cloudprovider.InstanceNotFound)
 		return vm, cloudprovider.InstanceNotFound
 	}
 
@@ -79,6 +80,10 @@ func (az *Cloud) getVirtualMachine(nodeName types.NodeName, crt azcache.AzureCac
 }
 
 func (az *Cloud) getRouteTable(crt azcache.AzureCacheReadType) (routeTable network.RouteTable, exists bool, err error) {
+	if len(az.RouteTableName) == 0 {
+		return routeTable, false, fmt.Errorf("Route table name is not configured")
+	}
+
 	cachedRt, err := az.rtCache.Get(az.RouteTableName, crt)
 	if err != nil {
 		return routeTable, false, err

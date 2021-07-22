@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -604,9 +604,16 @@ func TestGetProtocolsFromKubernetesProtocol(t *testing.T) {
 			nilProbeProto:              true,
 		},
 		{
+			Name:                       "getProtocolsFromKubernetesProtocol should get SCTP protocol",
+			protocol:                   v1.ProtocolSCTP,
+			expectedTransportProto:     network.TransportProtocolAll,
+			expectedSecurityGroupProto: network.SecurityRuleProtocolAsterisk,
+			nilProbeProto:              true,
+		},
+		{
 			Name:           "getProtocolsFromKubernetesProtocol should report error",
-			protocol:       v1.ProtocolSCTP,
-			expectedErrMsg: fmt.Errorf("only TCP and UDP are supported for Azure LoadBalancers"),
+			protocol:       v1.Protocol("ICMP"),
+			expectedErrMsg: fmt.Errorf("only TCP, UDP and SCTP are supported for Azure LoadBalancers"),
 		},
 	}
 
@@ -790,14 +797,14 @@ func TestGetIPConfigByIPFamily(t *testing.T) {
 	ipv4IPconfig := network.InterfaceIPConfiguration{
 		Name: to.StringPtr("ipconfig1"),
 		InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-			PrivateIPAddressVersion: network.IPv4,
+			PrivateIPAddressVersion: network.IPVersionIPv4,
 			PrivateIPAddress:        to.StringPtr("10.10.0.12"),
 		},
 	}
 	ipv6IPconfig := network.InterfaceIPConfiguration{
 		Name: to.StringPtr("ipconfig2"),
 		InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-			PrivateIPAddressVersion: network.IPv6,
+			PrivateIPAddressVersion: network.IPVersionIPv6,
 			PrivateIPAddress:        to.StringPtr("1111:11111:00:00:1111:1111:000:111"),
 		},
 	}
@@ -853,7 +860,7 @@ func TestGetIPConfigByIPFamily(t *testing.T) {
 						{
 							Name: to.StringPtr("ipconfig1"),
 							InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-								PrivateIPAddressVersion: network.IPv4,
+								PrivateIPAddressVersion: network.IPVersionIPv4,
 							},
 						},
 					},
@@ -983,6 +990,7 @@ func TestGetStandardVMPowerStatusByNodeName(t *testing.T) {
 			vm: compute.VirtualMachine{
 				Name: to.StringPtr("vm2"),
 				VirtualMachineProperties: &compute.VirtualMachineProperties{
+					ProvisioningState: to.StringPtr("Succeeded"),
 					InstanceView: &compute.VirtualMachineInstanceView{
 						Statuses: &[]compute.InstanceViewStatus{
 							{
@@ -998,8 +1006,10 @@ func TestGetStandardVMPowerStatusByNodeName(t *testing.T) {
 			name:     "GetPowerStatusByNodeName should get vmPowerStateStopped if vm.InstanceView is nil",
 			nodeName: "vm3",
 			vm: compute.VirtualMachine{
-				Name:                     to.StringPtr("vm3"),
-				VirtualMachineProperties: &compute.VirtualMachineProperties{},
+				Name: to.StringPtr("vm3"),
+				VirtualMachineProperties: &compute.VirtualMachineProperties{
+					ProvisioningState: to.StringPtr("Succeeded"),
+				},
 			},
 			expectedStatus: vmPowerStateStopped,
 		},
@@ -1009,7 +1019,8 @@ func TestGetStandardVMPowerStatusByNodeName(t *testing.T) {
 			vm: compute.VirtualMachine{
 				Name: to.StringPtr("vm4"),
 				VirtualMachineProperties: &compute.VirtualMachineProperties{
-					InstanceView: &compute.VirtualMachineInstanceView{},
+					ProvisioningState: to.StringPtr("Succeeded"),
+					InstanceView:      &compute.VirtualMachineInstanceView{},
 				},
 			},
 			expectedStatus: vmPowerStateStopped,
@@ -1022,6 +1033,69 @@ func TestGetStandardVMPowerStatusByNodeName(t *testing.T) {
 		powerState, err := cloud.VMSet.GetPowerStatusByNodeName(test.nodeName)
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
 		assert.Equal(t, test.expectedStatus, powerState, test.name)
+	}
+}
+
+func TestGetStandardVMProvisioningStateByNodeName(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	cloud := GetTestCloud(ctrl)
+
+	testcases := []struct {
+		name                      string
+		nodeName                  string
+		vm                        compute.VirtualMachine
+		expectedProvisioningState string
+		getErr                    *retry.Error
+		expectedErrMsg            error
+	}{
+		{
+			name:     "GetProvisioningStateByNodeName should report error if node don't exist",
+			nodeName: "vm1",
+			vm:       compute.VirtualMachine{},
+			getErr: &retry.Error{
+				HTTPStatusCode: http.StatusNotFound,
+				RawError:       cloudprovider.InstanceNotFound,
+			},
+			expectedErrMsg: fmt.Errorf("instance not found"),
+		},
+		{
+			name:     "GetProvisioningStateByNodeName should return Succeeded for running VM",
+			nodeName: "vm2",
+			vm: compute.VirtualMachine{
+				Name: to.StringPtr("vm2"),
+				VirtualMachineProperties: &compute.VirtualMachineProperties{
+					ProvisioningState: to.StringPtr("Succeeded"),
+					InstanceView: &compute.VirtualMachineInstanceView{
+						Statuses: &[]compute.InstanceViewStatus{
+							{
+								Code: to.StringPtr("PowerState/Running"),
+							},
+						},
+					},
+				},
+			},
+			expectedProvisioningState: "Succeeded",
+		},
+		{
+			name:     "GetProvisioningStateByNodeName should return empty string when vm.ProvisioningState is nil",
+			nodeName: "vm3",
+			vm: compute.VirtualMachine{
+				Name: to.StringPtr("vm3"),
+				VirtualMachineProperties: &compute.VirtualMachineProperties{
+					ProvisioningState: nil,
+				},
+			},
+			expectedProvisioningState: "",
+		},
+	}
+	for _, test := range testcases {
+		mockVMClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nodeName, gomock.Any()).Return(test.vm, test.getErr).AnyTimes()
+
+		provisioningState, err := cloud.VMSet.GetProvisioningStateByNodeName(test.nodeName)
+		assert.Equal(t, test.expectedErrMsg, err, test.name)
+		assert.Equal(t, test.expectedProvisioningState, provisioningState, test.name)
 	}
 }
 
@@ -1622,6 +1696,33 @@ func TestServiceOwnsFrontendIP(t *testing.T) {
 			},
 		},
 		{
+			desc: "serviceOwnsFrontendIP should return false if there is no public IP address in the frontend IP config",
+			existingPIPs: []network.PublicIPAddress{
+				{
+					ID: to.StringPtr("pip"),
+					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
+						IPAddress: to.StringPtr("4.3.2.1"),
+					},
+				},
+			},
+			fip: network.FrontendIPConfiguration{
+				Name: to.StringPtr("auid"),
+				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
+					PublicIPPrefix: &network.SubResource{
+						ID: to.StringPtr("pip1"),
+					},
+				},
+			},
+			service: &v1.Service{
+				ObjectMeta: meta.ObjectMeta{
+					UID: types.UID("secondary"),
+				},
+				Spec: v1.ServiceSpec{
+					LoadBalancerIP: "4.3.2.1",
+				},
+			},
+		},
+		{
 			desc: "serviceOwnsFrontendIP should detect the secondary external service",
 			existingPIPs: []network.PublicIPAddress{
 				{
@@ -1739,7 +1840,7 @@ func TestStandardEnsureBackendPoolDeleted(t *testing.T) {
 func buildDefaultTestInterface(isPrimary bool, lbBackendpoolIDs []string) network.Interface {
 	expectedNIC := network.Interface{
 		InterfacePropertiesFormat: &network.InterfacePropertiesFormat{
-			ProvisioningState: network.Succeeded,
+			ProvisioningState: network.ProvisioningStateSucceeded,
 			IPConfigurations: &[]network.InterfaceIPConfiguration{
 				{
 					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
@@ -1944,4 +2045,26 @@ func TestGetNodeCIDRMasksByProviderIDAvailabilitySet(t *testing.T) {
 			assert.Equal(t, tc.expectedIPV6MaskSize, ipv6MaskSize)
 		})
 	}
+}
+
+func TestGetAvailabilitySetNameByID(t *testing.T) {
+	t.Run("getAvailabilitySetNameByID should return empty string if the given ID is empty", func(t *testing.T) {
+		vmasName, err := getAvailabilitySetNameByID("")
+		assert.Nil(t, err)
+		assert.Empty(t, vmasName)
+	})
+
+	t.Run("getAvailabilitySetNameByID should report an error if the format of the given ID is wrong", func(t *testing.T) {
+		asID := "illegal-id"
+		vmasName, err := getAvailabilitySetNameByID(asID)
+		assert.Equal(t, fmt.Errorf("getAvailabilitySetNameByID: failed to parse the VMAS ID illegal-id"), err)
+		assert.Empty(t, vmasName)
+	})
+
+	t.Run("getAvailabilitySetNameByID should extract the VMAS name from the given ID", func(t *testing.T) {
+		asID := "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/availabilitySets/as"
+		vmasName, err := getAvailabilitySetNameByID(asID)
+		assert.Nil(t, err)
+		assert.Equal(t, "as", vmasName)
+	})
 }

@@ -22,6 +22,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ import (
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/flowcontrol"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
 
@@ -49,6 +51,9 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/fileclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/interfaceclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/loadbalancerclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatednsclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatednszonegroupclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privateendpointclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/routeclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/routetableclient"
@@ -56,6 +61,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/snapshotclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/storageaccountclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/virtualnetworklinksclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmasclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmsizeclient"
@@ -220,12 +226,14 @@ type Config struct {
 	// RouteUpdateWaitingInSeconds is the delay time for waiting route updates to take effect. This waiting delay is added
 	// because the routes are not taken effect when the async route updating operation returns success. Default is 30 seconds.
 	RouteUpdateWaitingInSeconds int `json:"routeUpdateWaitingInSeconds,omitempty" yaml:"routeUpdateWaitingInSeconds,omitempty"`
+	// The user agent for Azure customer usage attribution
+	UserAgent string `json:"userAgent,omitempty" yaml:"userAgent,omitempty"`
 }
 
 type InitSecretConfig struct {
-	SecretName      string `json:"secretName,omitempty" yaml:"secret_name,omitempty"`
-	SecretNamespace string `json:"secret_namespace,omitempty" yaml:"secret_namespace,omitempty"`
-	CloudConfigKey  string `json:"cloud_config_key,omitempty" yaml:"cloud_config_key,omitempty"`
+	SecretName      string `json:"secretName,omitempty" yaml:"secretName,omitempty"`
+	SecretNamespace string `json:"secretNamespace,omitempty" yaml:"secretNamespace,omitempty"`
+	CloudConfigKey  string `json:"cloudConfigKey,omitempty" yaml:"cloudConfigKey,omitempty"`
 }
 
 // HasExtendedLocation returns true if extendedlocation prop are specified.
@@ -265,6 +273,10 @@ type Cloud struct {
 	VirtualMachineSizesClient       vmsizeclient.Interface
 	AvailabilitySetsClient          vmasclient.Interface
 	ZoneClient                      zoneclient.Interface
+	privateendpointclient           privateendpointclient.Interface
+	privatednsclient                privatednsclient.Interface
+	privatednszonegroupclient       privatednszonegroupclient.Interface
+	virtualNetworkLinksClient       virtualnetworklinksclient.Interface
 
 	ResourceRequestBackoff wait.Backoff
 	metadata               *InstanceMetadataService
@@ -326,19 +338,67 @@ func init() {
 		}
 	}
 	autorest.StatusCodesForRetry = statusCodesForRetry
-
-	cloudprovider.RegisterCloudProvider(consts.CloudProviderName, NewCloud)
 }
 
 // NewCloud returns a Cloud with initialized clients
-func NewCloud(configReader io.Reader) (cloudprovider.Interface, error) {
-	az, err := NewCloudWithoutFeatureGates(configReader)
+func NewCloud(configReader io.Reader, callFromCCM bool) (cloudprovider.Interface, error) {
+	az, err := NewCloudWithoutFeatureGates(configReader, callFromCCM)
 	if err != nil {
 		return nil, err
 	}
 	az.ipv6DualStackEnabled = utilfeature.DefaultFeatureGate.Enabled(consts.IPv6DualStack)
 
 	return az, nil
+}
+
+func NewCloudFromConfigFile(configFilePath string, calFromCCM bool) (cloudprovider.Interface, error) {
+	var (
+		cloud cloudprovider.Interface
+		err   error
+	)
+
+	if configFilePath != "" {
+		var config *os.File
+		config, err = os.Open(configFilePath)
+		if err != nil {
+			klog.Fatalf("Couldn't open cloud provider configuration %s: %#v",
+				configFilePath, err)
+		}
+
+		defer config.Close()
+		cloud, err = NewCloud(config, calFromCCM)
+	} else {
+		// Pass explicit nil so plugins can actually check for nil. See
+		// "Why is my nil error value not equal to nil?" in golang.org/doc/faq.
+		cloud, err = NewCloud(nil, false)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("could not init cloud provider azure: %v", err)
+	}
+	if cloud == nil {
+		return nil, fmt.Errorf("nil cloud")
+	}
+
+	return cloud, nil
+}
+
+func (az *Cloud) configSecretMetadata(secretName, secretNamespace, cloudConfigKey string) {
+	if secretName == "" {
+		secretName = consts.DefaultCloudProviderConfigSecName
+	}
+	if secretNamespace == "" {
+		secretNamespace = consts.DefaultCloudProviderConfigSecNamespace
+	}
+	if cloudConfigKey == "" {
+		cloudConfigKey = consts.DefaultCloudProviderConfigSecKey
+	}
+
+	az.InitSecretConfig = InitSecretConfig{
+		SecretName:      secretName,
+		SecretNamespace: secretNamespace,
+		CloudConfigKey:  cloudConfigKey,
+	}
 }
 
 func NewCloudFromSecret(clientBuilder cloudprovider.ControllerClientBuilder, secretName, secretNamespace, cloudConfigKey string) (cloudprovider.Interface, error) {
@@ -348,12 +408,9 @@ func NewCloudFromSecret(clientBuilder cloudprovider.ControllerClientBuilder, sec
 		nodeResourceGroups: map[string]string{},
 		unmanagedNodes:     sets.NewString(),
 		routeCIDRs:         map[string]string{},
-		InitSecretConfig: InitSecretConfig{
-			SecretName:      secretName,
-			SecretNamespace: secretNamespace,
-			CloudConfigKey:  cloudConfigKey,
-		},
 	}
+
+	az.configSecretMetadata(secretName, secretNamespace, cloudConfigKey)
 
 	az.Initialize(clientBuilder, wait.NeverStop)
 
@@ -369,8 +426,8 @@ func NewCloudFromSecret(clientBuilder cloudprovider.ControllerClientBuilder, sec
 
 // NewCloudWithoutFeatureGates returns a Cloud without trying to wire the feature gates.  This is used by the unit tests
 // that don't load the actual features being used in the cluster.
-func NewCloudWithoutFeatureGates(configReader io.Reader) (*Cloud, error) {
-	config, err := parseConfig(configReader)
+func NewCloudWithoutFeatureGates(configReader io.Reader, callFromCCM bool) (*Cloud, error) {
+	config, err := ParseConfig(configReader)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +440,7 @@ func NewCloudWithoutFeatureGates(configReader io.Reader) (*Cloud, error) {
 		routeCIDRs:         map[string]string{},
 	}
 
-	err = az.InitializeCloudFromConfig(config, false)
+	err = az.InitializeCloudFromConfig(config, false, callFromCCM)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +449,7 @@ func NewCloudWithoutFeatureGates(configReader io.Reader) (*Cloud, error) {
 }
 
 // InitializeCloudFromConfig initializes the Cloud from config.
-func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) error {
+func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret, callFromCCM bool) error {
 	if config == nil {
 		// should not reach here
 		return fmt.Errorf("InitializeCloudFromConfig: cannot initialize from nil config")
@@ -437,7 +494,7 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 		return err
 	}
 
-	servicePrincipalToken, err := auth.GetServicePrincipalToken(&config.AzureAuthConfig, env)
+	servicePrincipalToken, err := auth.GetServicePrincipalToken(&config.AzureAuthConfig, env, env.ServiceManagementEndpoint)
 	if errors.Is(err, auth.ErrorNoAuth) {
 		// Only controller-manager would lazy-initialize from secret, and credentials are required for such case.
 		if fromSecret {
@@ -504,6 +561,39 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 		}
 	}
 
+	err = az.initCaches()
+	if err != nil {
+		return err
+	}
+
+	if err := initDiskControllers(az); err != nil {
+		return err
+	}
+
+	// updating routes and syncing zones only in CCM
+	if callFromCCM {
+		// start delayed route updater.
+		az.routeUpdater = newDelayedRouteUpdater(az, routeUpdateInterval)
+		go az.routeUpdater.run()
+
+		// Azure Stack does not support zone at the moment
+		// https://docs.microsoft.com/en-us/azure-stack/user/azure-stack-network-differences?view=azs-2102
+		if !az.isStackCloud() {
+			// wait for the success first time of syncing zones
+			err = az.syncRegionZonesMap()
+			if err != nil {
+				klog.Errorf("InitializeCloudFromConfig: failed to sync regional zones map for the first time: %s", err.Error())
+				return err
+			}
+
+			go az.refreshZones(az.syncRegionZonesMap)
+		}
+	}
+
+	return nil
+}
+
+func (az *Cloud) initCaches() (err error) {
 	az.vmCache, err = az.newVMCache()
 	if err != nil {
 		return err
@@ -523,16 +613,6 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret bool) erro
 	if err != nil {
 		return err
 	}
-
-	if err := initDiskControllers(az); err != nil {
-		return err
-	}
-
-	// start delayed route updater.
-	az.routeUpdater = newDelayedRouteUpdater(az, routeUpdateInterval)
-	go az.routeUpdater.run()
-
-	go az.refreshZones(az.syncRegionZonesMap)
 
 	return nil
 }
@@ -688,7 +768,14 @@ func (az *Cloud) configAzureClients(
 	az.PublicIPAddressesClient = publicipclient.New(publicIPClientConfig)
 	az.FileClient = fileclient.New(fileClientConfig)
 	az.AvailabilitySetsClient = vmasclient.New(vmasClientConfig)
-	az.ZoneClient = zoneclient.New(zoneClientConfig)
+	az.privateendpointclient = privateendpointclient.New(azClientConfig)
+	az.privatednsclient = privatednsclient.New(azClientConfig)
+	az.privatednszonegroupclient = privatednszonegroupclient.New(azClientConfig)
+	az.virtualNetworkLinksClient = virtualnetworklinksclient.New(azClientConfig)
+
+	if az.ZoneClient == nil {
+		az.ZoneClient = zoneclient.New(zoneClientConfig)
+	}
 }
 
 func (az *Cloud) getAzureClientConfig(servicePrincipalToken *adal.ServicePrincipalToken) *azclients.ClientConfig {
@@ -700,6 +787,7 @@ func (az *Cloud) getAzureClientConfig(servicePrincipalToken *adal.ServicePrincip
 		Authorizer:              autorest.NewBearerAuthorizer(servicePrincipalToken),
 		Backoff:                 &retry.Backoff{Steps: 1},
 		DisableAzureStackCloud:  az.Config.DisableAzureStackCloud,
+		UserAgent:               az.Config.UserAgent,
 	}
 
 	if az.Config.CloudProviderBackoff {
@@ -721,8 +809,8 @@ func (az *Cloud) getAzureClientConfig(servicePrincipalToken *adal.ServicePrincip
 	return azClientConfig
 }
 
-// parseConfig returns a parsed configuration for an Azure cloudprovider config file
-func parseConfig(configReader io.Reader) (*Config, error) {
+// ParseConfig returns a parsed configuration for an Azure cloudprovider config file
+func ParseConfig(configReader io.Reader) (*Config, error) {
 	var config Config
 	if configReader == nil {
 		return nil, nil
@@ -742,6 +830,10 @@ func parseConfig(configReader io.Reader) (*Config, error) {
 	// See more context at https://github.com/kubernetes/kubernetes/issues/71994.
 	config.ResourceGroup = strings.ToLower(config.ResourceGroup)
 	return &config, nil
+}
+
+func (az *Cloud) isStackCloud() bool {
+	return strings.EqualFold(az.Config.Cloud, consts.AzureStackCloudName) && !az.Config.DisableAzureStackCloud
 }
 
 // Initialize passes a Kubernetes clientBuilder interface to the cloud provider
@@ -769,6 +861,11 @@ func (az *Cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
 
 // Zones returns a zones interface. Also returns true if the interface is supported, false otherwise.
 func (az *Cloud) Zones() (cloudprovider.Zones, bool) {
+	if az.isStackCloud() {
+		// Azure stack does not support zones at this point
+		// https://docs.microsoft.com/en-us/azure-stack/user/azure-stack-network-differences?view=azs-2102
+		return nil, false
+	}
 	return az, true
 }
 
@@ -796,6 +893,14 @@ func initDiskControllers(az *Cloud) error {
 	// Common controller contains the function
 	// needed by both blob disk and managed disk controllers
 
+	qps := float32(defaultAtachDetachDiskQPS)
+	bucket := defaultAtachDetachDiskBucket
+	if az.Config.AttachDetachDiskRateLimit != nil {
+		qps = az.Config.AttachDetachDiskRateLimit.CloudProviderRateLimitQPSWrite
+		bucket = az.Config.AttachDetachDiskRateLimit.CloudProviderRateLimitBucketWrite
+	}
+	klog.V(2).Infof("attach/detach disk operation rate limit QPS: %f, Bucket: %d", qps, bucket)
+
 	common := &controllerCommon{
 		location:              az.Location,
 		storageEndpointSuffix: az.Environment.StorageEndpointSuffix,
@@ -803,6 +908,7 @@ func initDiskControllers(az *Cloud) error {
 		subscriptionID:        az.SubscriptionID,
 		cloud:                 az,
 		lockMap:               newLockMap(),
+		diskOpRateLimiter:     flowcontrol.NewTokenBucketRateLimiter(qps, bucket),
 	}
 
 	if az.HasExtendedLocation() {

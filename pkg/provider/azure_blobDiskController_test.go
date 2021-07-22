@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2019-06-01/storage"
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-02-01/storage"
 	azstorage "github.com/Azure/azure-sdk-for-go/storage"
 	autorestazure "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
@@ -79,11 +79,14 @@ func TestCreateVolume(t *testing.T) {
 	defer ctrl.Finish()
 	b := GetTestBlobDiskController(t)
 
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
 	mockSAClient := mockstorageaccountclient.NewMockInterface(ctrl)
 	mockSAClient.EXPECT().ListKeys(gomock.Any(), b.common.resourceGroup, "testsa").Return(storage.AccountListKeysResult{}, &retryError500)
 	b.common.cloud.StorageAccountClient = mockSAClient
 
-	diskName, diskURI, requestGB, err := b.CreateVolume("testBlob", "testsa", "type", b.common.location, 10)
+	diskName, diskURI, requestGB, err := b.CreateVolume(ctx, "testBlob", "testsa", "type", b.common.location, 10)
 	var nilErr error
 	rawErr := fmt.Errorf("%w", nilErr)
 	retryErr := fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 500, RawError: %w", rawErr)
@@ -102,7 +105,7 @@ func TestCreateVolume(t *testing.T) {
 			},
 		},
 	}, nil)
-	diskName, diskURI, requestGB, err = b.CreateVolume("testBlob", "testsa", "type", b.common.location, 10)
+	diskName, diskURI, requestGB, err = b.CreateVolume(ctx, "testBlob", "testsa", "type", b.common.location, 10)
 	expectedErrStr := "failed to put page blob testBlob.vhd in container vhds: storage: service returned error: StatusCode=403, ErrorCode=AccountIsDisabled, ErrorMessage=The specified account is disabled."
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), expectedErrStr))
@@ -114,6 +117,8 @@ func TestCreateVolume(t *testing.T) {
 func TestDeleteVolume(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
 	b := GetTestBlobDiskController(t)
 	b.common.cloud.BlobDiskController = &b
 
@@ -123,14 +128,14 @@ func TestDeleteVolume(t *testing.T) {
 
 	fakeDiskURL := "fake"
 	diskURL := "https://foo.blob./vhds/bar.vhd"
-	err := b.DeleteVolume(diskURL)
+	err := b.DeleteVolume(ctx, diskURL)
 	var nilErr error
 	rawErr := fmt.Errorf("%w", nilErr)
 	retryErr := fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 500, RawError: %w", rawErr)
 	expectedErr := fmt.Errorf("no key for storage account foo, err %w", retryErr)
 	assert.EqualError(t, expectedErr, err.Error())
 
-	err = b.DeleteVolume(diskURL)
+	err = b.DeleteVolume(ctx, diskURL)
 	assert.EqualError(t, expectedErr, err.Error())
 
 	mockSAClient.EXPECT().ListKeys(gomock.Any(), b.common.resourceGroup, "foo").Return(storage.AccountListKeysResult{
@@ -142,11 +147,11 @@ func TestDeleteVolume(t *testing.T) {
 		},
 	}, nil)
 
-	err = b.DeleteVolume(fakeDiskURL)
+	err = b.DeleteVolume(ctx, fakeDiskURL)
 	expectedErr = fmt.Errorf("failed to parse vhd URI invalid vhd URI for regex https://(.*).blob./vhds/(.*): %w", fmt.Errorf("fake"))
 	assert.EqualError(t, expectedErr, err.Error())
 
-	err = b.DeleteVolume(diskURL)
+	err = b.DeleteVolume(ctx, diskURL)
 	expectedErrStr := "failed to delete vhd https://foo.blob./vhds/bar.vhd, account foo, blob bar.vhd, err: storage: service returned error: " +
 		"StatusCode=403, ErrorCode=AccountIsDisabled, ErrorMessage=The specified account is disabled."
 	assert.Error(t, err)
@@ -216,11 +221,11 @@ func TestEnsureDefaultContainer(t *testing.T) {
 
 	b.accounts["testsa"] = &storageAccountState{isValidating: 0}
 	mockSAClient.EXPECT().GetProperties(gomock.Any(), b.common.resourceGroup, "testsa").Return(storage.Account{
-		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.Creating},
+		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.ProvisioningStateCreating},
 	}, nil)
 	mockSAClient.EXPECT().GetProperties(gomock.Any(), b.common.resourceGroup, "testsa").Return(storage.Account{}, &retryError500)
 	mockSAClient.EXPECT().GetProperties(gomock.Any(), b.common.resourceGroup, "testsa").Return(storage.Account{
-		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.Succeeded},
+		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.ProvisioningStateSucceeded},
 	}, nil)
 	mockSAClient.EXPECT().ListKeys(gomock.Any(), b.common.resourceGroup, "testsa").Return(storage.AccountListKeysResult{
 		Keys: &[]storage.AccountKey{
@@ -284,13 +289,13 @@ func TestFindSANameForDisk(t *testing.T) {
 		"this-shall-be-skipped": {name: "fake"},
 		"ds0": {
 			name:      "ds0",
-			saType:    storage.StandardGRS,
+			saType:    storage.SkuNameStandardGRS,
 			diskCount: 50,
 		},
 	}
 	mockSAClient.EXPECT().GetProperties(gomock.Any(), b.common.resourceGroup, gomock.Any()).Return(storage.Account{}, &retryError500).Times(2)
 	mockSAClient.EXPECT().GetProperties(gomock.Any(), b.common.resourceGroup, gomock.Any()).Return(storage.Account{
-		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.Succeeded},
+		AccountProperties: &storage.AccountProperties{ProvisioningState: storage.ProvisioningStateSucceeded},
 	}, nil).Times(2)
 	mockSAClient.EXPECT().ListKeys(gomock.Any(), b.common.resourceGroup, gomock.Any()).Return(storage.AccountListKeysResult{
 		Keys: &[]storage.AccountKey{
@@ -301,36 +306,36 @@ func TestFindSANameForDisk(t *testing.T) {
 		},
 	}, nil)
 	mockSAClient.EXPECT().Create(gomock.Any(), b.common.resourceGroup, gomock.Any(), gomock.Any()).Return(nil)
-	name, err := b.findSANameForDisk(storage.StandardGRS)
+	name, err := b.findSANameForDisk(storage.SkuNameStandardGRS)
 	expectedErr := "does not exist while trying to create/ensure default container"
 	assert.True(t, strings.Contains(err.Error(), expectedErr))
 	assert.Error(t, err)
 	assert.Empty(t, name)
 
 	b.accounts = make(map[string]*storageAccountState)
-	name, err = b.findSANameForDisk(storage.StandardGRS)
+	name, err = b.findSANameForDisk(storage.SkuNameStandardGRS)
 	assert.Error(t, err)
 	assert.Empty(t, name)
 
 	b.accounts = map[string]*storageAccountState{
 		"ds0": {
 			name:      "ds0",
-			saType:    storage.StandardGRS,
+			saType:    storage.SkuNameStandardGRS,
 			diskCount: 0,
 		},
 	}
-	name, err = b.findSANameForDisk(storage.StandardGRS)
+	name, err = b.findSANameForDisk(storage.SkuNameStandardGRS)
 	assert.Equal(t, "ds0", name)
 	assert.NoError(t, err)
 
 	for i := 0; i < maxStorageAccounts; i++ {
 		b.accounts[fmt.Sprintf("ds%d", i)] = &storageAccountState{
 			name:      fmt.Sprintf("ds%d", i),
-			saType:    storage.StandardGRS,
+			saType:    storage.SkuNameStandardGRS,
 			diskCount: 59,
 		}
 	}
-	name, err = b.findSANameForDisk(storage.StandardGRS)
+	name, err = b.findSANameForDisk(storage.SkuNameStandardGRS)
 	assert.NotEmpty(t, name)
 	assert.NoError(t, err)
 }
@@ -342,7 +347,7 @@ func TestCreateBlobDisk(t *testing.T) {
 	b.accounts = map[string]*storageAccountState{
 		"ds0": {
 			name:      "ds0",
-			saType:    storage.StandardGRS,
+			saType:    storage.SkuNameStandardGRS,
 			diskCount: 0,
 		},
 	}
@@ -357,7 +362,7 @@ func TestCreateBlobDisk(t *testing.T) {
 			},
 		},
 	}, nil)
-	diskURI, err := b.CreateBlobDisk("datadisk", storage.StandardGRS, 10)
+	diskURI, err := b.CreateBlobDisk("datadisk", storage.SkuNameStandardGRS, 10)
 	expectedErr := "failed to put page blob datadisk.vhd in container vhds: storage: service returned error: StatusCode=403"
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), expectedErr))
