@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2019-06-01/storage"
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-02-01/storage"
 	"github.com/golang/mock/gomock"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/fileclient"
@@ -31,6 +31,9 @@ import (
 func TestCreateFileShare(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
 
 	cloud := &Cloud{controllerCommon: &controllerCommon{resourceGroup: "rg"}}
 	name := "baz"
@@ -57,21 +60,27 @@ func TestCreateFileShare(t *testing.T) {
 		expectKey  string
 	}{
 		{
-			name:      "foo",
-			acct:      "bar",
-			acctType:  "type",
-			acctKind:  "StorageV2",
-			loc:       "eastus",
-			gb:        10,
+			name:     "foo",
+			acct:     "bar",
+			acctType: "type",
+			acctKind: "StorageV2",
+			loc:      "eastus",
+			gb:       10,
+			accounts: []storage.Account{
+				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location, AccountProperties: &storage.AccountProperties{}},
+			},
 			expectErr: true,
 		},
 		{
-			name:      "foo",
-			acct:      "",
-			acctType:  "type",
-			acctKind:  "StorageV2",
-			loc:       "eastus",
-			gb:        10,
+			name:     "foo",
+			acct:     "",
+			acctType: "type",
+			acctKind: "StorageV2",
+			loc:      "eastus",
+			gb:       10,
+			accounts: []storage.Account{
+				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location, AccountProperties: &storage.AccountProperties{}},
+			},
 			expectErr: true,
 		},
 		{
@@ -82,7 +91,7 @@ func TestCreateFileShare(t *testing.T) {
 			loc:      location,
 			gb:       10,
 			accounts: []storage.Account{
-				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location},
+				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location, AccountProperties: &storage.AccountProperties{}},
 			},
 			keys: storage.AccountListKeysResult{
 				Keys: &[]storage.AccountKey{
@@ -101,7 +110,7 @@ func TestCreateFileShare(t *testing.T) {
 			loc:      location,
 			gb:       10,
 			accounts: []storage.Account{
-				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location},
+				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Kind: storage.Kind(kind), Location: &location, AccountProperties: &storage.AccountProperties{}},
 			},
 			keys: storage.AccountListKeysResult{
 				Keys: &[]storage.AccountKey{
@@ -119,7 +128,7 @@ func TestCreateFileShare(t *testing.T) {
 			loc:      location,
 			gb:       10,
 			accounts: []storage.Account{
-				{Name: &bogus, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Location: &location},
+				{Name: &bogus, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Location: &location, AccountProperties: &storage.AccountProperties{}},
 			},
 			expectErr: true,
 		},
@@ -131,7 +140,7 @@ func TestCreateFileShare(t *testing.T) {
 			loc:      location,
 			gb:       10,
 			accounts: []storage.Account{
-				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Location: &bogus},
+				{Name: &name, Sku: &storage.Sku{Name: storage.SkuName(sku)}, Location: &bogus, AccountProperties: &storage.AccountProperties{}},
 			},
 			expectErr: true,
 		},
@@ -158,11 +167,11 @@ func TestCreateFileShare(t *testing.T) {
 
 		mockFileShare := &fileclient.ShareOptions{
 			Name:       test.name,
-			Protocol:   storage.SMB,
+			Protocol:   storage.EnabledProtocolsSMB,
 			RequestGiB: test.gb,
 		}
 
-		account, key, err := cloud.CreateFileShare(mockAccount, mockFileShare)
+		account, key, err := cloud.CreateFileShare(ctx, mockAccount, mockFileShare)
 		if test.expectErr && err == nil {
 			t.Errorf("unexpected non-error")
 			continue

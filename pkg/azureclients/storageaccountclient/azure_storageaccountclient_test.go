@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2019-06-01/storage"
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-02-01/storage"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -457,7 +457,7 @@ func TestListByResourceGroup(t *testing.T) {
 
 	armClient := mockarmclient.NewMockInterface(ctrl)
 	snList := []storage.Account{getTestStorageAccount("sn1"), getTestStorageAccount("pip2"), getTestStorageAccount("pip3")}
-	responseBody, err := json.Marshal(storage.AccountListResult{Value: &snList})
+	responseBody, err := json.Marshal(map[string]interface{}{"value": snList, "nextLink": ""})
 	assert.NoError(t, err)
 	armClient.EXPECT().GetResource(gomock.Any(), testResourcePrefix, "").Return(
 		&http.Response{

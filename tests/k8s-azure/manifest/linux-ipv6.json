@@ -12,8 +12,7 @@
                 "excludeMasterFromStandardLB": true,
                 "networkPlugin": "kubenet",
                 "apiServerConfig": {
-                    "--bind-address": "::",
-                    "--service-account-issuer": "https://kubernetes.default.svc.cluster.local"
+                    "--bind-address": "::"
                 },
                 "kubeletConfig": {
                     "--node-ip": "::",
@@ -34,9 +33,9 @@
             }
         },
         "masterProfile": {
-            "count": 1,
+            "count": 3,
             "dnsPrefix": "{dnsPrefix}",
-            "vmSize": "Standard_DS3_v2",
+            "vmSize": "Standard_DS2_v2",
             "distro": "aks-ubuntu-16.04"
         },
         "agentPoolProfiles": [

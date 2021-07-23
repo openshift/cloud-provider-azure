@@ -17,10 +17,12 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -31,16 +33,16 @@ import (
 )
 
 // AttachDisk attaches a disk to vm
-func (as *availabilitySet) AttachDisk(nodeName types.NodeName, diskMap map[string]*AttachDiskOptions) error {
+func (as *availabilitySet) AttachDisk(nodeName types.NodeName, diskMap map[string]*AttachDiskOptions) (*azure.Future, error) {
 	vm, err := as.getVirtualMachine(nodeName, azcache.CacheReadTypeDefault)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	vmName := mapNodeNameToVMName(nodeName)
 	nodeResourceGroup, err := as.GetNodeResourceGroup(vmName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	disks := make([]compute.DataDisk, len(*vm.StorageProfile.DataDisks))
@@ -114,19 +116,27 @@ func (as *availabilitySet) AttachDisk(nodeName types.NodeName, diskMap map[strin
 		_ = as.cloud.vmCache.Delete(vmName)
 	}()
 
-	rerr := as.VirtualMachinesClient.Update(ctx, nodeResourceGroup, vmName, newVM, "attach_disk")
+	future, rerr := as.VirtualMachinesClient.UpdateAsync(ctx, nodeResourceGroup, vmName, newVM, "attach_disk")
 	if rerr != nil {
 		klog.Errorf("azureDisk - attach disk list(%s) on rg(%s) vm(%s) failed, err: %v", diskMap, nodeResourceGroup, vmName, rerr)
 		if rerr.HTTPStatusCode == http.StatusNotFound {
 			klog.Errorf("azureDisk - begin to filterNonExistingDisks(%v) on rg(%s) vm(%s)", diskMap, nodeResourceGroup, vmName)
 			disks := as.filterNonExistingDisks(ctx, *newVM.VirtualMachineProperties.StorageProfile.DataDisks)
 			newVM.VirtualMachineProperties.StorageProfile.DataDisks = &disks
-			rerr = as.VirtualMachinesClient.Update(ctx, nodeResourceGroup, vmName, newVM, "attach_disk")
+			future, rerr = as.VirtualMachinesClient.UpdateAsync(ctx, nodeResourceGroup, vmName, newVM, "attach_disk")
 		}
 	}
 
 	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk list(%s) returned with %v", nodeResourceGroup, vmName, diskMap, rerr)
 	if rerr != nil {
+		return future, rerr.Error()
+	}
+	return future, nil
+}
+
+// WaitForUpdateResult waits for the response of the update request
+func (as *availabilitySet) WaitForUpdateResult(ctx context.Context, future *azure.Future, resourceGroupName, source string) error {
+	if rerr := as.VirtualMachinesClient.WaitForUpdateResult(ctx, future, resourceGroupName, source); rerr != nil {
 		return rerr.Error()
 	}
 	return nil
@@ -158,11 +168,7 @@ func (as *availabilitySet) DetachDisk(nodeName types.NodeName, diskMap map[strin
 				(disk.ManagedDisk != nil && diskURI != "" && strings.EqualFold(*disk.ManagedDisk.ID, diskURI)) {
 				// found the disk
 				klog.V(2).Infof("azureDisk - detach disk: name %q uri %q", diskName, diskURI)
-				if strings.EqualFold(as.cloud.Environment.Name, consts.AzureStackCloudName) && !as.Config.DisableAzureStackCloud {
-					disks = append(disks[:i], disks[i+1:]...)
-				} else {
-					disks[i].ToBeDetached = to.BoolPtr(true)
-				}
+				disks[i].ToBeDetached = to.BoolPtr(true)
 				bFoundDisk = true
 			}
 		}
@@ -171,6 +177,17 @@ func (as *availabilitySet) DetachDisk(nodeName types.NodeName, diskMap map[strin
 	if !bFoundDisk {
 		// only log here, next action is to update VM status with original meta data
 		klog.Errorf("detach azure disk on node(%s): disk list(%s) not found", nodeName, diskMap)
+	} else {
+		if strings.EqualFold(as.cloud.Environment.Name, consts.AzureStackCloudName) && !as.Config.DisableAzureStackCloud {
+			// Azure stack does not support ToBeDetached flag, use original way to detach disk
+			newDisks := []compute.DataDisk{}
+			for _, disk := range disks {
+				if !to.Bool(disk.ToBeDetached) {
+					newDisks = append(newDisks, disk)
+				}
+			}
+			disks = newDisks
+		}
 	}
 
 	newVM := compute.VirtualMachineUpdate{

@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -810,6 +810,57 @@ func TestGetPowerStatusByNodeName(t *testing.T) {
 		powerState, err := ss.GetPowerStatusByNodeName("vmss-vm-000001")
 		assert.Equal(t, test.expectedErr, err, test.description+", but an error occurs")
 		assert.Equal(t, test.expectedPowerState, powerState, test.description)
+	}
+}
+
+func TestGetProvisioningStateByNodeName(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	testCases := []struct {
+		description               string
+		vmList                    []string
+		provisioningState         string
+		expectedProvisioningState string
+		expectedErr               error
+	}{
+		{
+			description:               "GetProvisioningStateByNodeName should return empty value when the vm.ProvisioningState is nil",
+			provisioningState:         "",
+			vmList:                    []string{"vmss-vm-000001"},
+			expectedProvisioningState: "",
+		},
+		{
+			description:               "GetProvisioningStateByNodeName should return Succeeded when the vm is running",
+			provisioningState:         "Succeeded",
+			vmList:                    []string{"vmss-vm-000001"},
+			expectedProvisioningState: "Succeeded",
+		},
+	}
+
+	for _, test := range testCases {
+		ss, err := NewTestScaleSet(ctrl)
+		assert.NoError(t, err, "unexpected error when creating test VMSS")
+
+		expectedVMSS := buildTestVMSS(testVMSSName, "vmss-vm-")
+		mockVMSSClient := ss.cloud.VirtualMachineScaleSetsClient.(*mockvmssclient.MockInterface)
+		mockVMSSClient.EXPECT().List(gomock.Any(), ss.ResourceGroup).Return([]compute.VirtualMachineScaleSet{expectedVMSS}, nil).AnyTimes()
+
+		expectedVMSSVMs, _, _ := buildTestVirtualMachineEnv(ss.cloud, testVMSSName, "", 0, test.vmList, "", false)
+		mockVMSSVMClient := ss.cloud.VirtualMachineScaleSetVMsClient.(*mockvmssvmclient.MockInterface)
+		if test.provisioningState != "" {
+			expectedVMSSVMs[0].ProvisioningState = to.StringPtr(test.provisioningState)
+		} else {
+			expectedVMSSVMs[0].ProvisioningState = nil
+		}
+		mockVMSSVMClient.EXPECT().List(gomock.Any(), ss.ResourceGroup, testVMSSName, gomock.Any()).Return(expectedVMSSVMs, nil).AnyTimes()
+
+		mockVMsClient := ss.cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachine{}, nil).AnyTimes()
+
+		provisioningState, err := ss.GetProvisioningStateByNodeName("vmss-vm-000001")
+		assert.Equal(t, test.expectedErr, err, test.description+", but an error occurs")
+		assert.Equal(t, test.expectedProvisioningState, provisioningState, test.description)
 	}
 }
 
@@ -1769,7 +1820,6 @@ func TestEnsureHostInPool(t *testing.T) {
 			expectedVMSSName:          testVMSSName,
 			expectedInstanceID:        "0",
 			expectedVMSSVM: &compute.VirtualMachineScaleSetVM{
-				Sku:      &compute.Sku{Name: to.StringPtr("sku")},
 				Location: to.StringPtr("westus"),
 				VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
 					NetworkProfileConfiguration: &compute.VirtualMachineScaleSetVMNetworkProfileConfiguration{
@@ -2084,7 +2134,7 @@ func TestEnsureHostsInPool(t *testing.T) {
 			expectedVMSSVMPutTimes: 1,
 		},
 		{
-			description: "EnsureHostsInPool should gather report the error if something goes wrong in EnsureHostInPool",
+			description: "EnsureHostsInPool should skip not found nodes",
 			nodes: []*v1.Node{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -2098,7 +2148,7 @@ func TestEnsureHostsInPool(t *testing.T) {
 			backendpoolID:          testLBBackendpoolID1,
 			vmSetName:              testVMSSName,
 			expectedVMSSVMPutTimes: 0,
-			expectedErr:            true,
+			expectedErr:            false,
 		},
 	}
 
@@ -2144,9 +2194,8 @@ func TestEnsureBackendPoolDeletedFromNode(t *testing.T) {
 		expectedErr               error
 	}{
 		{
-			description: "ensureBackendPoolDeletedFromNode should report the error that occurs during getVmssVM",
+			description: "ensureBackendPoolDeletedFromNode should skip not found nodes",
 			nodeName:    "vmss-vm-000001",
-			expectedErr: cloudprovider.InstanceNotFound,
 		},
 		{
 			description:           "ensureBackendPoolDeletedFromNode skip the node if the VM's NIC config is nil",
@@ -2166,7 +2215,6 @@ func TestEnsureBackendPoolDeletedFromNode(t *testing.T) {
 			expectedVMSSName:          testVMSSName,
 			expectedInstanceID:        "0",
 			expectedVMSSVM: &compute.VirtualMachineScaleSetVM{
-				Sku:      &compute.Sku{Name: to.StringPtr("sku")},
 				Location: to.StringPtr("westus"),
 				VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
 					NetworkProfileConfiguration: &compute.VirtualMachineScaleSetVMNetworkProfileConfiguration{

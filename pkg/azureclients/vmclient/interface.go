@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
+	"github.com/Azure/go-autorest/autorest/azure"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
@@ -34,8 +35,7 @@ const (
 )
 
 // Interface is the client interface for VirtualMachines.
-// Don't forget to run the following command to generate the mock client:
-// mockgen -source=$GOPATH/src/sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/interface.go -package=mockvmclient Interface > $GOPATH/src/sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/mockvmclient/interface.go
+// Don't forget to run "hack/update-mock-clients.sh" command to generate the mock client.
 type Interface interface {
 	// Get gets a VirtualMachine.
 	Get(ctx context.Context, resourceGroupName string, VMName string, expand compute.InstanceViewTypes) (compute.VirtualMachine, *retry.Error)
@@ -48,6 +48,12 @@ type Interface interface {
 
 	// Update updates a VirtualMachine.
 	Update(ctx context.Context, resourceGroupName string, VMName string, parameters compute.VirtualMachineUpdate, source string) *retry.Error
+
+	// UpdateAsync updates a VirtualMachine asynchronously
+	UpdateAsync(ctx context.Context, resourceGroupName string, VMName string, parameters compute.VirtualMachineUpdate, source string) (*azure.Future, *retry.Error)
+
+	// WaitForUpdateResult waits for the response of the update request
+	WaitForUpdateResult(ctx context.Context, future *azure.Future, resourceGroupName, source string) *retry.Error
 
 	// Delete deletes a VirtualMachine.
 	Delete(ctx context.Context, resourceGroupName string, VMName string) *retry.Error

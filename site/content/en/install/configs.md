@@ -22,8 +22,9 @@ Here is a config file sample:
     "location": "eastus",
     "subnetName": "<name>",
     "securityGroupName": "<name>",
+    "securityGroupResourceGroup": "<name>",
     "vnetName": "<name>",
-    "vnetResourceGroup": "",
+    "vnetResourceGroup": "<name>",
     "routeTableName": "<name>",
     "primaryAvailabilitySetName": "<name>",
     "routeTableResourceGroup": "<name>",
@@ -72,6 +73,7 @@ If more than one value is set, the order is `Managed Identity` > `Service Princi
 |vnetResourceGroup|The name of the resource group that the Vnet is deployed in||
 |subnetName|The name of the subnet that the cluster is deployed in||
 |securityGroupName|The name of the security group attached to the cluster's subnet||
+|securityGroupResourceGroup|The name of the resource group that the security group is deployed in||
 |routeTableName|The name of the route table attached to the subnet that the cluster is deployed in|Optional in 1.6|
 |primaryAvailabilitySetName[*](#primaryavailabilitysetname)|The name of the availability set that should be used as the load balancer backend|Optional|
 |vmType|The type of azure nodes. Candidate values are: `vmss` and `standard`|Optional, default to `standard`|
@@ -93,7 +95,6 @@ If more than one value is set, the order is `Managed Identity` > `Service Princi
 |disableOutboundSNAT| Disable outbound SNAT for SLB | Default to false and available since v1.11.9, v1.12.7, v1.13.5 and v1.14.0|
 |maximumLoadBalancerRuleCount|Maximum allowed LoadBalancer Rule Count is the limit enforced by Azure Load balancer|Integer value, default to [148](https://github.com/kubernetes/kubernetes/blob/v1.10.0/pkg/cloudprovider/providers/azure/azure.go#L48)|
 |routeTableResourceGroup| The resource group name for routeTable | Default same as resourceGroup and available since v1.15.0 |
-|cloudConfigType| The cloud configure type for Azure cloud provider. Supported values are file, secret and merge.| Default to `merge`.  and available since v1.15.0 |
 |loadBalancerName| Working together with loadBalancerResourceGroup to determine the LB name in a different resource group | Since v1.18.0, default is cluster name setting on kube-controller-manager|
 |loadBalancerResourceGroup | The load balancer resource group name, which is different from node resource group | Since v1.18.0, default is same as resourceGroup|
 |disableAvailabilitySetNodes| Disable supporting for AvailabilitySet virtual machines in vmss cluster. It should be only used when vmType is "vmss" and all the nodes (including master) are VMSS virtual machines | Since v1.18.0, default is false|
@@ -128,15 +129,13 @@ Master nodes are not added to the backends of Azure Load Balancer (ALB) if `excl
 
 By default, if nodes are labeled with `node-role.kubernetes.io/master`, they would also be excluded from ALB. If you want to add the master nodes to ALB, `excludeMasterFromStandardLB` should be set to false and label `node-role.kubernetes.io/master` should be removed if it has already been applied.
 
-### Setting Azure cloud provider from Kubernetes secrets
+### Dynamically reloading cloud controller manager
 
-Since v1.15.0, Azure cloud provider supports reading the cloud config from Kubernetes secrets. The secret is a serialized version of `azure.json` file with key `cloud-config`. The secret should be put in `kube-system` namespace and its name should be `azure-cloud-provider`.
+Since v1.21.0, Azure cloud provider supports reading the cloud config from Kubernetes secrets. The secret is a serialized version of `azure.json` file. When the secret is changed, the cloud controller manager will re-constructing itself without restarting the pod.
 
-To enable this feature, set `cloudConfigType` to `secret` or `merge` (default is `merge`). All supported values for this option are:
+To enable this feature, set `--enable-dynamic-reloading=true` and configure the secret name, namespace and data key by `--cloud-config-secret-name`, `--cloud-config-secret-namespace` and `--cloud-config-key`. When initializing from secret, the `--cloud-config` should not be set.
 
-- `file`: The cloud provider configuration is read from cloud-config file.
-- `secret`: the cloud provider configuration must be overridden by the secret.
-- `merge`: the cloud provider configuration can be optionally overridden by a secret when it is set explicitly in the secret, this is default value.
+> Note that the `--enable-dynamic-reloading` cannot be `false` if `--cloud-config` is empty. To build the cloud provider from classic config file, please explicitly specify the `--cloud-config` and do not set `--enable-dynamic-reloading=true`. In this manner, the cloud controller manager will not be updated when the config file is changed. You need to restart the pod to manually trigger the re-initialization.
 
 Since Azure cloud provider would read Kubernetes secrets, the following RBAC should also be configured:
 
@@ -170,6 +169,8 @@ subjects:
   name: azure-cloud-provider
   namespace: kube-system
 ```
+
+It is also supported to build the cloud controller manager from the cloud config file and reload dynamically. To use this way, turn on `--enable-dynamic-reloading` and set `--cloud-config` to an non-empty value.
 
 ### per client rate limiting
 

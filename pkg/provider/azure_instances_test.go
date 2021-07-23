@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -65,6 +65,7 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 			},
 		}
 		vm.VirtualMachineProperties = &compute.VirtualMachineProperties{
+			ProvisioningState: to.StringPtr(string(compute.ProvisioningStateSucceeded)),
 			HardwareProfile: &compute.HardwareProfile{
 				VMSize: compute.StandardA0,
 			},
@@ -76,10 +77,20 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 			},
 		}
 		if !isDataDisksFull {
-			vm.StorageProfile.DataDisks = &[]compute.DataDisk{{
-				Lun:  to.Int32Ptr(0),
-				Name: to.StringPtr("disk1"),
-			}}
+			vm.StorageProfile.DataDisks = &[]compute.DataDisk{
+				{
+					Lun:  to.Int32Ptr(0),
+					Name: to.StringPtr("disk1"),
+				},
+				{
+					Lun:  to.Int32Ptr(1),
+					Name: to.StringPtr("disk2"),
+				},
+				{
+					Lun:  to.Int32Ptr(2),
+					Name: to.StringPtr("disk3"),
+				},
+			}
 		} else {
 			dataDisks := make([]compute.DataDisk, maxLUN)
 			for i := 0; i < maxLUN; i++ {
@@ -254,12 +265,13 @@ func TestInstanceID(t *testing.T) {
 
 func TestInstanceShutdownByProviderID(t *testing.T) {
 	testcases := []struct {
-		name           string
-		vmList         map[string]string
-		nodeName       string
-		providerID     string
-		expected       bool
-		expectedErrMsg error
+		name              string
+		vmList            map[string]string
+		nodeName          string
+		providerID        string
+		provisioningState string
+		expected          bool
+		expectedErrMsg    error
 	}{
 		{
 			name:       "InstanceShutdownByProviderID should return false if the vm is in PowerState/Running status",
@@ -297,6 +309,14 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 			expected:   true,
 		},
 		{
+			name:              "InstanceShutdownByProviderID should return false if the vm is in PowerState/Stopped state with Creating provisioning state",
+			vmList:            map[string]string{"vm5": "PowerState/Stopped"},
+			nodeName:          "vm5",
+			provisioningState: "Creating",
+			providerID:        "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm5",
+			expected:          false,
+		},
+		{
 			name:       "InstanceShutdownByProviderID should return false if the vm is in PowerState/Stopping status",
 			vmList:     map[string]string{"vm6": "PowerState/Stopping"},
 			nodeName:   "vm6",
@@ -319,10 +339,12 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 		},
 		{
 			name:     "InstanceShutdownByProviderID should report error if providerID is null",
+			nodeName: "vmm",
 			expected: false,
 		},
 		{
 			name:           "InstanceShutdownByProviderID should report error if providerID is invalid",
+			nodeName:       "vm9",
 			providerID:     "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VM/vm9",
 			expected:       false,
 			expectedErrMsg: fmt.Errorf("error splitting providerID"),
@@ -334,13 +356,25 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 	for _, test := range testcases {
 		cloud := GetTestCloud(ctrl)
 		expectedVMs := setTestVirtualMachines(cloud, test.vmList, false)
+		if test.provisioningState != "" {
+			expectedVMs[0].ProvisioningState = to.StringPtr(test.provisioningState)
+		}
 		mockVMsClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
 		for _, vm := range expectedVMs {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
-		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm8", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
+		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nodeName, gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
 
 		hasShutdown, err := cloud.InstanceShutdownByProviderID(context.Background(), test.providerID)
+		assert.Equal(t, test.expectedErrMsg, err, test.name)
+		assert.Equal(t, test.expected, hasShutdown, test.name)
+
+		hasShutdown, err = cloud.InstanceShutdown(context.Background(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: test.nodeName},
+			Spec: v1.NodeSpec{
+				ProviderID: test.providerID,
+			},
+		})
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
 		assert.Equal(t, test.expected, hasShutdown, test.name)
 	}

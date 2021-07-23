@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
@@ -103,7 +103,7 @@ func (c *Client) Get(ctx context.Context, resourceGroupName string, networkSecur
 	}
 
 	result, rerr := c.getSecurityGroup(ctx, resourceGroupName, networkSecurityGroupName, expand)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -164,7 +164,7 @@ func (c *Client) List(ctx context.Context, resourceGroupName string) ([]network.
 	}
 
 	result, rerr := c.listSecurityGroup(ctx, resourceGroupName)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -235,7 +235,7 @@ func (c *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, n
 	}
 
 	rerr := c.createOrUpdateNSG(ctx, resourceGroupName, networkSecurityGroupName, parameters, etag)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -310,7 +310,7 @@ func (c *Client) Delete(ctx context.Context, resourceGroupName string, networkSe
 	}
 
 	rerr := c.deleteNSG(ctx, resourceGroupName, networkSecurityGroupName)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.

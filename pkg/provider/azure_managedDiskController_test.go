@@ -59,6 +59,8 @@ func TestCreateManagedDisk(t *testing.T) {
 		diskIOPSReadWrite   string
 		diskMBPSReadWrite   string
 		diskEncryptionSetID string
+		networkAccessPolicy compute.NetworkAccessPolicy
+		diskAccessID        *string
 		expectedDiskID      string
 		existedDisk         compute.Disk
 		expectedErr         bool
@@ -153,6 +155,53 @@ func TestCreateManagedDisk(t *testing.T) {
 			expectedErr:         true,
 			expectedErrMsg:      fmt.Errorf("AzureDisk - DiskMBpsReadWrite parameter is only applicable in UltraSSD_LRS disk type"),
 		},
+		{
+			desc:                "correct NetworkAccessPolicy(DenyAll) setting",
+			diskID:              disk1ID,
+			diskName:            disk1Name,
+			storageAccountType:  compute.StandardLRS,
+			diskEncryptionSetID: goodDiskEncryptionSetID,
+			networkAccessPolicy: compute.DenyAll,
+			expectedDiskID:      disk1ID,
+			existedDisk:         compute.Disk{ID: to.StringPtr(disk1ID), Name: to.StringPtr(disk1Name), DiskProperties: &compute.DiskProperties{Encryption: &compute.Encryption{DiskEncryptionSetID: &goodDiskEncryptionSetID, Type: compute.EncryptionTypeEncryptionAtRestWithCustomerKey}, ProvisioningState: to.StringPtr("Succeeded")}, Tags: testTags},
+			expectedErr:         false,
+		},
+		{
+			desc:                "correct NetworkAccessPolicy(AllowAll) setting",
+			diskID:              disk1ID,
+			diskName:            disk1Name,
+			storageAccountType:  compute.StandardLRS,
+			diskEncryptionSetID: goodDiskEncryptionSetID,
+			networkAccessPolicy: compute.AllowAll,
+			expectedDiskID:      disk1ID,
+			existedDisk:         compute.Disk{ID: to.StringPtr(disk1ID), Name: to.StringPtr(disk1Name), DiskProperties: &compute.DiskProperties{Encryption: &compute.Encryption{DiskEncryptionSetID: &goodDiskEncryptionSetID, Type: compute.EncryptionTypeEncryptionAtRestWithCustomerKey}, ProvisioningState: to.StringPtr("Succeeded")}, Tags: testTags},
+			expectedErr:         false,
+		},
+		{
+			desc:                "DiskAccessID should not be empty when NetworkAccessPolicy is AllowPrivate",
+			diskID:              disk1ID,
+			diskName:            disk1Name,
+			storageAccountType:  compute.StandardLRS,
+			diskEncryptionSetID: goodDiskEncryptionSetID,
+			networkAccessPolicy: compute.AllowPrivate,
+			expectedDiskID:      "",
+			existedDisk:         compute.Disk{ID: to.StringPtr(disk1ID), Name: to.StringPtr(disk1Name), DiskProperties: &compute.DiskProperties{Encryption: &compute.Encryption{DiskEncryptionSetID: &goodDiskEncryptionSetID, Type: compute.EncryptionTypeEncryptionAtRestWithCustomerKey}, ProvisioningState: to.StringPtr("Succeeded")}, Tags: testTags},
+			expectedErr:         true,
+			expectedErrMsg:      fmt.Errorf("DiskAccessID should not be empty when NetworkAccessPolicy is AllowPrivate"),
+		},
+		{
+			desc:                "DiskAccessID(%s) must be empty when NetworkAccessPolicy(%s) is not AllowPrivate",
+			diskID:              disk1ID,
+			diskName:            disk1Name,
+			storageAccountType:  compute.StandardLRS,
+			diskEncryptionSetID: goodDiskEncryptionSetID,
+			networkAccessPolicy: compute.AllowAll,
+			diskAccessID:        to.StringPtr("diskAccessID"),
+			expectedDiskID:      "",
+			existedDisk:         compute.Disk{ID: to.StringPtr(disk1ID), Name: to.StringPtr(disk1Name), DiskProperties: &compute.DiskProperties{Encryption: &compute.Encryption{DiskEncryptionSetID: &goodDiskEncryptionSetID, Type: compute.EncryptionTypeEncryptionAtRestWithCustomerKey}, ProvisioningState: to.StringPtr("Succeeded")}, Tags: testTags},
+			expectedErr:         true,
+			expectedErrMsg:      fmt.Errorf("DiskAccessID(diskAccessID) must be empty when NetworkAccessPolicy(AllowAll) is not AllowPrivate"),
+		},
 	}
 
 	for i, test := range testCases {
@@ -169,6 +218,8 @@ func TestCreateManagedDisk(t *testing.T) {
 			DiskMBpsReadWrite:   test.diskMBPSReadWrite,
 			DiskEncryptionSetID: test.diskEncryptionSetID,
 			MaxShares:           maxShare,
+			NetworkAccessPolicy: test.networkAccessPolicy,
+			DiskAccessID:        test.diskAccessID,
 		}
 
 		mockDisksClient := testCloud.DisksClient.(*mockdiskclient.MockInterface)
@@ -263,6 +314,8 @@ func TestDeleteManagedDisk(t *testing.T) {
 			expectedErrMsg: fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 0, RawError: Get Disk failed"),
 		},
 	}
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
 
 	for i, test := range testCases {
 		testCloud := GetTestCloud(ctrl)
@@ -281,7 +334,7 @@ func TestDeleteManagedDisk(t *testing.T) {
 		}
 		mockDisksClient.EXPECT().Delete(gomock.Any(), testCloud.ResourceGroup, test.diskName).Return(nil).AnyTimes()
 
-		err := managedDiskController.DeleteManagedDisk(diskURI)
+		err := managedDiskController.DeleteManagedDisk(ctx, diskURI)
 		assert.Equal(t, test.expectedErr, err != nil, "TestCase[%d]: %s, return error: %v", i, test.desc, err)
 		if test.expectedErr {
 			assert.EqualError(t, test.expectedErrMsg, err.Error(), "TestCase[%d]: %s, expected: %v, return: %v", i, test.desc, test.expectedErrMsg, err)

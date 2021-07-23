@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -279,6 +279,24 @@ func TestCreateOrUpdate(t *testing.T) {
 	assert.Nil(t, rerr)
 }
 
+func TestCreateOrUpdateBackendPools(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	backendAddressPool := getTestBackendAddressPool("lb1", "backendAddressPool1")
+	armClient := mockarmclient.NewMockInterface(ctrl)
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
+	}
+	armClient.EXPECT().PutResourceWithDecorators(gomock.Any(), to.String(backendAddressPool.ID), backendAddressPool, gomock.Any()).Return(response, nil).Times(1)
+	armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
+
+	lbClient := getTestLoadBalancerClient(armClient)
+	rerr := lbClient.CreateOrUpdateBackendPools(context.TODO(), "rg", "lb1", "backendAddressPool1", backendAddressPool, "")
+	assert.Nil(t, rerr)
+}
+
 func TestDelete(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -315,6 +333,16 @@ func getTestLoadBalancer(name string) network.LoadBalancer {
 		ID:       to.StringPtr(fmt.Sprintf("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/%s", name)),
 		Name:     to.StringPtr(name),
 		Location: to.StringPtr("eastus"),
+	}
+}
+
+func getTestBackendAddressPool(lbName, backendPoolName string) network.BackendAddressPool {
+	return network.BackendAddressPool{
+		ID:   to.StringPtr(fmt.Sprintf("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/%s/backendAddressPools/%s", lbName, backendPoolName)),
+		Name: to.StringPtr(backendPoolName),
+		BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
+			Location: to.StringPtr("eastus"),
+		},
 	}
 }
 

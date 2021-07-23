@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
@@ -105,7 +105,7 @@ func (c *Client) Get(ctx context.Context, resourceGroupName string, networkInter
 	}
 
 	result, rerr := c.getNetworkInterface(ctx, resourceGroupName, networkInterfaceName, expand)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -166,7 +166,7 @@ func (c *Client) GetVirtualMachineScaleSetNetworkInterface(ctx context.Context, 
 	}
 
 	result, rerr := c.getVMSSNetworkInterface(ctx, resourceGroupName, virtualMachineScaleSetName, virtualmachineIndex, networkInterfaceName, expand)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -241,7 +241,7 @@ func (c *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, n
 	}
 
 	rerr := c.createOrUpdateInterface(ctx, resourceGroupName, networkInterfaceName, parameters)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.
@@ -316,7 +316,7 @@ func (c *Client) Delete(ctx context.Context, resourceGroupName string, networkIn
 	}
 
 	rerr := c.deleteInterface(ctx, resourceGroupName, networkInterfaceName)
-	_ = mc.Observe(rerr.Error())
+	mc.Observe(rerr)
 	if rerr != nil {
 		if rerr.IsThrottled() {
 			// Update RetryAfterReader so that no more requests would be sent until RetryAfter expires.

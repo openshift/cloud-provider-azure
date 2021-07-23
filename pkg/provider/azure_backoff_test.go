@@ -26,7 +26,7 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-12-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -275,7 +275,7 @@ func TestCreateOrUpdateLB(t *testing.T) {
 		mockPIPClient.EXPECT().Get(gomock.Any(), az.ResourceGroup, "pip", gomock.Any()).Return(network.PublicIPAddress{
 			Name: to.StringPtr("pip"),
 			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-				ProvisioningState: network.Succeeded,
+				ProvisioningState: network.ProvisioningStateSucceeded,
 			},
 		}, nil).AnyTimes()
 
@@ -417,7 +417,7 @@ func TestDeleteLB(t *testing.T) {
 	mockLBClient.EXPECT().Delete(gomock.Any(), az.ResourceGroup, "lb").Return(&retry.Error{HTTPStatusCode: http.StatusInternalServerError})
 
 	err := az.DeleteLB(&v1.Service{}, "lb")
-	assert.EqualError(t, fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 500, RawError: %w", error(nil)), err.Error())
+	assert.EqualError(t, fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 500, RawError: %w", error(nil)), fmt.Sprintf("%s", err.Error()))
 }
 
 func TestCreateOrUpdateRouteTable(t *testing.T) {

@@ -19,7 +19,7 @@ package publicipclient
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2020-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
@@ -40,8 +40,7 @@ const (
 )
 
 // Interface is the client interface for PublicIPAddress.
-// Don't forget to run the following command to generate the mock client:
-// mockgen -source=$GOPATH/src/sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/interface.go -package=mockpublicipclient Interface > $GOPATH/src/sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient/interface.go
+// Don't forget to run "hack/update-mock-clients.sh" command to generate the mock client.
 type Interface interface {
 	// Get gets a PublicIPAddress.
 	Get(ctx context.Context, resourceGroupName string, publicIPAddressName string, expand string) (result network.PublicIPAddress, rerr *retry.Error)
@@ -51,6 +50,9 @@ type Interface interface {
 
 	// List gets a list of PublicIPAddress in the resource group.
 	List(ctx context.Context, resourceGroupName string) (result []network.PublicIPAddress, rerr *retry.Error)
+
+	// ListAll gets all of PublicIPAddress in the subscription.
+	ListAll(ctx context.Context) (result []network.PublicIPAddress, rerr *retry.Error)
 
 	// CreateOrUpdate creates or updates a PublicIPAddress.
 	CreateOrUpdate(ctx context.Context, resourceGroupName string, publicIPAddressName string, parameters network.PublicIPAddress) *retry.Error
