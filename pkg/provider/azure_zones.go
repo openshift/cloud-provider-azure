@@ -74,7 +74,7 @@ func (az *Cloud) updateRegionZonesMap(zones map[string][]string) {
 
 func (az *Cloud) getRegionZonesBackoff(region string) ([]string, error) {
 	if az.isStackCloud() {
-		// Azure Stack does not support zone at the moment
+		// Azure Stack does not support zones at the moment
 		// https://docs.microsoft.com/en-us/azure-stack/user/azure-stack-network-differences?view=azs-2102
 		klog.V(3).Infof("getRegionZonesMapWrapper: Azure Stack does not support Zones at the moment, skipping")
 		return az.regionZonesMap[region], nil
