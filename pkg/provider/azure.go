@@ -576,7 +576,7 @@ func (az *Cloud) InitializeCloudFromConfig(config *Config, fromSecret, callFromC
 		az.routeUpdater = newDelayedRouteUpdater(az, routeUpdateInterval)
 		go az.routeUpdater.run()
 
-		// Azure Stack does not support zone at the moment
+		// Azure Stack does not support zones at the moment
 		// https://docs.microsoft.com/en-us/azure-stack/user/azure-stack-network-differences?view=azs-2102
 		if !az.isStackCloud() {
 			// wait for the success first time of syncing zones
