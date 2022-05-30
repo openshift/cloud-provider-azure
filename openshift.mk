@@ -18,7 +18,7 @@ verify-history:
 	openshift-hack/verify-history.sh
 .PHONY: verify-history
 
-verify: test-lint test-gofmt test-govet
+verify: test-lint
 .PHONY: verify
 
 test-unit-ci:
