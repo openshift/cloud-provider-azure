@@ -1,14 +1,8 @@
-*
-!.git
-!cloud-controller-manager
-!Makefile
-!openshift.mk
-!openshift-hack
-!hack
-!vendor
-!cmd
-!pkg
-!bin
-!go.mod
-!go.sum
-!tests
+# Exclude files and directories which are not needed for the OCP-specific image build process
+docs/
+examples/
+site/
+helm/
+
+/cloudbuild.yaml
+/netlify.toml
