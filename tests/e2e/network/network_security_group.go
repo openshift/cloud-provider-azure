@@ -142,6 +142,54 @@ var _ = Describe("Network security group", Label(utils.TestSuiteLabelNSG), func(
 		Expect(isDeleted).To(BeTrue(), "Fail to automatically delete the rule")
 	})
 
+	It("should support service annotation `service.beta.kubernetes.io/azure-shared-securityrule`", func() {
+		By("Exposing two services with shared security rule")
+		annotation := map[string]string{
+			consts.ServiceAnnotationSharedSecurityRule: "true",
+		}
+		ip1 := createAndExposeDefaultServiceWithAnnotation(cs, serviceName, ns.Name, labels, annotation, ports)
+
+		defer func() {
+			err := utils.DeleteServiceIfExists(cs, ns.Name, serviceName)
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		serviceName2 := serviceName + "-share"
+		ip2 := createAndExposeDefaultServiceWithAnnotation(cs, serviceName2, ns.Name, labels, annotation, ports)
+		defer func() {
+			By("Cleaning up")
+			err := utils.DeleteServiceIfExists(cs, ns.Name, serviceName2)
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		By("Validate shared security rule exists")
+		port := fmt.Sprintf("%d", serverPort)
+		nsgs, err := tc.GetClusterSecurityGroups()
+		Expect(err).NotTo(HaveOccurred())
+
+		ipList := []string{ip1, ip2}
+		Expect(validateSharedSecurityRuleExists(nsgs, ipList, port)).To(BeTrue(), "Security rule for service %s not exists", serviceName)
+
+		By("Validate automatically adjust or delete the rule, when service is deleted")
+		Expect(utils.DeleteService(cs, ns.Name, serviceName)).NotTo(HaveOccurred())
+		ipList = []string{ip2}
+		Expect(validateSharedSecurityRuleExists(nsgs, ipList, port)).To(BeTrue(), "Security rule should be modified to only contain service %s", serviceName2)
+
+		Expect(utils.DeleteService(cs, ns.Name, serviceName2)).NotTo(HaveOccurred())
+		isDeleted := false
+		for i := 1; i <= 30; i++ {
+			nsgs, err := tc.GetClusterSecurityGroups()
+			Expect(err).NotTo(HaveOccurred())
+			if !validateSharedSecurityRuleExists(nsgs, ipList, port) {
+				utils.Logf("Target rule successfully deleted")
+				isDeleted = true
+				break
+			}
+			time.Sleep(20 * time.Second)
+		}
+		Expect(isDeleted).To(BeTrue(), "Fail to automatically delete the shared security rule")
+	})
+
 	It("can set source IP prefixes automatically according to corresponding service tag", func() {
 		By("Creating service and wait it to expose")
 		annotation := map[string]string{
@@ -246,7 +294,7 @@ var _ = Describe("Network security group", Label(utils.TestSuiteLabelNSG), func(
 	It("should support service annotation `service.beta.kubernetes.io/azure-disable-load-balancer-floating-ip`", func() {
 		By("Creating a public IP with tags")
 		ipName := basename + "-public-IP-disable-floating-ip"
-		pip := defaultPublicIPAddress(ipName)
+		pip := defaultPublicIPAddress(ipName, false)
 		pip, err := utils.WaitCreatePIP(tc, ipName, tc.GetResourceGroup(), pip)
 		Expect(err).NotTo(HaveOccurred())
 		targetIP := to.String(pip.IPAddress)
@@ -257,7 +305,7 @@ var _ = Describe("Network security group", Label(utils.TestSuiteLabelNSG), func(
 			consts.ServiceAnnotationDisableLoadBalancerFloatingIP: "true",
 		}
 		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
-		service = updateServiceBalanceIP(service, false, targetIP)
+		service = updateServiceLBIP(service, false, targetIP)
 		_, err = cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		ip, err := utils.WaitServiceExposureAndValidateConnectivity(cs, ns.Name, serviceName, "")

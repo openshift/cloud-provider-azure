@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -67,7 +67,7 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 		vm.VirtualMachineProperties = &compute.VirtualMachineProperties{
 			ProvisioningState: to.StringPtr(string(compute.ProvisioningStateSucceeded)),
 			HardwareProfile: &compute.HardwareProfile{
-				VMSize: compute.VirtualMachineSizeTypesStandardA0,
+				VMSize: compute.StandardA0,
 			},
 			InstanceView: &compute.VirtualMachineInstanceView{
 				Statuses: &status,
@@ -117,6 +117,7 @@ func TestInstanceID(t *testing.T) {
 		nodeName            string
 		vmssName            string
 		metadataName        string
+		resourceID          string
 		metadataTemplate    string
 		vmType              string
 		expectedID          string
@@ -130,6 +131,7 @@ func TestInstanceID(t *testing.T) {
 			vmList:              []string{"vm1"},
 			nodeName:            "vm1",
 			metadataName:        "vm1",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1",
@@ -140,6 +142,7 @@ func TestInstanceID(t *testing.T) {
 			vmssName:            "vmss1",
 			nodeName:            "vmss1_0",
 			metadataName:        "vmss1_0",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss1/virtualMachines/0",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss1/virtualMachines/0",
@@ -150,6 +153,7 @@ func TestInstanceID(t *testing.T) {
 			vmssName:            "vmss1",
 			nodeName:            "vmss1-0",
 			metadataName:        "vmss1-0",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vmss1-0",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vmss1-0",
@@ -225,7 +229,7 @@ func TestInstanceID(t *testing.T) {
 			if test.metadataTemplate != "" {
 				fmt.Fprintf(w, test.metadataTemplate)
 			} else {
-				fmt.Fprintf(w, "{\"compute\":{\"name\":\"%s\",\"VMScaleSetName\":\"%s\",\"subscriptionId\":\"subscription\",\"resourceGroupName\":\"rg\"}}", test.metadataName, test.vmssName)
+				fmt.Fprintf(w, "{\"compute\":{\"name\":\"%s\",\"VMScaleSetName\":\"%s\",\"subscriptionId\":\"subscription\",\"resourceGroupName\":\"rg\", \"resourceId\":\"%s\"}}", test.metadataName, test.vmssName, test.resourceID)
 			}
 		}))
 		go func() {
@@ -876,7 +880,7 @@ func TestInstanceMetadata(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVM := buildDefaultTestVirtualMachine("as", []string{"/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/k8s-agentpool1-00000000-nic-1"})
 		expectedVM.HardwareProfile = &compute.HardwareProfile{
-			VMSize: compute.VirtualMachineSizeTypesBasicA0,
+			VMSize: compute.BasicA0,
 		}
 		expectedVM.Location = to.StringPtr("westus2")
 		expectedVM.Zones = &[]string{"1"}
@@ -903,7 +907,7 @@ func TestInstanceMetadata(t *testing.T) {
 
 		expectedMetadata := cloudprovider.InstanceMetadata{
 			ProviderID:   "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm",
-			InstanceType: string(compute.VirtualMachineSizeTypesBasicA0),
+			InstanceType: string(compute.BasicA0),
 			NodeAddresses: []v1.NodeAddress{
 				{
 					Type:    v1.NodeInternalIP,
