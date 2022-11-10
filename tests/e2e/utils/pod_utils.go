@@ -56,26 +56,28 @@ func GetPodList(cs clientset.Interface, ns string) (*v1.PodList, error) {
 	return pods, nil
 }
 
-// CountPendingPods counts how many pods is in the `pending` state
-func CountPendingPods(cs clientset.Interface, ns string) (int, error) {
-	pods, err := GetPodList(cs, ns)
-	if err != nil {
-		return -1, err
-	}
-
+// countPendingPods counts how many pods is in the `pending` state
+func countPendingPods(cs clientset.Interface, ns string, pods []v1.Pod) int {
 	pendingPodCount := 0
-	for _, p := range pods.Items {
+	for _, p := range pods {
 		if p.Status.Phase == v1.PodPending {
 			pendingPodCount++
 		}
 	}
 
-	return pendingPodCount, nil
+	return pendingPodCount
 }
 
 func WaitPodsToBeReady(cs clientset.Interface, ns string) error {
-	return wait.PollImmediate(pollInterval, pollTimeout, func() (done bool, err error) {
-		pendingPodCount, err := CountPendingPods(cs, ns)
+	var pods []v1.Pod
+	err := wait.PollImmediate(pollInterval, pollTimeout, func() (done bool, err error) {
+		podList, err := GetPodList(cs, ns)
+		if err != nil {
+			Logf("failed to list pods in namespace %s", ns)
+			return false, err
+		}
+		pods = podList.Items
+		pendingPodCount := countPendingPods(cs, ns, pods)
 		if err != nil {
 			Logf("unexpected error: %w", err)
 			return false, err
@@ -84,11 +86,28 @@ func WaitPodsToBeReady(cs clientset.Interface, ns string) error {
 		Logf("%d pods in namespace %s are pending", pendingPodCount, ns)
 		return pendingPodCount == 0, nil
 	})
+	if err != nil {
+		if err == wait.ErrWaitTimeout {
+			for _, pod := range pods {
+				printPodInfo(cs, ns, pod.Name)
+			}
+		}
+		return err
+	}
+
+	return nil
 }
 
 // LogPodStatus logs the rate of pending
 func LogPodStatus(cs clientset.Interface, ns string) error {
-	pendingPodCount, err := CountPendingPods(cs, ns)
+	podList, err := GetPodList(cs, ns)
+	if err != nil {
+		Logf("failed to list pods in namespace %s", ns)
+		return err
+	}
+
+	pods := podList.Items
+	pendingPodCount := countPendingPods(cs, ns, pods)
 	if err != nil {
 		return err
 	}
@@ -131,10 +150,7 @@ func DeletePod(cs clientset.Interface, ns string, podName string) error {
 func CreatePod(cs clientset.Interface, ns string, manifest *v1.Pod) error {
 	Logf("creating pod %s in namespace %s", manifest.Name, ns)
 	_, err := cs.CoreV1().Pods(ns).Create(context.TODO(), manifest, metav1.CreateOptions{})
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // CreateHostExecPod creates an Agnhost Pod to exec. It returns if the Pod is running and error.
@@ -175,7 +191,7 @@ func CreateHostExecPod(cs clientset.Interface, ns, name string) (bool, error) {
 			},
 		},
 	}
-	if _, err := cs.CoreV1().Pods(ns).Create(context.TODO(), pod, metav1.CreateOptions{}); err != nil {
+	if err := CreatePod(cs, ns, pod); err != nil {
 		return false, err
 	}
 	return WaitPodTo(v1.PodRunning, cs, pod, ns)
@@ -204,13 +220,48 @@ func CheckPodExist(cs clientset.Interface, ns, name string) bool {
 	return !apierrs.IsNotFound(err)
 }
 
-// GetPodLogs gets the log of the given pods
-func GetPodLogs(cs clientset.Interface, ns, podName string, opts *v1.PodLogOptions) ([]byte, error) {
+// getPodLogs gets the log of the given pods
+func getPodLogs(cs clientset.Interface, ns, podName string, opts *v1.PodLogOptions) ([]byte, error) {
 	Logf("getting the log of pod %s", podName)
 	return cs.CoreV1().Pods(ns).GetLogs(podName, opts).Do(context.TODO()).Raw()
 }
 
-// GetPodOutboundIP returns the outbound IP of the given pod
+// printPodInfo prints Pod describe info and logs.
+func printPodInfo(cs clientset.Interface, ns, pod string) {
+	output, _ := RunKubectl(ns, "describe", "pod", pod)
+	Logf("Describe info of Pod %q:\n%s", pod, output)
+	log, _ := getPodLogs(cs, ns, pod, &v1.PodLogOptions{})
+	Logf("Log of Pod %q:\n%s", pod, log)
+	log, _ = getPodLogs(cs, ns, pod, &v1.PodLogOptions{Previous: true})
+	Logf("Previous log of Pod %q:\n%s", pod, log)
+}
+
+// CreatePodGetIPManifest creates a Pod manifest getting IP with ifconfig.me.
+func CreatePodGetIPManifest() *v1.Pod {
+	podName := "test-pod"
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: podName,
+		},
+		Spec: v1.PodSpec{
+			Hostname: podName,
+			Containers: []v1.Container{
+				{
+					Name:            "test-app",
+					Image:           "k8s.gcr.io/e2e-test-images/agnhost:2.36",
+					ImagePullPolicy: v1.PullIfNotPresent,
+					Command: []string{
+						"/bin/sh", "-c", "curl -s -m 5 --retry-delay 5 --retry 10 ifconfig.me",
+					},
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
+// GetPodOutboundIP returns the outbound IP of the given pod.
+// It must be used with utils.CreatePodGetIPManifest()
 func GetPodOutboundIP(cs clientset.Interface, podTemplate *v1.Pod, nsName string) (string, error) {
 	var log []byte
 	err := wait.PollImmediate(pollInterval, pollTimeout, func() (bool, error) {
@@ -223,13 +274,16 @@ func GetPodOutboundIP(cs clientset.Interface, podTemplate *v1.Pod, nsName string
 		}
 		if pod.Status.Phase != v1.PodSucceeded {
 			Logf("waiting for the pod to succeed, current status: %s", pod.Status.Phase)
+			if pod.Status.Phase == v1.PodFailed {
+				return false, wait.ErrWaitTimeout
+			}
 			return false, nil
 		}
 		if pod.Status.ContainerStatuses[0].State.Terminated == nil || pod.Status.ContainerStatuses[0].State.Terminated.Reason != "Completed" {
 			Logf("waiting for the container to be completed")
 			return false, nil
 		}
-		log, err = GetPodLogs(cs, nsName, podTemplate.Name, &v1.PodLogOptions{})
+		log, err = getPodLogs(cs, nsName, podTemplate.Name, &v1.PodLogOptions{})
 		if err != nil {
 			Logf("retrying getting pod's log")
 			return false, nil
@@ -237,10 +291,14 @@ func GetPodOutboundIP(cs clientset.Interface, podTemplate *v1.Pod, nsName string
 		return PodIPRE.MatchString(string(log)), nil
 	})
 	if err != nil {
+		if err == wait.ErrWaitTimeout {
+			printPodInfo(cs, nsName, podTemplate.Name)
+		}
 		return "", err
 	}
-	Logf("Got pod outbound IP %s", string(log))
-	return string(log), nil
+	ip := PodIPRE.FindString(string(log))
+	Logf("Got pod outbound IP %s", ip)
+	return ip, nil
 }
 
 // WaitPodTo returns True if pod is in the specific phase during
@@ -260,8 +318,7 @@ func WaitPodTo(phase v1.PodPhase, cs clientset.Interface, podTemplate *v1.Pod, n
 		}
 		return true, nil
 	}); err != nil {
-		output, _ := RunKubectl(nsName, "describe", "pod", podTemplate.Name)
-		Logf("Describe info of Pod %q:\n%s", podTemplate.Name, output)
+		printPodInfo(cs, nsName, podTemplate.Name)
 		return false, err
 	}
 	return true, err
