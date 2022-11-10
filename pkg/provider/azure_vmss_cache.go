@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -33,29 +33,40 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
 
-type vmssVirtualMachinesEntry struct {
-	resourceGroup  string
-	vmssName       string
-	instanceID     string
-	virtualMachine *compute.VirtualMachineScaleSetVM
-	lastUpdate     time.Time
+type VMSSVirtualMachinesEntry struct {
+	ResourceGroup  string
+	VMSSName       string
+	InstanceID     string
+	VirtualMachine *compute.VirtualMachineScaleSetVM
+	LastUpdate     time.Time
 }
 
-type vmssEntry struct {
-	vmss          *compute.VirtualMachineScaleSet
-	resourceGroup string
-	lastUpdate    time.Time
+type VMSSEntry struct {
+	VMSS          *compute.VirtualMachineScaleSet
+	ResourceGroup string
+	LastUpdate    time.Time
 }
 
-type availabilitySetNodeEntry struct {
-	vmNames   sets.String
-	nodeNames sets.String
-	vms       []compute.VirtualMachine
+type NonVmssUniformNodesEntry struct {
+	VMSSFlexVMNodeNames   sets.String
+	VMSSFlexVMProviderIDs sets.String
+	AvSetVMNodeNames      sets.String
+	AvSetVMProviderIDs    sets.String
+	ClusterNodeNames      sets.String
 }
+
+type VMManagementType string
+
+const (
+	ManagedByVmssUniform  VMManagementType = "ManagedByVmssUniform"
+	ManagedByVmssFlex     VMManagementType = "ManagedByVmssFlex"
+	ManagedByAvSet        VMManagementType = "ManagedByAvSet"
+	ManagedByUnknownVMSet VMManagementType = "ManagedByUnknownVMSet"
+)
 
 func (ss *ScaleSet) newVMSSCache() (*azcache.TimedCache, error) {
 	getter := func(key string) (interface{}, error) {
-		localCache := &sync.Map{} // [vmasName]*vmssEntry
+		localCache := &sync.Map{} // [vmssName]*vmssEntry
 
 		allResourceGroups, err := ss.GetResourceGroups()
 		if err != nil {
@@ -81,11 +92,13 @@ func (ss *ScaleSet) newVMSSCache() (*azcache.TimedCache, error) {
 					klog.Warning("failed to get the name of VMSS")
 					continue
 				}
-				localCache.Store(*scaleSet.Name, &vmssEntry{
-					vmss:          &scaleSet,
-					resourceGroup: resourceGroup,
-					lastUpdate:    time.Now().UTC(),
-				})
+				if scaleSet.OrchestrationMode == "" || scaleSet.OrchestrationMode == compute.Uniform {
+					localCache.Store(*scaleSet.Name, &VMSSEntry{
+						VMSS:          &scaleSet,
+						ResourceGroup: resourceGroup,
+						LastUpdate:    time.Now().UTC(),
+					})
+				}
 			}
 		}
 
@@ -133,41 +146,26 @@ func extractVmssVMName(name string) (string, string, error) {
 func (ss *ScaleSet) getVMSSVMCache(resourceGroup, vmssName string) (string, *azcache.TimedCache, error) {
 	cacheKey := strings.ToLower(fmt.Sprintf("%s/%s", resourceGroup, vmssName))
 	if entry, ok := ss.vmssVMCache.Load(cacheKey); ok {
-		cache := entry.(*azcache.TimedCache)
-		return cacheKey, cache, nil
+		return cacheKey, entry.(*azcache.TimedCache), nil
 	}
 
-	cache, err := ss.newVMSSVirtualMachinesCache(resourceGroup, vmssName, cacheKey)
+	v, err, _ := ss.group.Do(cacheKey, func() (interface{}, error) {
+		cache, err := ss.newVMSSVirtualMachinesCache(resourceGroup, vmssName, cacheKey)
+		if err != nil {
+			return nil, err
+		}
+		ss.vmssVMCache.Store(cacheKey, cache)
+		return cache, nil
+	})
 	if err != nil {
 		return "", nil, err
 	}
-	ss.vmssVMCache.Store(cacheKey, cache)
-	return cacheKey, cache, nil
+	return cacheKey, v.(*azcache.TimedCache), nil
 }
 
 // gcVMSSVMCache delete stale VMSS VMs caches from deleted VMSSes.
 func (ss *ScaleSet) gcVMSSVMCache() error {
-	cached, err := ss.vmssCache.Get(consts.VMSSKey, azcache.CacheReadTypeUnsafe)
-	if err != nil {
-		return err
-	}
-
-	vmsses := cached.(*sync.Map)
-	removed := map[string]bool{}
-	ss.vmssVMCache.Range(func(key, value interface{}) bool {
-		cacheKey := key.(string)
-		vlistIdx := cacheKey[strings.LastIndex(cacheKey, "/")+1:]
-		if _, ok := vmsses.Load(vlistIdx); !ok {
-			removed[cacheKey] = true
-		}
-		return true
-	})
-
-	for key := range removed {
-		ss.vmssVMCache.Delete(key)
-	}
-
-	return nil
+	return ss.vmssCache.Delete(consts.VMSSKey)
 }
 
 // newVMSSVirtualMachinesCache instantiates a new VMs cache for VMs belonging to the provided VMSS.
@@ -175,9 +173,9 @@ func (ss *ScaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 	vmssVirtualMachinesCacheTTL := time.Duration(ss.Config.VmssVirtualMachinesCacheTTLInSeconds) * time.Second
 
 	getter := func(key string) (interface{}, error) {
-		localCache := &sync.Map{} // [nodeName]*vmssVirtualMachinesEntry
+		localCache := &sync.Map{} // [nodeName]*VMSSVirtualMachinesEntry
 
-		oldCache := make(map[string]vmssVirtualMachinesEntry)
+		oldCache := make(map[string]VMSSVirtualMachinesEntry)
 
 		if vmssCache, ok := ss.vmssVMCache.Load(cacheKey); ok {
 			// get old cache before refreshing the cache
@@ -191,7 +189,7 @@ func (ss *ScaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 				if cached != nil {
 					virtualMachines := cached.(*sync.Map)
 					virtualMachines.Range(func(key, value interface{}) bool {
-						oldCache[key.(string)] = *value.(*vmssVirtualMachinesEntry)
+						oldCache[key.(string)] = *value.(*VMSSVirtualMachinesEntry)
 						return true
 					})
 				}
@@ -216,18 +214,18 @@ func (ss *ScaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 				continue
 			}
 
-			vmssVMCacheEntry := &vmssVirtualMachinesEntry{
-				resourceGroup:  resourceGroupName,
-				vmssName:       vmssName,
-				instanceID:     to.String(vm.InstanceID),
-				virtualMachine: &vm,
-				lastUpdate:     time.Now().UTC(),
+			vmssVMCacheEntry := &VMSSVirtualMachinesEntry{
+				ResourceGroup:  resourceGroupName,
+				VMSSName:       vmssName,
+				InstanceID:     to.String(vm.InstanceID),
+				VirtualMachine: &vm,
+				LastUpdate:     time.Now().UTC(),
 			}
 			// set cache entry to nil when the VM is under deleting.
 			if vm.VirtualMachineScaleSetVMProperties != nil &&
 				strings.EqualFold(to.String(vm.VirtualMachineScaleSetVMProperties.ProvisioningState), string(compute.ProvisioningStateDeleting)) {
 				klog.V(4).Infof("VMSS virtualMachine %q is under deleting, setting its cache to nil", computerName)
-				vmssVMCacheEntry.virtualMachine = nil
+				vmssVMCacheEntry.VirtualMachine = nil
 			}
 			localCache.Store(computerName, vmssVMCacheEntry)
 
@@ -239,24 +237,24 @@ func (ss *ScaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 		for name, vmEntry := range oldCache {
 			// if the nil cache entry has existed for vmssVirtualMachinesCacheTTL in the cache
 			// then it should not be added back to the cache
-			if vmEntry.virtualMachine == nil && time.Since(vmEntry.lastUpdate) > vmssVirtualMachinesCacheTTL {
+			if vmEntry.VirtualMachine == nil && time.Since(vmEntry.LastUpdate) > vmssVirtualMachinesCacheTTL {
 				klog.V(5).Infof("ignoring expired entries from old cache for %s", name)
 				continue
 			}
-			lastUpdate := time.Now().UTC()
-			if vmEntry.virtualMachine == nil {
+			LastUpdate := time.Now().UTC()
+			if vmEntry.VirtualMachine == nil {
 				// if this is already a nil entry then keep the time the nil
 				// entry was first created, so we can cleanup unwanted entries
-				lastUpdate = vmEntry.lastUpdate
+				LastUpdate = vmEntry.LastUpdate
 			}
 
 			klog.V(5).Infof("adding old entries to new cache for %s", name)
-			localCache.Store(name, &vmssVirtualMachinesEntry{
-				resourceGroup:  vmEntry.resourceGroup,
-				vmssName:       vmEntry.vmssName,
-				instanceID:     vmEntry.instanceID,
-				virtualMachine: nil,
-				lastUpdate:     lastUpdate,
+			localCache.Store(name, &VMSSVirtualMachinesEntry{
+				ResourceGroup:  vmEntry.ResourceGroup,
+				VMSSName:       vmEntry.VMSSName,
+				InstanceID:     vmEntry.InstanceID,
+				VirtualMachine: nil,
+				LastUpdate:     LastUpdate,
 			})
 		}
 
@@ -266,35 +264,21 @@ func (ss *ScaleSet) newVMSSVirtualMachinesCache(resourceGroupName, vmssName, cac
 	return azcache.NewTimedcache(vmssVirtualMachinesCacheTTL, getter)
 }
 
+// DeleteCacheForNode deletes Node from VMSS VM and VM caches.
 func (ss *ScaleSet) DeleteCacheForNode(nodeName string) error {
-	managedByAS, err := ss.isNodeManagedByAvailabilitySet(nodeName, azcache.CacheReadTypeUnsafe)
+	vmManagementType, err := ss.getVMManagementTypeByNodeName(nodeName, azcache.CacheReadTypeUnsafe)
 	if err != nil {
-		klog.Warningf("DeleteCacheForNode(%s): failed to check if the node is managed by AvailabilitySet", nodeName)
-		return nil
+		klog.Errorf("Failed to check VM management type: %v", err)
+		return err
 	}
-	if managedByAS {
-		cached, err := ss.availabilitySetNodesCache.Get(consts.AvailabilitySetNodesKey, azcache.CacheReadTypeDefault)
-		if err != nil {
-			klog.Warningf("DeleteCacheForNode(%s): failed to get availabilitySetNodesCache: %s", err.Error())
-			return nil
-		}
 
-		ss.lockMap.LockEntry(consts.AvailabilitySetNodesKey)
-		defer ss.lockMap.UnlockEntry(consts.AvailabilitySetNodesKey)
-
-		entry := cached.(*availabilitySetNodeEntry)
-		entry.nodeNames.Delete(nodeName)
-		entry.vmNames.Delete(nodeName)
-		for i := len(entry.vms) - 1; i >= 0; i-- {
-			if strings.EqualFold(to.String(entry.vms[i].Name), nodeName) {
-				entry.vms = append(entry.vms[:i], entry.vms[i+1:]...)
-				break
-			}
-		}
-
-		_ = ss.vmCache.Delete(nodeName)
-
-		return nil
+	if vmManagementType == ManagedByAvSet {
+		// vm is managed by availability set.
+		return ss.availabilitySet.DeleteCacheForNode(nodeName)
+	}
+	if vmManagementType == ManagedByVmssFlex {
+		// vm is managed by vmss flex.
+		return ss.flexScaleSet.DeleteCacheForNode(nodeName)
 	}
 
 	node, err := ss.getNodeIdentityByNodeName(nodeName, azcache.CacheReadTypeUnsafe)
@@ -309,14 +293,13 @@ func (ss *ScaleSet) DeleteCacheForNode(nodeName string) error {
 		return err
 	}
 
-	vmcache, err := timedcache.Get(cacheKey, azcache.CacheReadTypeUnsafe)
+	err = timedcache.Delete(cacheKey)
 	if err != nil {
 		klog.Errorf("DeleteCacheForNode(%s) failed with error: %v", nodeName, err)
 		return err
 	}
-	virtualMachines := vmcache.(*sync.Map)
-	virtualMachines.Delete(nodeName)
 
+	// Delete in VMSS VM cache
 	if err := ss.gcVMSSVMCache(); err != nil {
 		klog.Errorf("DeleteCacheForNode(%s) failed to gc stale vmss caches: %v", nodeName, err)
 	}
@@ -324,24 +307,73 @@ func (ss *ScaleSet) DeleteCacheForNode(nodeName string) error {
 	return nil
 }
 
-func (ss *ScaleSet) newAvailabilitySetNodesCache() (*azcache.TimedCache, error) {
+func (ss *ScaleSet) updateCache(nodeName, resourceGroupName, vmssName, instanceID string, updatedVM *compute.VirtualMachineScaleSetVM) error {
+	cacheKey, timedCache, err := ss.getVMSSVMCache(resourceGroupName, vmssName)
+	if err != nil {
+		klog.Errorf("updateCache(%s, %s, %s) failed with error: %v", vmssName, resourceGroupName, nodeName, err)
+		return err
+	}
+
+	localCache := &sync.Map{}
+
+	vmssVMCacheEntry := &VMSSVirtualMachinesEntry{
+		ResourceGroup:  resourceGroupName,
+		VMSSName:       vmssName,
+		InstanceID:     instanceID,
+		VirtualMachine: updatedVM,
+		LastUpdate:     time.Now().UTC(),
+	}
+
+	localCache.Store(nodeName, vmssVMCacheEntry)
+
+	vmCache, err := timedCache.Get(cacheKey, azcache.CacheReadTypeUnsafe)
+	if err != nil {
+		klog.Errorf("updateCache(%s, %s, %s) failed getting vmCache with error: %v", vmssName, resourceGroupName, nodeName, err)
+	}
+
+	virtualMachines := vmCache.(*sync.Map)
+	virtualMachines.Range(func(key, value interface{}) bool {
+		if key.(string) != nodeName {
+			localCache.Store(key.(string), value.(*VMSSVirtualMachinesEntry))
+		}
+		return true
+	})
+
+	timedCache.Update(cacheKey, localCache)
+	klog.V(4).Infof("updateCache(%s, %s, %s) for cacheKey(%s) updated successfully", vmssName, resourceGroupName, nodeName, cacheKey)
+	return nil
+}
+
+func (ss *ScaleSet) newNonVmssUniformNodesCache() (*azcache.TimedCache, error) {
 	getter := func(key string) (interface{}, error) {
-		vmNames := sets.NewString()
+		klog.V(6).Infof("refresh the cache of NonVmssUniformNodesCache")
+		vmssFlexVMNodeNames := sets.NewString()
+		vmssFlexVMProviderIDs := sets.NewString()
+		avSetVMNodeNames := sets.NewString()
+		avSetVMProviderIDs := sets.NewString()
 		resourceGroups, err := ss.GetResourceGroups()
 		if err != nil {
 			return nil, err
 		}
 
-		vmList := make([]compute.VirtualMachine, 0)
 		for _, resourceGroup := range resourceGroups.List() {
 			vms, err := ss.Cloud.ListVirtualMachines(resourceGroup)
 			if err != nil {
-				return nil, fmt.Errorf("newAvailabilitySetNodesCache: failed to list vms in the resource group %s: %w", resourceGroup, err)
+				return nil, fmt.Errorf("getter function of nonVmssUniformNodesCache: failed to list vms in the resource group %s: %w", resourceGroup, err)
 			}
 			for _, vm := range vms {
-				if vm.Name != nil {
-					vmNames.Insert(to.String(vm.Name))
-					vmList = append(vmList, vm)
+				if vm.OsProfile != nil && vm.OsProfile.ComputerName != nil {
+					if vm.VirtualMachineScaleSet != nil {
+						vmssFlexVMNodeNames.Insert(strings.ToLower(to.String(vm.OsProfile.ComputerName)))
+						if vm.ID != nil {
+							vmssFlexVMProviderIDs.Insert(ss.ProviderName() + "://" + to.String(vm.ID))
+						}
+					} else {
+						avSetVMNodeNames.Insert(strings.ToLower(to.String(vm.OsProfile.ComputerName)))
+						if vm.ID != nil {
+							avSetVMProviderIDs.Insert(ss.ProviderName() + "://" + to.String(vm.ID))
+						}
+					}
 				}
 			}
 		}
@@ -352,43 +384,119 @@ func (ss *ScaleSet) newAvailabilitySetNodesCache() (*azcache.TimedCache, error) 
 			return nil, err
 		}
 
-		localCache := &availabilitySetNodeEntry{
-			vmNames:   vmNames,
-			nodeNames: nodeNames,
-			vms:       vmList,
+		localCache := NonVmssUniformNodesEntry{
+			VMSSFlexVMNodeNames:   vmssFlexVMNodeNames,
+			VMSSFlexVMProviderIDs: vmssFlexVMProviderIDs,
+			AvSetVMNodeNames:      avSetVMNodeNames,
+			AvSetVMProviderIDs:    avSetVMProviderIDs,
+			ClusterNodeNames:      nodeNames,
 		}
 
 		return localCache, nil
 	}
 
-	if ss.Config.AvailabilitySetNodesCacheTTLInSeconds == 0 {
-		ss.Config.AvailabilitySetNodesCacheTTLInSeconds = consts.AvailabilitySetNodesCacheTTLDefaultInSeconds
+	if ss.Config.NonVmssUniformNodesCacheTTLInSeconds == 0 {
+		ss.Config.NonVmssUniformNodesCacheTTLInSeconds = consts.NonVmssUniformNodesCacheTTLDefaultInSeconds
 	}
-	return azcache.NewTimedcache(time.Duration(ss.Config.AvailabilitySetNodesCacheTTLInSeconds)*time.Second, getter)
+	return azcache.NewTimedcache(time.Duration(ss.Config.NonVmssUniformNodesCacheTTLInSeconds)*time.Second, getter)
 }
 
-func (ss *ScaleSet) isNodeManagedByAvailabilitySet(nodeName string, crt azcache.AzureCacheReadType) (bool, error) {
-	// Assume all nodes are managed by VMSS when DisableAvailabilitySetNodes is enabled.
-	if ss.DisableAvailabilitySetNodes {
-		klog.V(6).Infof("Assuming node %q is managed by VMSS since DisableAvailabilitySetNodes is set to true", nodeName)
-		return false, nil
+func (ss *ScaleSet) getVMManagementTypeByNodeName(nodeName string, crt azcache.AzureCacheReadType) (VMManagementType, error) {
+	if ss.DisableAvailabilitySetNodes && !ss.EnableVmssFlexNodes {
+		return ManagedByVmssUniform, nil
 	}
-
-	cached, err := ss.availabilitySetNodesCache.Get(consts.AvailabilitySetNodesKey, crt)
+	ss.lockMap.LockEntry(consts.VMManagementTypeLockKey)
+	defer ss.lockMap.UnlockEntry(consts.VMManagementTypeLockKey)
+	cached, err := ss.nonVmssUniformNodesCache.Get(consts.NonVmssUniformNodesKey, crt)
 	if err != nil {
-		return false, err
+		return ManagedByUnknownVMSet, err
 	}
 
-	cachedNodes := cached.(*availabilitySetNodeEntry).nodeNames
+	cachedNodes := cached.(NonVmssUniformNodesEntry).ClusterNodeNames
+
 	// if the node is not in the cache, assume the node has joined after the last cache refresh and attempt to refresh the cache.
 	if !cachedNodes.Has(nodeName) {
-		klog.V(2).Infof("Node %s has joined the cluster since the last VM cache refresh, refreshing the cache", nodeName)
-		cached, err = ss.availabilitySetNodesCache.Get(consts.AvailabilitySetNodesKey, azcache.CacheReadTypeForceRefresh)
+		klog.V(2).Infof("Node %s has joined the cluster since the last VM cache refresh in NonVmssUniformNodesEntry, refreshing the cache", nodeName)
+		cached, err = ss.nonVmssUniformNodesCache.Get(consts.NonVmssUniformNodesKey, azcache.CacheReadTypeForceRefresh)
 		if err != nil {
-			return false, err
+			return ManagedByUnknownVMSet, err
 		}
 	}
 
-	cachedVMs := cached.(*availabilitySetNodeEntry).vmNames
-	return cachedVMs.Has(nodeName), nil
+	cachedAvSetVMs := cached.(NonVmssUniformNodesEntry).AvSetVMNodeNames
+	cachedVmssFlexVMs := cached.(NonVmssUniformNodesEntry).VMSSFlexVMNodeNames
+
+	if cachedAvSetVMs.Has(nodeName) {
+		return ManagedByAvSet, nil
+	}
+	if cachedVmssFlexVMs.Has(nodeName) {
+		return ManagedByVmssFlex, nil
+	}
+	return ManagedByVmssUniform, nil
+}
+
+func (ss *ScaleSet) getVMManagementTypeByProviderID(providerID string, crt azcache.AzureCacheReadType) (VMManagementType, error) {
+	if ss.DisableAvailabilitySetNodes && !ss.EnableVmssFlexNodes {
+		return ManagedByVmssUniform, nil
+	}
+	_, err := extractScaleSetNameByProviderID(providerID)
+	if err == nil {
+		return ManagedByVmssUniform, nil
+	}
+
+	ss.lockMap.LockEntry(consts.VMManagementTypeLockKey)
+	defer ss.lockMap.UnlockEntry(consts.VMManagementTypeLockKey)
+	cached, err := ss.nonVmssUniformNodesCache.Get(consts.NonVmssUniformNodesKey, crt)
+	if err != nil {
+		return ManagedByUnknownVMSet, err
+	}
+
+	cachedVmssFlexVMProviderIDs := cached.(NonVmssUniformNodesEntry).VMSSFlexVMProviderIDs
+	cachedAvSetVMProviderIDs := cached.(NonVmssUniformNodesEntry).AvSetVMProviderIDs
+
+	if cachedAvSetVMProviderIDs.Has(providerID) {
+		return ManagedByAvSet, nil
+	}
+	if cachedVmssFlexVMProviderIDs.Has(providerID) {
+		return ManagedByVmssFlex, nil
+	}
+	return ManagedByUnknownVMSet, fmt.Errorf("getVMManagementTypeByProviderID : failed to check the providerID %s management type", providerID)
+
+}
+
+func (ss *ScaleSet) getVMManagementTypeByIPConfigurationID(ipConfigurationID string, crt azcache.AzureCacheReadType) (VMManagementType, error) {
+	if ss.DisableAvailabilitySetNodes && !ss.EnableVmssFlexNodes {
+		return ManagedByVmssUniform, nil
+	}
+
+	_, _, err := getScaleSetAndResourceGroupNameByIPConfigurationID(ipConfigurationID)
+	if err == nil {
+		return ManagedByVmssUniform, nil
+	}
+
+	ss.lockMap.LockEntry(consts.VMManagementTypeLockKey)
+	defer ss.lockMap.UnlockEntry(consts.VMManagementTypeLockKey)
+	cached, err := ss.nonVmssUniformNodesCache.Get(consts.NonVmssUniformNodesKey, crt)
+	if err != nil {
+		return ManagedByUnknownVMSet, err
+	}
+
+	matches := nicIDRE.FindStringSubmatch(ipConfigurationID)
+	if len(matches) != 3 {
+		return ManagedByUnknownVMSet, fmt.Errorf("can not extract nic name from ipConfigurationID (%s)", ipConfigurationID)
+	}
+
+	nicResourceGroup, nicName := matches[1], matches[2]
+	if nicResourceGroup == "" || nicName == "" {
+		return ManagedByUnknownVMSet, fmt.Errorf("invalid ip config ID %s", ipConfigurationID)
+	}
+
+	vmName := strings.Replace(nicName, "-nic", "", 1)
+
+	cachedAvSetVMs := cached.(NonVmssUniformNodesEntry).AvSetVMNodeNames
+
+	if cachedAvSetVMs.Has(vmName) {
+		return ManagedByAvSet, nil
+	}
+	return ManagedByVmssFlex, nil
 }
