@@ -116,7 +116,3 @@ require (
 	sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 )
-
-// https://github.com/kubernetes/kubernetes/issues/112793
-// Remove after k8s.io/cloud-provider v0.25.3 will be released, updated upstream and rebased.
-replace k8s.io/cloud-provider v0.25.2 => github.com/openshift/kubernetes-cloud-provider v0.0.0-20221007081959-e07817829a38
