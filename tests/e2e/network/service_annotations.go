@@ -50,6 +50,8 @@ var (
 	scalesetRE               = regexp.MustCompile(`.*/subscriptions/(?:.*)/resourceGroups/(.+)/providers/Microsoft.Compute/virtualMachineScaleSets/(.+)/virtualMachines(?:.*)`)
 	lbNameRE                 = regexp.MustCompile(`^/subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Network/loadBalancers/(.+)/frontendIPConfigurations(?:.*)`)
 	backendIPConfigurationRE = regexp.MustCompile(`^/subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/virtualMachineScaleSets/(.+)/virtualMachines(?:.*)`)
+
+	ipFamily = utils.IPv4
 )
 
 const (
@@ -97,6 +99,9 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 
 		utils.Logf("Waiting for backend pods to be ready")
 		err = utils.WaitPodsToBeReady(cs, ns.Name)
+		Expect(err).NotTo(HaveOccurred())
+
+		ipFamily, err = utils.GetClusterServiceIPFamily()
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -150,6 +155,37 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 		var code int
 		serviceDomainName := utils.GetServiceDomainName(serviceDomainNamePrefix)
 		url := fmt.Sprintf("http://%s:%v", serviceDomainName, ports[0].Port)
+		for i := 1; i <= 30; i++ {
+			/* #nosec G107: Potential HTTP request made with variable url */
+			resp, err := http.Get(url)
+			if err == nil {
+				defer func() {
+					if resp != nil {
+						resp.Body.Close()
+					}
+				}()
+				code = resp.StatusCode
+				if code == nginxStatusCode {
+					break
+				} else {
+					utils.Logf("Received %d status code from %s", code, url)
+				}
+			} else {
+				utils.Logf("Received the following error when validating %s: %v", url, err)
+			}
+			utils.Logf("Retrying in 20 seconds")
+			time.Sleep(20 * time.Second)
+		}
+		Expect(code).To(Equal(nginxStatusCode), "Fail to get response from the domain name")
+		By("Update service")
+		annotation = map[string]string{
+			consts.ServiceAnnotationDNSLabelName: serviceDomainNamePrefix + "new",
+		}
+		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
+		_, err := cs.CoreV1().Services(ns.Name).Update(context.TODO(), service, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		serviceDomainName = utils.GetServiceDomainName(serviceDomainNamePrefix)
+		url = fmt.Sprintf("http://%s:%v", serviceDomainName, ports[0].Port)
 		for i := 1; i <= 30; i++ {
 			/* #nosec G107: Potential HTTP request made with variable url */
 			resp, err := http.Get(url)
@@ -289,13 +325,16 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 	})
 
 	It("should support service annotation 'service.beta.kubernetes.io/azure-load-balancer-resource-group'", func() {
+		if os.Getenv(utils.AKSTestCCM) != utils.TrueValue {
+			Skip("Skip this test because ARM is not working properly on testgrid testbeds")
+		}
 		By("creating a test resource group")
 		rg, cleanup := utils.CreateTestResourceGroup(tc)
 		defer cleanup(to.String(rg.Name))
 
 		By("creating test PIP in the test resource group")
 		testPIPName := "testPIP-" + string(uuid.NewUUID())[0:4]
-		pip, err := utils.WaitCreatePIP(tc, testPIPName, *rg.Name, defaultPublicIPAddress(testPIPName))
+		pip, err := utils.WaitCreatePIP(tc, testPIPName, *rg.Name, defaultPublicIPAddress(testPIPName, false))
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			utils.Logf("Cleaning up service and public IP")
@@ -310,7 +349,7 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 		}
 		By("Creating service " + serviceName + " in namespace " + ns.Name)
 		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
-		service.Spec.LoadBalancerIP = *pip.IPAddress
+		service = updateServiceLBIP(service, false, *pip.IPAddress)
 		_, err = cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		utils.Logf("Successfully created LoadBalancer service " + serviceName + " in namespace " + ns.Name)
@@ -324,39 +363,10 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 		Expect(lb).NotTo(BeNil())
 	})
 
-	It("should support service annotation `service.beta.kubernetes.io/azure-shared-securityrule`", func() {
-		By("Exposing two services with shared security rule")
-		annotation := map[string]string{
-			consts.ServiceAnnotationSharedSecurityRule: "true",
-		}
-		ip1 := createAndExposeDefaultServiceWithAnnotation(cs, serviceName, ns.Name, labels, annotation, ports)
-
-		defer func() {
-			err := utils.DeleteServiceIfExists(cs, ns.Name, serviceName)
-			Expect(err).NotTo(HaveOccurred())
-		}()
-
-		serviceName2 := serviceName + "-share"
-		ip2 := createAndExposeDefaultServiceWithAnnotation(cs, serviceName2, ns.Name, labels, annotation, ports)
-		defer func() {
-			By("Cleaning up")
-			err := utils.DeleteServiceIfExists(cs, ns.Name, serviceName2)
-			Expect(err).NotTo(HaveOccurred())
-		}()
-
-		By("Validate shared security rule exists")
-		port := fmt.Sprintf("%d", serverPort)
-		nsgs, err := tc.GetClusterSecurityGroups()
-		Expect(err).NotTo(HaveOccurred())
-
-		ipList := []string{ip1, ip2}
-		Expect(validateSharedSecurityRuleExists(nsgs, ipList, port)).To(BeTrue(), "Security rule for service %s not exists", serviceName)
-	})
-
 	It("should support service annotation `service.beta.kubernetes.io/azure-additional-public-ips`", func() {
 		By("creating a public IP")
 		ipName := basename + "-public-IP" + string(uuid.NewUUID())[0:4]
-		pip := defaultPublicIPAddress(ipName)
+		pip := defaultPublicIPAddress(ipName, false)
 		pip, err := utils.WaitCreatePIP(tc, ipName, tc.GetResourceGroup(), pip)
 		Expect(err).NotTo(HaveOccurred())
 		additionalPIP := to.String(pip.IPAddress)
@@ -415,6 +425,7 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 			consts.ServiceAnnotationAzurePIPTags: "a=b,c= d,e =, =f",
 		}
 		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
+		service.GetAnnotations()
 		_, err := cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -467,7 +478,7 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 	It("should support service annotation `service.beta.kubernetes.io/azure-pip-name`", func() {
 		By("Creating two test pips")
 		pipName1 := "pip1"
-		pip1, err := utils.WaitCreatePIP(tc, pipName1, tc.GetResourceGroup(), defaultPublicIPAddress(pipName1))
+		pip1, err := utils.WaitCreatePIP(tc, pipName1, tc.GetResourceGroup(), defaultPublicIPAddress(pipName1, false))
 		defer func() {
 			By("Cleaning up test PIP")
 			err := utils.DeletePIPWithRetry(tc, pipName1, tc.GetResourceGroup())
@@ -475,7 +486,7 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 		}()
 		Expect(err).NotTo(HaveOccurred())
 		pipName2 := "pip2"
-		pip2, err := utils.WaitCreatePIP(tc, pipName2, tc.GetResourceGroup(), defaultPublicIPAddress(pipName2))
+		pip2, err := utils.WaitCreatePIP(tc, pipName2, tc.GetResourceGroup(), defaultPublicIPAddress(pipName2, false))
 		defer func() {
 			By("Cleaning up test PIP")
 			err := utils.DeletePIPWithRetry(tc, pipName2, tc.GetResourceGroup())
@@ -650,6 +661,51 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 		utils.Logf("Validating health probe config protocol")
 		Expect((len(targetProbes))).To(Equal(1))
 		Expect(targetProbes[0].Protocol).To(Equal(network.ProbeProtocolHTTP))
+	})
+
+	// Check if the following annotations are correctly set with Service LB IP
+	// service.beta.kubernetes.io/azure-load-balancer-ipv4 or service.beta.kubernetes.io/azure-load-balancer-ipv6
+	It("should support service annotation 'service.beta.kubernetes.io/azure-load-balancer-ip'", func() {
+		pipName := fmt.Sprintf("%s-public-IP%s", basename, string(uuid.NewUUID())[0:4])
+		By(fmt.Sprintf("Creating a public IP %q", pipName))
+		var pip network.PublicIPAddress
+		if ipFamily == utils.IPv4 {
+			pip = defaultPublicIPAddress(pipName, false)
+		} else if ipFamily == utils.IPv6 {
+			pip = defaultPublicIPAddress(pipName, true)
+		} else {
+			// TODO: dual-stack support
+		}
+		rg := tc.GetResourceGroup()
+		pip, err := utils.WaitCreatePIP(tc, pipName, rg, pip)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() {
+			utils.Logf("Cleaning up public IP")
+			err = utils.DeletePIPWithRetry(tc, pipName, rg)
+			Expect(err).NotTo(HaveOccurred())
+		}()
+		pipAddr := to.String(pip.IPAddress)
+		utils.Logf("Created pip with address %s", pipAddr)
+
+		annotation := map[string]string{}
+		if ipFamily == utils.IPv4 {
+			annotation[consts.ServiceAnnotationLoadBalancerIPDualStack[false]] = pipAddr
+		} else if ipFamily == utils.IPv6 {
+			annotation[consts.ServiceAnnotationLoadBalancerIPDualStack[true]] = pipAddr
+		} else {
+			// TODO: dual-stack support
+		}
+
+		By("Creating a Service")
+		publicIP := createAndExposeDefaultServiceWithAnnotation(cs, serviceName, ns.Name, labels, annotation, ports)
+		defer func() {
+			By("Cleaning up service")
+			err := utils.DeleteService(cs, ns.Name, serviceName)
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		By("Check if the Service has the correct address")
+		Expect(publicIP).To(Equal(pipAddr))
 	})
 })
 
