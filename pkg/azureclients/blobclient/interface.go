@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-09-01/storage"
+
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
 
@@ -38,4 +39,6 @@ type Interface interface {
 	CreateContainer(ctx context.Context, subsID, resourceGroupName, accountName, containerName string, parameters storage.BlobContainer) *retry.Error
 	DeleteContainer(ctx context.Context, subsID, resourceGroupName, accountName, containerName string) *retry.Error
 	GetContainer(ctx context.Context, subsID, resourceGroupName, accountName, containerName string) (storage.BlobContainer, *retry.Error)
+	GetServiceProperties(ctx context.Context, subsID, resourceGroupName, accountName string) (storage.BlobServiceProperties, error)
+	SetServiceProperties(ctx context.Context, subsID, resourceGroupName, accountName string, parameters storage.BlobServiceProperties) (storage.BlobServiceProperties, error)
 }

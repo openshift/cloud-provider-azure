@@ -23,11 +23,14 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-09-01/storage"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/utils/pointer"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/blobclient/mockblobclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/fileclient/mockfileclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatednsclient/mockprivatednsclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatednszonegroupclient/mockprivatednszonegroupclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privateendpointclient/mockprivateendpointclient"
@@ -344,7 +347,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 	subnetName := "SubnetName"
 	location := TestLocation
 
-	cloud := &Cloud{}
+	cloud := GetTestCloud(ctrl)
 	cloud.ResourceGroup = resourceGroup
 	cloud.VnetResourceGroup = vnetResourceGroup
 	cloud.VnetName = vnetName
@@ -375,6 +378,8 @@ func TestEnsureStorageAccount(t *testing.T) {
 		SubnetPropertiesFormatNil       bool
 		mockStorageAccountsClient       bool
 		setAccountOptions               bool
+		accessTier                      string
+		storageType                     StorageType
 		requireInfrastructureEncryption *bool
 		keyVaultURL                     *string
 		accountName                     string
@@ -383,14 +388,29 @@ func TestEnsureStorageAccount(t *testing.T) {
 		expectedErr                     string
 	}{
 		{
+			name:                            "[Success] EnsureStorageAccount with createPrivateEndpoint and storagetype blob",
+			createAccount:                   true,
+			createPrivateEndpoint:           true,
+			mockStorageAccountsClient:       true,
+			setAccountOptions:               true,
+			storageType:                     StorageTypeBlob,
+			requireInfrastructureEncryption: pointer.Bool(true),
+			keyVaultURL:                     pointer.String("keyVaultURL"),
+			resourceGroup:                   "rg",
+			accessTier:                      "AccessTierHot",
+			accountName:                     "",
+			expectedErr:                     "",
+		},
+		{
 			name:                            "[Success] EnsureStorageAccount with createPrivateEndpoint",
 			createAccount:                   true,
 			createPrivateEndpoint:           true,
 			mockStorageAccountsClient:       true,
 			setAccountOptions:               true,
-			requireInfrastructureEncryption: to.BoolPtr(true),
-			keyVaultURL:                     to.StringPtr("keyVaultURL"),
+			requireInfrastructureEncryption: pointer.Bool(true),
+			keyVaultURL:                     pointer.String("keyVaultURL"),
 			resourceGroup:                   "rg",
+			accessTier:                      "AccessTierHot",
 			accountName:                     "",
 			expectedErr:                     "",
 		},
@@ -428,6 +448,12 @@ func TestEnsureStorageAccount(t *testing.T) {
 	}
 
 	for _, test := range tests {
+		mockBlobClient := mockblobclient.NewMockInterface(ctrl)
+		cloud.BlobClient = mockBlobClient
+		mockBlobClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.BlobServiceProperties{
+			BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{}}, nil).AnyTimes()
+		mockBlobClient.EXPECT().SetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.BlobServiceProperties{}, nil).AnyTimes()
+
 		mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
 		if test.mockStorageAccountsClient {
 			cloud.StorageAccountClient = mockStorageAccountsClient
@@ -455,6 +481,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 			cloud.SubnetsClient = mockSubnetsClient
 
 			mockPrivateDNSClient := mockprivatednsclient.NewMockInterface(ctrl)
+			mockPrivateDNSClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any()).Return(privatedns.PrivateZone{}, &retry.Error{}).Times(1)
 			mockPrivateDNSClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), "", true).Return(nil).Times(1)
 			cloud.privatednsclient = mockPrivateDNSClient
 
@@ -467,6 +494,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 			cloud.privateendpointclient = mockPrivateEndpointClient
 
 			mockVirtualNetworkLinksClient := mockvirtualnetworklinksclient.NewMockInterface(ctrl)
+			mockVirtualNetworkLinksClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(privatedns.VirtualNetworkLink{}, &retry.Error{}).Times(1)
 			mockVirtualNetworkLinksClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any(), "", false).Return(nil).Times(1)
 			cloud.virtualNetworkLinksClient = mockVirtualNetworkLinksClient
 		}
@@ -479,6 +507,11 @@ func TestEnsureStorageAccount(t *testing.T) {
 				Name:                  test.accountName,
 				CreateAccount:         test.createAccount,
 				SubscriptionID:        test.subscriptionID,
+				AccessTier:            test.accessTier,
+				StorageType:           test.storageType,
+				EnableBlobVersioning:  pointer.BoolPtr(true),
+				SoftDeleteBlobs:       7,
+				SoftDeleteContainers:  7,
 			}
 		}
 
@@ -544,7 +577,7 @@ func TestIsPrivateEndpointAsExpected(t *testing.T) {
 
 	for _, test := range tests {
 		result := isPrivateEndpointAsExpected(test.account, test.accountOptions)
-		assert.Equal(t, result, test.expectedResult)
+		assert.Equal(t, test.expectedResult, result)
 	}
 }
 
@@ -575,7 +608,7 @@ func TestIsTagsEqual(t *testing.T) {
 			desc: "identitical tags",
 			account: storage.Account{
 				Tags: map[string]*string{
-					"key":  to.StringPtr("value"),
+					"key":  pointer.String("value"),
 					"key2": nil,
 				},
 			},
@@ -591,8 +624,8 @@ func TestIsTagsEqual(t *testing.T) {
 			desc: "identitical tags",
 			account: storage.Account{
 				Tags: map[string]*string{
-					"key":  to.StringPtr("value"),
-					"key2": to.StringPtr("value2"),
+					"key":  pointer.String("value"),
+					"key2": pointer.String("value2"),
 				},
 			},
 			accountOptions: &AccountOptions{
@@ -607,7 +640,7 @@ func TestIsTagsEqual(t *testing.T) {
 			desc: "non-identitical tags while MatchTags is false",
 			account: storage.Account{
 				Tags: map[string]*string{
-					"key": to.StringPtr("value2"),
+					"key": pointer.String("value2"),
 				},
 			},
 			accountOptions: &AccountOptions{
@@ -622,7 +655,7 @@ func TestIsTagsEqual(t *testing.T) {
 			desc: "non-identitical tags",
 			account: storage.Account{
 				Tags: map[string]*string{
-					"key": to.StringPtr("value2"),
+					"key": pointer.String("value2"),
 				},
 			},
 			accountOptions: &AccountOptions{
@@ -637,6 +670,979 @@ func TestIsTagsEqual(t *testing.T) {
 
 	for _, test := range tests {
 		result := isTagsEqual(test.account, test.accountOptions)
-		assert.Equal(t, result, test.expectedResult)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsHnsPropertyEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					IsHnsEnabled: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsHnsEnabled: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					IsHnsEnabled: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				IsHnsEnabled: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsHnsEnabled: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					IsHnsEnabled: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				IsHnsEnabled: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isHnsPropertyEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsEnableNfsV3PropertyEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableNfsV3: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableNfsV3: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableNfsV3: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableNfsV3: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableNfsV3: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableNfsV3: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableNfsV3: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isEnableNfsV3PropertyEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsAllowBlobPublicAccessEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowBlobPublicAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				AllowBlobPublicAccess: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowBlobPublicAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				AllowBlobPublicAccess: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				AllowBlobPublicAccess: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowBlobPublicAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				AllowBlobPublicAccess: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isAllowBlobPublicAccessEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsAllowSharedKeyAccessEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowSharedKeyAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				AllowSharedKeyAccess: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowSharedKeyAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				AllowSharedKeyAccess: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				AllowSharedKeyAccess: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AllowSharedKeyAccess: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				AllowSharedKeyAccess: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isAllowSharedKeyAccessEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsRequireInfrastructureEncryptionEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					Encryption: &storage.Encryption{
+						RequireInfrastructureEncryption: pointer.Bool(true),
+					},
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					Encryption: &storage.Encryption{
+						RequireInfrastructureEncryption: pointer.Bool(true),
+					},
+				},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					Encryption: &storage.Encryption{
+						RequireInfrastructureEncryption: pointer.Bool(false),
+					},
+				},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					Encryption: &storage.Encryption{
+						RequireInfrastructureEncryption: pointer.Bool(true),
+					},
+				},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					Encryption: &storage.Encryption{
+						RequireInfrastructureEncryption: pointer.Bool(false),
+					},
+				},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				RequireInfrastructureEncryption: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isRequireInfrastructureEncryptionEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsLargeFileSharesPropertyEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					LargeFileSharesState: storage.LargeFileSharesStateEnabled,
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableLargeFileShare: pointer.Bool(false),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					LargeFileSharesState: storage.LargeFileSharesStateEnabled,
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableLargeFileShare: pointer.Bool(true),
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableLargeFileShare: pointer.Bool(true),
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					LargeFileSharesState: storage.LargeFileSharesStateEnabled,
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableLargeFileShare: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isLargeFileSharesPropertyEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsAccessTierEqual(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AccessTier: storage.AccessTierCool,
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AccessTier: storage.AccessTierHot,
+				},
+			},
+			accountOptions: &AccountOptions{
+				AccessTier: "Hot",
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AccessTier: storage.AccessTierPremium,
+				},
+			},
+			accountOptions: &AccountOptions{
+				AccessTier: "Premium",
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				AccessTier: "Hot",
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					AccessTier: storage.AccessTierPremium,
+				},
+			},
+			accountOptions: &AccountOptions{
+				AccessTier: "Hot",
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isAccessTierEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsMultichannelEnabledEqual(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	accountName := "account2"
+
+	cloud := GetTestCloud(ctrl)
+
+	multichannelEnabled := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
+			ProtocolSettings: &storage.ProtocolSettings{
+				Smb: &storage.SmbSetting{Multichannel: &storage.Multichannel{Enabled: pointer.BoolPtr(true)}},
+			},
+		},
+	}
+
+	multichannelDisabled := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
+			ProtocolSettings: &storage.ProtocolSettings{
+				Smb: &storage.SmbSetting{Multichannel: &storage.Multichannel{Enabled: pointer.BoolPtr(false)}},
+			},
+		},
+	}
+
+	incompleteServiceProperties := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
+			ProtocolSettings: &storage.ProtocolSettings{},
+		},
+	}
+
+	mockFileClient := mockfileclient.NewMockInterface(ctrl)
+	cloud.FileClient = mockFileClient
+	mockFileClient.EXPECT().WithSubscriptionID(gomock.Any()).Return(mockFileClient).AnyTimes()
+
+	tests := []struct {
+		desc                      string
+		account                   storage.Account
+		accountOptions            *AccountOptions
+		serviceProperties         *storage.FileServiceProperties
+		servicePropertiesRetError error
+		expectedResult            bool
+	}{
+		{
+			desc: "IsMultichannelEnabled is nil",
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			desc: "account.Name is nil",
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+		{
+			desc: "IsMultichannelEnabled not equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(false),
+			},
+			serviceProperties: &multichannelEnabled,
+			expectedResult:    false,
+		},
+		{
+			desc: "GetServiceProperties return error",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(false),
+			},
+			serviceProperties:         &multichannelEnabled,
+			servicePropertiesRetError: fmt.Errorf("GetServiceProperties return error"),
+			expectedResult:            false,
+		},
+		{
+			desc: "IsMultichannelEnabled not equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(true),
+			},
+			serviceProperties: &multichannelDisabled,
+			expectedResult:    false,
+		},
+		{
+			desc: "IsMultichannelEnabled is equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(true),
+			},
+			serviceProperties: &multichannelEnabled,
+			expectedResult:    true,
+		},
+		{
+			desc: "IsMultichannelEnabled is equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(false),
+			},
+			serviceProperties: &multichannelDisabled,
+			expectedResult:    true,
+		},
+		{
+			desc: "incompleteServiceProperties should be regarded as IsMultichannelDisabled",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsMultichannelEnabled: pointer.Bool(false),
+			},
+			serviceProperties: &incompleteServiceProperties,
+			expectedResult:    true,
+		},
+	}
+
+	for _, test := range tests {
+		if test.serviceProperties != nil {
+			mockFileClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any()).Return(*test.serviceProperties, test.servicePropertiesRetError).Times(1)
+		}
+
+		result := cloud.isMultichannelEnabledEqual(ctx, test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result, test.desc)
+	}
+}
+
+func TestIsDisableFileServiceDeleteRetentionPolicyEqual(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	accountName := "account"
+	cloud := GetTestCloud(ctrl)
+
+	deleteRetentionPolicyEnabled := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
+			ShareDeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+				Enabled: pointer.BoolPtr(true),
+			},
+		},
+	}
+
+	deleteRetentionPolicyDisabled := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
+			ShareDeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+				Enabled: pointer.BoolPtr(false),
+			},
+		},
+	}
+
+	incompleteServiceProperties := storage.FileServiceProperties{
+		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{},
+	}
+
+	mockFileClient := mockfileclient.NewMockInterface(ctrl)
+	cloud.FileClient = mockFileClient
+	mockFileClient.EXPECT().WithSubscriptionID(gomock.Any()).Return(mockFileClient).AnyTimes()
+
+	tests := []struct {
+		desc                      string
+		account                   storage.Account
+		accountOptions            *AccountOptions
+		serviceProperties         *storage.FileServiceProperties
+		servicePropertiesRetError error
+		expectedResult            bool
+	}{
+		{
+			desc: "DisableFileServiceDeleteRetentionPolicy is nil",
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			desc: "account.Name is nil",
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(false),
+			},
+			expectedResult: false,
+		},
+		{
+			desc: "DisableFileServiceDeleteRetentionPolicy not equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(true),
+			},
+			serviceProperties: &deleteRetentionPolicyEnabled,
+			expectedResult:    false,
+		},
+		{
+			desc: "GetServiceProperties return error",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(false),
+			},
+			serviceProperties:         &deleteRetentionPolicyEnabled,
+			servicePropertiesRetError: fmt.Errorf("GetServiceProperties return error"),
+			expectedResult:            false,
+		},
+		{
+			desc: "DisableFileServiceDeleteRetentionPolicy not equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(false),
+			},
+			serviceProperties: &deleteRetentionPolicyDisabled,
+			expectedResult:    false,
+		},
+		{
+			desc: "DisableFileServiceDeleteRetentionPolicy is equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(true),
+			},
+			serviceProperties: &deleteRetentionPolicyDisabled,
+			expectedResult:    true,
+		},
+		{
+			desc: "DisableFileServiceDeleteRetentionPolicy is equal",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(false),
+			},
+			serviceProperties: &deleteRetentionPolicyEnabled,
+			expectedResult:    true,
+		},
+		{
+			desc: "incompleteServiceProperties should be regarded as not DisableFileServiceDeleteRetentionPolicy",
+			account: storage.Account{
+				Name:              &accountName,
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				DisableFileServiceDeleteRetentionPolicy: pointer.Bool(false),
+			},
+			serviceProperties: &incompleteServiceProperties,
+			expectedResult:    true,
+		},
+	}
+
+	for _, test := range tests {
+		if test.serviceProperties != nil {
+			mockFileClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any()).Return(*test.serviceProperties, test.servicePropertiesRetError).Times(1)
+		}
+
+		result := cloud.isDisableFileServiceDeleteRetentionPolicyEqual(ctx, test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result, test.desc)
+	}
+}
+
+func Test_isSoftDeleteBlobsEqual(t *testing.T) {
+	type args struct {
+		property       storage.BlobServiceProperties
+		accountOptions *AccountOptions
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "not equal for property nil",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteBlobs: 7,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "not equal for property not enable",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						DeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(false),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteBlobs: 7,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "not equal for accountOptions nil",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						DeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(true),
+							Days:    pointer.Int32(7),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{},
+			},
+			want: false,
+		},
+		{
+			name: "qual",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						DeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(true),
+							Days:    pointer.Int32(7),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteBlobs: 7,
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSoftDeleteBlobsEqual(tt.args.property, tt.args.accountOptions); got != tt.want {
+				t.Errorf("isSoftDeleteBlobsEqual() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_isSoftDeleteContainersEqual(t *testing.T) {
+	type args struct {
+		property       storage.BlobServiceProperties
+		accountOptions *AccountOptions
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "not equal for property nil",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteContainers: 7,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "not equal for property not enable",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						ContainerDeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(false),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteContainers: 7,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "not equal for accountOptions nil",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						ContainerDeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(true),
+							Days:    pointer.Int32(7),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{},
+			},
+			want: false,
+		},
+		{
+			name: "qual",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						ContainerDeleteRetentionPolicy: &storage.DeleteRetentionPolicy{
+							Enabled: pointer.Bool(true),
+							Days:    pointer.Int32(7),
+						},
+					},
+				},
+				accountOptions: &AccountOptions{
+					SoftDeleteContainers: 7,
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSoftDeleteContainersEqual(tt.args.property, tt.args.accountOptions); got != tt.want {
+				t.Errorf("isSoftDeleteContainersEqual() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_isEnableBlobVersioningEqual(t *testing.T) {
+	type args struct {
+		property       storage.BlobServiceProperties
+		accountOptions *AccountOptions
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "equal",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{},
+				},
+				accountOptions: &AccountOptions{
+					EnableBlobVersioning: pointer.Bool(false),
+				},
+			},
+			want: true,
+		},
+		{
+			name: "not equal",
+			args: args{
+				property: storage.BlobServiceProperties{
+					BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{
+						IsVersioningEnabled: pointer.Bool(true),
+					},
+				},
+				accountOptions: &AccountOptions{
+					EnableBlobVersioning: pointer.Bool(false),
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isEnableBlobVersioningEqual(tt.args.property, tt.args.accountOptions); got != tt.want {
+				t.Errorf("isEnableBlobVersioningEqual() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

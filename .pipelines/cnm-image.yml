@@ -1,7 +1,7 @@
 steps:
   - task: GoTool@0
     inputs:
-      version: '1.18.5'
+      version: '1.19'
   - bash: |
       git show --stat
       echo $REGISTRY_PASSWORD | docker login $REGISTRY_URL -u $REGISTRY_USERNAME --password-stdin
@@ -9,12 +9,20 @@ steps:
       export GOPATH="/home/vsts/go"
       export PATH="${PATH}:${GOPATH}/bin"
 
+      if [[ ! -d kubetest2-aks ]]; then
+        git clone https://github.com/kubernetes-sigs/cloud-provider-azure.git
+        cp -r cloud-provider-azure/kubetest2-aks .
+        rm -rf cloud-provider-azure
+      fi
       pushd kubetest2-aks
       go get -d sigs.k8s.io/kubetest2@latest
       go install sigs.k8s.io/kubetest2@latest
+      go mod tidy
       make deployer
       sudo GOPATH="/home/vsts/go" make install
       popd
+
+      export IMAGE_TAG="$(git describe --tags)"
       kubetest2 aks --build --target cnm --targetPath `pwd`
     displayName: make and push cnm image
     env:

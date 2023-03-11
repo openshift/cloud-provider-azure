@@ -24,13 +24,14 @@ import (
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/pointer"
 
+	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
 
@@ -55,12 +56,13 @@ func newLockMap() *lockMap {
 func (lm *lockMap) LockEntry(entry string) {
 	lm.Lock()
 	// check if entry does not exists, then add entry
-	if _, exists := lm.mutexMap[entry]; !exists {
-		lm.addEntry(entry)
+	mutex, exists := lm.mutexMap[entry]
+	if !exists {
+		mutex = &sync.Mutex{}
+		lm.mutexMap[entry] = mutex
 	}
-
 	lm.Unlock()
-	lm.lockEntry(entry)
+	mutex.Lock()
 }
 
 // UnlockEntry release the lock associated with the specific entry
@@ -68,22 +70,11 @@ func (lm *lockMap) UnlockEntry(entry string) {
 	lm.Lock()
 	defer lm.Unlock()
 
-	if _, exists := lm.mutexMap[entry]; !exists {
+	mutex, exists := lm.mutexMap[entry]
+	if !exists {
 		return
 	}
-	lm.unlockEntry(entry)
-}
-
-func (lm *lockMap) addEntry(entry string) {
-	lm.mutexMap[entry] = &sync.Mutex{}
-}
-
-func (lm *lockMap) lockEntry(entry string) {
-	lm.mutexMap[entry].Lock()
-}
-
-func (lm *lockMap) unlockEntry(entry string) {
-	lm.mutexMap[entry].Unlock()
+	mutex.Unlock()
 }
 
 func getContextWithCancel() (context.Context, context.CancelFunc) {
@@ -115,7 +106,7 @@ func parseTags(tags string, tagsMap map[string]string) map[string]*string {
 				klog.Warning("parseTags: empty key, ignoring this key-value pair")
 				continue
 			}
-			formatted[k] = to.StringPtr(v)
+			formatted[k] = pointer.String(v)
 		}
 	}
 
@@ -131,7 +122,7 @@ func parseTags(tags string, tagsMap map[string]string) map[string]*string {
 				klog.V(4).Infof("parseTags: found identical keys: %s from tags and %s from tagsMap (case-insensitive), %s will replace %s", k, key, key, k)
 				delete(formatted, k)
 			}
-			formatted[key] = to.StringPtr(value)
+			formatted[key] = pointer.String(value)
 		}
 	}
 
@@ -159,7 +150,7 @@ func (az *Cloud) reconcileTags(currentTagsOnResource, newTags map[string]*string
 		}
 
 		for _, systemTag := range systemTags {
-			systemTagsMap[systemTag] = to.StringPtr("")
+			systemTagsMap[systemTag] = pointer.String("")
 		}
 	}
 
@@ -170,7 +161,7 @@ func (az *Cloud) reconcileTags(currentTagsOnResource, newTags map[string]*string
 		if !found {
 			currentTagsOnResource[k] = v
 			changed = true
-		} else if !strings.EqualFold(to.String(v), to.String(currentTagsOnResource[key])) {
+		} else if !strings.EqualFold(pointer.StringDeref(v, ""), pointer.StringDeref(currentTagsOnResource[key], "")) {
 			currentTagsOnResource[key] = v
 			changed = true
 		}
@@ -261,22 +252,6 @@ func getNodePrivateIPAddresses(node *v1.Node) []string {
 	return addresses
 }
 
-func isLBBackendPoolTypeIPConfig(service *v1.Service, lb *network.LoadBalancer, clusterName string) bool {
-	if lb == nil || lb.LoadBalancerPropertiesFormat == nil || lb.BackendAddressPools == nil {
-		klog.V(4).Infof("isLBBackendPoolTypeIPConfig: no backend pools in the LB %s", to.String(lb.Name))
-		return false
-	}
-	lbBackendPoolName := getBackendPoolName(clusterName, service)
-	for _, bp := range *lb.BackendAddressPools {
-		if strings.EqualFold(to.String(bp.Name), lbBackendPoolName) {
-			return bp.BackendAddressPoolPropertiesFormat != nil &&
-				bp.BackendIPConfigurations != nil &&
-				len(*bp.BackendIPConfigurations) != 0
-		}
-	}
-	return false
-}
-
 func getBoolValueFromServiceAnnotations(service *v1.Service, key string) bool {
 	if l, found := service.Annotations[key]; found {
 		return strings.EqualFold(strings.TrimSpace(l), consts.TrueAnnotationValue)
@@ -304,11 +279,66 @@ func sameContentInSlices(s1 []string, s2 []string) bool {
 func removeDuplicatedSecurityRules(rules []network.SecurityRule) []network.SecurityRule {
 	ruleNames := make(map[string]bool)
 	for i := len(rules) - 1; i >= 0; i-- {
-		if _, ok := ruleNames[to.String(rules[i].Name)]; ok {
-			klog.Warningf("Found duplicated rule %s, will be removed.", to.String(rules[i].Name))
+		if _, ok := ruleNames[pointer.StringDeref(rules[i].Name, "")]; ok {
+			klog.Warningf("Found duplicated rule %s, will be removed.", pointer.StringDeref(rules[i].Name, ""))
 			rules = append(rules[:i], rules[i+1:]...)
 		}
-		ruleNames[to.String(rules[i].Name)] = true
+		ruleNames[pointer.StringDeref(rules[i].Name, "")] = true
 	}
 	return rules
+}
+
+func getVMSSVMCacheKey(resourceGroup, vmssName string) string {
+	cacheKey := strings.ToLower(fmt.Sprintf("%s/%s", resourceGroup, vmssName))
+	return cacheKey
+}
+
+// isNodeInVMSSVMCache check whether nodeName is in vmssVMCache
+func isNodeInVMSSVMCache(nodeName string, vmssVMCache *azcache.TimedCache) bool {
+	if vmssVMCache == nil {
+		return false
+	}
+
+	var isInCache bool
+
+	vmssVMCache.Lock.Lock()
+	defer vmssVMCache.Lock.Unlock()
+
+	for _, entry := range vmssVMCache.Store.List() {
+		if entry != nil {
+			e := entry.(*azcache.AzureCacheEntry)
+			e.Lock.Lock()
+			data := e.Data
+			if data != nil {
+				data.(*sync.Map).Range(func(vmName, _ interface{}) bool {
+					if vmName != nil && vmName.(string) == nodeName {
+						isInCache = true
+						return false
+					}
+					return true
+				})
+			}
+			e.Lock.Unlock()
+		}
+
+		if isInCache {
+			break
+		}
+	}
+
+	return isInCache
+}
+
+func extractVmssVMName(name string) (string, string, error) {
+	split := strings.SplitAfter(name, consts.VMSSNameSeparator)
+	if len(split) < 2 {
+		klog.V(3).Infof("Failed to extract vmssVMName %q", name)
+		return "", "", ErrorNotVmssInstance
+	}
+
+	ssName := strings.Join(split[0:len(split)-1], "")
+	// removing the trailing `vmssNameSeparator` since we used SplitAfter
+	ssName = ssName[:len(ssName)-1]
+	instanceID := split[len(split)-1]
+	return ssName, instanceID, nil
 }

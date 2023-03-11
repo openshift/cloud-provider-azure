@@ -24,18 +24,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/utils/pointer"
+
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
-
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkService), func() {
@@ -67,6 +67,11 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 
 		tc, err = utils.CreateAzureTestClient()
 		Expect(err).NotTo(HaveOccurred())
+
+		if tc.IPFamily != utils.IPv4 {
+			// https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview#limitations
+			Skip("private link service only works with IPv4")
+		}
 
 		utils.Logf("Creating deployment " + serviceName)
 		deployment := createServerDeploymentManifest(serviceName, labels)
@@ -137,13 +142,13 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 	It("should support service annotation 'service.beta.kubernetes.io/azure-pls-ip-configuration-subnet'", func() {
 		subnetName := "pls-subnet"
 		subnet, isNew := createNewSubnet(tc, subnetName)
-		Expect(to.String(subnet.Name)).To(Equal(subnetName))
+		Expect(pointer.StringDeref(subnet.Name, "")).To(Equal(subnetName))
 		if isNew {
 			defer func() {
 				utils.Logf("cleaning up test subnet %s", subnetName)
 				vNet, err := tc.GetClusterVirtualNetwork()
 				Expect(err).NotTo(HaveOccurred())
-				err = tc.DeleteSubnet(to.String(vNet.Name), subnetName)
+				err = tc.DeleteSubnet(pointer.StringDeref(vNet.Name, ""), subnetName)
 				Expect(err).NotTo(HaveOccurred())
 			}()
 		}
@@ -393,7 +398,7 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 			err = utils.DeleteService(cs, ns.Name, svc2)
 			Expect(err).NotTo(HaveOccurred())
 		}()
-		service2.Spec.LoadBalancerIP = ip
+		service2 = updateServiceLBIP(service2, true, ip)
 		_, err = cs.CoreV1().Services(ns.Name).Create(context.TODO(), service2, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = utils.WaitServiceExposureAndValidateConnectivity(cs, ns.Name, svc2, ip)

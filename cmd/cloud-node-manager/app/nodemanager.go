@@ -25,7 +25,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/healthz"
 	cliflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/cli/globalflag"
@@ -115,17 +114,9 @@ func Run(c *cloudnodeconfig.Config, stopCh <-chan struct{}) error {
 			return err
 		}
 	}
-	if c.InsecureServing != nil {
-		unsecuredMux := genericcontrollermanager.NewBaseHandler(&config.DebuggingConfiguration{}, healthzHandler)
-		insecureSuperuserAuthn := server.AuthenticationInfo{Authenticator: &server.InsecureSuperuser{}}
-		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, nil, &insecureSuperuserAuthn)
-		if err := c.InsecureServing.Serve(handler, 0, stopCh); err != nil {
-			return err
-		}
-	}
 
 	run := func(ctx context.Context) {
-		if err := startControllers(c, ctx.Done(), healthzHandler); err != nil {
+		if err := startControllers(ctx, c, ctx.Done(), healthzHandler); err != nil {
 			klog.Fatalf("error running controllers: %v", err)
 		}
 	}
@@ -135,7 +126,7 @@ func Run(c *cloudnodeconfig.Config, stopCh <-chan struct{}) error {
 }
 
 // startControllers starts the cloud specific controller loops.
-func startControllers(c *cloudnodeconfig.Config, stopCh <-chan struct{}, healthzHandler *controllerhealthz.MutableHealthzHandler) error {
+func startControllers(ctx context.Context, c *cloudnodeconfig.Config, stopCh <-chan struct{}, healthzHandler *controllerhealthz.MutableHealthzHandler) error {
 	klog.V(1).Infof("Starting cloud-node-manager...")
 
 	// Start the CloudNodeController
@@ -144,7 +135,7 @@ func startControllers(c *cloudnodeconfig.Config, stopCh <-chan struct{}, healthz
 		c.SharedInformers.Core().V1().Nodes(),
 		// cloud node controller uses existing cluster role from node-controller
 		c.ClientBuilder.ClientOrDie("node-controller"),
-		nodeprovider.NewNodeProvider(c.UseInstanceMetadata, c.CloudConfigFilePath),
+		nodeprovider.NewNodeProvider(ctx, c.UseInstanceMetadata, c.CloudConfigFilePath),
 		c.NodeStatusUpdateFrequency.Duration,
 		c.WaitForRoutes)
 

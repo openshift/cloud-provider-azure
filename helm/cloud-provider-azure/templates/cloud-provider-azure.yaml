@@ -1,13 +1,15 @@
 {{- if eq .Capabilities.KubeVersion.Minor "21" -}}
   {{- $_ := set . "cloudProviderAzureVersion" "v1.0.23" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "22" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.1.19" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.1.27" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "23" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.23.16" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.23.24" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "24" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.24.4" }}
-{{- else -}}
-  {{- $_ := set . "unsupportedKubernetesVersion" "true" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.24.11" }}
+{{- else if eq .Capabilities.KubeVersion.Minor "25" -}}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.25.5" }}
+{{- else if eq .Capabilities.KubeVersion.Minor "26" -}}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.26.0" }}
 {{- end -}}
 {{- if .Values.cloudControllerManager.enabled }}
 apiVersion: v1
@@ -254,7 +256,6 @@ spec:
             - "--node-status-update-frequency={{ .Values.cloudControllerManager.nodeStatusUpdateFrequency }}"
             {{- end }}
             - "--route-reconciliation-period={{ .Values.cloudControllerManager.routeReconciliationPeriod }}"
-            - "--port={{ .Values.cloudControllerManager.port }}"
             {{- if hasKey .Values.cloudControllerManager "profiling" }}
             - "--profiling={{ .Values.cloudControllerManager.profiling }}"
             {{- end }}
@@ -275,7 +276,8 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: {{ .Values.cloudControllerManager.port }}
+              port: {{ .Values.cloudControllerManager.securePort }}
+              scheme: HTTPS
             initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 5

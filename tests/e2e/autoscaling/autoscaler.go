@@ -25,16 +25,16 @@ import (
 	"strings"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
 )
 
 const (
@@ -331,7 +331,7 @@ var _ = Describe("Cluster size autoscaler", Label(utils.TestSuiteLabelFeatureAut
 
 	It("should support scaling up or down Azure Spot VM", Label(utils.TestSuiteLabelVMSS, utils.TestSuiteLabelSpotVM), func() {
 		By("Checking the spot vms")
-		scaleSets, err := utils.ListVMSSes(tc)
+		scaleSets, err := utils.ListUniformVMSSes(tc)
 		Expect(err).NotTo(HaveOccurred())
 
 		if len(scaleSets) == 0 {

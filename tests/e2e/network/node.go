@@ -24,15 +24,15 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clientset "k8s.io/client-go/kubernetes"
+
 	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
 )
 
@@ -87,12 +87,14 @@ var _ = Describe("Azure node resources", Label(utils.TestSuiteLabelNode), func()
 		if vms != nil && len(*vms) != 0 {
 			for _, vm := range *vms {
 				nodeName, err := utils.GetVMComputerName(vm)
+				utils.Logf("nodeName: %s", nodeName)
 				Expect(err).NotTo(HaveOccurred())
 
 				node, err := utils.GetNode(cs, strings.ToLower(nodeName))
 				Expect(err).NotTo(HaveOccurred())
 
 				providerID := node.Spec.ProviderID
+				utils.Logf("providerID: %s", providerID)
 				providerIDMatches := vmProviderIDRE.FindStringSubmatch(providerID)
 				Expect(len(providerIDMatches)).To(Equal(4))
 				Expect(strings.EqualFold(providerIDMatches[1], subscriptionID)).To(BeTrue())
@@ -102,7 +104,7 @@ var _ = Describe("Azure node resources", Label(utils.TestSuiteLabelNode), func()
 		}
 
 		utils.Logf("getting VMSS VMs")
-		vmsses, err := utils.ListVMSSes(tc)
+		vmsses, err := utils.ListUniformVMSSes(tc)
 		Expect(err).NotTo(HaveOccurred())
 
 		if len(vmsses) != 0 {
@@ -130,7 +132,7 @@ var _ = Describe("Azure node resources", Label(utils.TestSuiteLabelNode), func()
 	})
 
 	It("should set correct private IP address for every node", func() {
-		utils.Logf("getting all NICs of availabilitySet VMs")
+		utils.Logf("getting all NICs of availabilitySet VMs and vmssflex VMs")
 		vmasNICs, err := utils.ListNICs(tc, tc.GetResourceGroup())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -173,8 +175,8 @@ var _ = Describe("Azure node resources", Label(utils.TestSuiteLabelNode), func()
 			Expect(found).To(BeTrue())
 		}
 
-		utils.Logf("getting all scale sets")
-		vmsses, err := utils.ListVMSSes(tc)
+		utils.Logf("getting all uniform scale sets")
+		vmsses, err := utils.ListUniformVMSSes(tc)
 		Expect(err).NotTo(HaveOccurred())
 
 		utils.Logf("getting all NICs of VMSSes")
@@ -320,11 +322,11 @@ var _ = Describe("Azure nodes", func() {
 
 		utils.Logf("scaling VMSS")
 		count := *vmss.Sku.Capacity
-		err = utils.ScaleVMSS(tc, *vmss.Name, tc.GetResourceGroup(), int64(vmssScaleUpCelling))
+		err = utils.ScaleVMSS(tc, *vmss.Name, int64(vmssScaleUpCelling))
 
 		defer func() {
 			utils.Logf("restoring VMSS")
-			err = utils.ScaleVMSS(tc, *vmss.Name, tc.GetResourceGroup(), count)
+			err = utils.ScaleVMSS(tc, *vmss.Name, count)
 			Expect(err).NotTo(HaveOccurred())
 		}()
 

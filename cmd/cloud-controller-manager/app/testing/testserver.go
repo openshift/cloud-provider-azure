@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+
 	"sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app"
 	cloudcontrollerconfig "sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/config"
 	"sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/options"
@@ -102,15 +103,6 @@ func StartTestServer(t Logger, customFlags []string) (result TestServer, err err
 		s.SecureServing.ServerCert.CertDirectory = result.TmpDir
 
 		t.Logf("cloud-controller-manager will listen securely on port %d...", s.SecureServing.BindPort)
-	}
-
-	if s.InsecureServing.BindPort != 0 {
-		s.InsecureServing.Listener, s.InsecureServing.BindPort, err = createListenerOnFreePort()
-		if err != nil {
-			return result, fmt.Errorf("failed to create listener: %w", err)
-		}
-
-		t.Logf("cloud-controller-manager will listen insecurely on port %d...", s.InsecureServing.BindPort)
 	}
 
 	config, err := s.Config(all, disabled)

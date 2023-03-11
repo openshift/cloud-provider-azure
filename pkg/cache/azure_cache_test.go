@@ -17,12 +17,15 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -30,20 +33,27 @@ const (
 	fakeCacheTTL = 2 * time.Second
 )
 
-type fakeDataObj struct{}
+type fakeDataObj struct{ Data string }
 
 type fakeDataSource struct {
-	called int
-	data   map[string]*fakeDataObj
-	lock   sync.Mutex
+	sem        semaphore.Weighted
+	wait       sync.WaitGroup
+	called     int
+	concurrent bool
+	data       sync.Map
 }
 
 func (fake *fakeDataSource) get(key string) (interface{}, error) {
-	fake.lock.Lock()
-	defer fake.lock.Unlock()
+	if !fake.sem.TryAcquire(1) {
+		_ = fake.sem.Acquire(context.TODO(), 1)
+		fake.concurrent = true
+	}
+	defer fake.sem.Release(1)
+
+	fake.wait.Wait()
 
 	fake.called = fake.called + 1
-	if v, ok := fake.data[key]; ok {
+	if v, ok := fake.data.Load(key); ok {
 		return v, nil
 	}
 
@@ -51,16 +61,24 @@ func (fake *fakeDataSource) get(key string) (interface{}, error) {
 }
 
 func (fake *fakeDataSource) set(data map[string]*fakeDataObj) {
-	fake.lock.Lock()
-	defer fake.lock.Unlock()
+	_ = fake.sem.Acquire(context.TODO(), 1)
+	defer fake.sem.Release(1)
 
-	fake.data = data
+	fake.data = sync.Map{}
+	for k, v := range data {
+		fake.data.Store(k, v)
+	}
 	fake.called = 0
+	fake.concurrent = false
+}
+
+func (fake *fakeDataSource) update(key string, val *fakeDataObj) {
+	fake.data.Store(key, val)
 }
 
 func newFakeCache(t *testing.T) (*fakeDataSource, *TimedCache) {
 	dataSource := &fakeDataSource{
-		data: make(map[string]*fakeDataObj),
+		sem: *semaphore.NewWeighted(1),
 	}
 	getter := dataSource.get
 	cache, err := NewTimedcache(fakeCacheTTL, getter)
@@ -98,7 +116,7 @@ func TestCacheGet(t *testing.T) {
 	for _, c := range cases {
 		dataSource, cache := newFakeCache(t)
 		dataSource.set(c.data)
-		val, err := cache.Get(c.key, CacheReadTypeDefault)
+		val, err := cache.GetWithDeepCopy(c.key, CacheReadTypeDefault)
 		assert.NoError(t, err, c.name)
 		assert.Equal(t, c.expected, val, c.name)
 	}
@@ -112,10 +130,44 @@ func TestCacheGetError(t *testing.T) {
 	cache, err := NewTimedcache(fakeCacheTTL, getter)
 	assert.NoError(t, err)
 
-	val, err := cache.Get("key", CacheReadTypeDefault)
+	val, err := cache.GetWithDeepCopy("key", CacheReadTypeDefault)
 	assert.Error(t, err)
 	assert.Equal(t, getError, err)
 	assert.Nil(t, val)
+}
+
+func TestCacheGetWithDeepCopy(t *testing.T) {
+	changed, unchanged := "changed", "unchanged"
+	valFake := &fakeDataObj{unchanged}
+	cases := []struct {
+		name     string
+		data     map[string]*fakeDataObj
+		key      string
+		expected interface{}
+	}{
+		{
+			name:     "cache should return data for existing key",
+			data:     map[string]*fakeDataObj{"key1": valFake},
+			key:      "key1",
+			expected: unchanged,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dataSource, cache := newFakeCache(t)
+			dataSource.set(c.data)
+			cache.Set(c.key, valFake)
+			val, err := cache.GetWithDeepCopy(c.key, CacheReadTypeDefault)
+			assert.NoError(t, err)
+			assert.Equal(t, c.expected, val.(*fakeDataObj).Data)
+
+			// Change the value
+			valFake.Data = changed
+			cache.Set(c.key, valFake)
+			assert.Equal(t, c.expected, val.(*fakeDataObj).Data)
+		})
+	}
 }
 
 func TestCacheDelete(t *testing.T) {
@@ -126,13 +178,13 @@ func TestCacheDelete(t *testing.T) {
 	dataSource, cache := newFakeCache(t)
 	dataSource.set(data)
 
-	v, err := cache.Get(testKey, CacheReadTypeDefault)
+	v, err := cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	dataSource.set(nil)
 	_ = cache.Delete(testKey)
-	v, err = cache.Get(testKey, CacheReadTypeDefault)
+	v, err = cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, nil, v, "cache should get nil after data is removed")
@@ -146,13 +198,13 @@ func TestCacheExpired(t *testing.T) {
 	dataSource, cache := newFakeCache(t)
 	dataSource.set(data)
 
-	v, err := cache.Get(testKey, CacheReadTypeDefault)
+	v, err := cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	time.Sleep(fakeCacheTTL)
-	v, err = cache.Get(testKey, CacheReadTypeDefault)
+	v, err = cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data even after expired")
@@ -166,13 +218,13 @@ func TestCacheAllowUnsafeRead(t *testing.T) {
 	dataSource, cache := newFakeCache(t)
 	dataSource.set(data)
 
-	v, err := cache.Get(testKey, CacheReadTypeDefault)
+	v, err := cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	time.Sleep(fakeCacheTTL)
-	v, err = cache.Get(testKey, CacheReadTypeUnsafe)
+	v, err = cache.GetWithDeepCopy(testKey, CacheReadTypeUnsafe)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should return expired as allow unsafe read is allowed")
@@ -192,14 +244,53 @@ func TestCacheNoConcurrentGet(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = cache.Get(testKey, CacheReadTypeDefault)
+			_, _ = cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 		}()
 	}
-	v, err := cache.Get(testKey, CacheReadTypeDefault)
+	v, err := cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	wg.Wait()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
+}
+
+func TestCacheNoConcurrentGetWithUpdate(t *testing.T) {
+	val := &fakeDataObj{Data: "original"}
+	data := map[string]*fakeDataObj{
+		testKey: val,
+	}
+	expectedVal := &fakeDataObj{Data: "update"}
+	dataSource, cache := newFakeCache(t)
+	dataSource.set(data)
+
+	var wg sync.WaitGroup
+	goGet := func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = cache.Get(testKey, CacheReadTypeForceRefresh)
+		}()
+	}
+	goUpdate := func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dataSource.update(testKey, expectedVal)
+			cache.Update(testKey, expectedVal)
+		}()
+	}
+
+	dataSource.wait.Add(1)
+	goGet()
+	goUpdate()
+	goGet()
+	time.Sleep(100 * time.Millisecond)
+	dataSource.wait.Done()
+
+	wg.Wait()
+
+	assert.Falsef(t, dataSource.concurrent, "cache should not call getter concurrently")
+	assert.Equal(t, 2, dataSource.called)
 }
 
 func TestCacheForceRefresh(t *testing.T) {
@@ -210,12 +301,12 @@ func TestCacheForceRefresh(t *testing.T) {
 	dataSource, cache := newFakeCache(t)
 	dataSource.set(data)
 
-	v, err := cache.Get(testKey, CacheReadTypeDefault)
+	v, err := cache.GetWithDeepCopy(testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
-	v, err = cache.Get(testKey, CacheReadTypeForceRefresh)
+	v, err = cache.GetWithDeepCopy(testKey, CacheReadTypeForceRefresh)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, dataSource.called)
 	assert.Equal(t, val, v, "should refetch unexpired data as forced refresh")

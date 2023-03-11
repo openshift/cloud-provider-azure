@@ -18,7 +18,16 @@ verify-history:
 	openshift-hack/verify-history.sh
 .PHONY: verify-history
 
-verify: test-lint
+# due to the way the linter binary packages are included in builds for OpenShift,
+# we only want to run the linting target if the binary is defined.
+have_linter = $(LINTER)
+ifneq ($(have_linter),)
+	linter_target = lint
+else
+	linter_target =
+endif
+
+verify: $(linter_target)
 .PHONY: verify
 
 test-unit-ci:

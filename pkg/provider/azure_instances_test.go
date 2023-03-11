@@ -24,9 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
@@ -34,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
+	"k8s.io/utils/pointer"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/interfaceclient/mockinterfaceclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
@@ -58,16 +58,16 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 		}
 		status := []compute.InstanceViewStatus{
 			{
-				Code: to.StringPtr(powerState),
+				Code: pointer.String(powerState),
 			},
 			{
-				Code: to.StringPtr("ProvisioningState/succeeded"),
+				Code: pointer.String("ProvisioningState/succeeded"),
 			},
 		}
 		vm.VirtualMachineProperties = &compute.VirtualMachineProperties{
-			ProvisioningState: to.StringPtr(string(compute.ProvisioningStateSucceeded)),
+			ProvisioningState: pointer.String(string(compute.ProvisioningStateSucceeded)),
 			HardwareProfile: &compute.HardwareProfile{
-				VMSize: compute.VirtualMachineSizeTypesStandardA0,
+				VMSize: compute.StandardA0,
 			},
 			InstanceView: &compute.VirtualMachineInstanceView{
 				Statuses: &status,
@@ -79,22 +79,22 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 		if !isDataDisksFull {
 			vm.StorageProfile.DataDisks = &[]compute.DataDisk{
 				{
-					Lun:  to.Int32Ptr(0),
-					Name: to.StringPtr("disk1"),
+					Lun:  pointer.Int32(0),
+					Name: pointer.String("disk1"),
 				},
 				{
-					Lun:  to.Int32Ptr(1),
-					Name: to.StringPtr("disk2"),
+					Lun:  pointer.Int32(1),
+					Name: pointer.String("disk2"),
 				},
 				{
-					Lun:  to.Int32Ptr(2),
-					Name: to.StringPtr("disk3"),
+					Lun:  pointer.Int32(2),
+					Name: pointer.String("disk3"),
 				},
 			}
 		} else {
 			dataDisks := make([]compute.DataDisk, maxLUN)
 			for i := 0; i < maxLUN; i++ {
-				dataDisks[i] = compute.DataDisk{Lun: to.Int32Ptr(int32(i))}
+				dataDisks[i] = compute.DataDisk{Lun: pointer.Int32(int32(i))}
 			}
 			vm.StorageProfile.DataDisks = &dataDisks
 		}
@@ -117,6 +117,7 @@ func TestInstanceID(t *testing.T) {
 		nodeName            string
 		vmssName            string
 		metadataName        string
+		resourceID          string
 		metadataTemplate    string
 		vmType              string
 		expectedID          string
@@ -130,6 +131,7 @@ func TestInstanceID(t *testing.T) {
 			vmList:              []string{"vm1"},
 			nodeName:            "vm1",
 			metadataName:        "vm1",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm1",
@@ -140,6 +142,7 @@ func TestInstanceID(t *testing.T) {
 			vmssName:            "vmss1",
 			nodeName:            "vmss1_0",
 			metadataName:        "vmss1_0",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss1/virtualMachines/0",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/vmss1/virtualMachines/0",
@@ -150,6 +153,7 @@ func TestInstanceID(t *testing.T) {
 			vmssName:            "vmss1",
 			nodeName:            "vmss1-0",
 			metadataName:        "vmss1-0",
+			resourceID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vmss1-0",
 			vmType:              consts.VMTypeStandard,
 			useInstanceMetadata: true,
 			expectedID:          "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vmss1-0",
@@ -225,7 +229,7 @@ func TestInstanceID(t *testing.T) {
 			if test.metadataTemplate != "" {
 				fmt.Fprintf(w, test.metadataTemplate)
 			} else {
-				fmt.Fprintf(w, "{\"compute\":{\"name\":\"%s\",\"VMScaleSetName\":\"%s\",\"subscriptionId\":\"subscription\",\"resourceGroupName\":\"rg\"}}", test.metadataName, test.vmssName)
+				fmt.Fprintf(w, "{\"compute\":{\"name\":\"%s\",\"VMScaleSetName\":\"%s\",\"subscriptionId\":\"subscription\",\"resourceGroupName\":\"rg\", \"resourceId\":\"%s\"}}", test.metadataName, test.vmssName, test.resourceID)
 			}
 		}))
 		go func() {
@@ -255,7 +259,7 @@ func TestInstanceID(t *testing.T) {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
 		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
-		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 		instanceID, err := cloud.InstanceID(context.Background(), types.NodeName(test.nodeName))
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
@@ -357,7 +361,7 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVMs := setTestVirtualMachines(cloud, test.vmList, false)
 		if test.provisioningState != "" {
-			expectedVMs[0].ProvisioningState = to.StringPtr(test.provisioningState)
+			expectedVMs[0].ProvisioningState = pointer.String(test.provisioningState)
 		}
 		mockVMsClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
 		for _, vm := range expectedVMs {
@@ -391,9 +395,9 @@ func TestNodeAddresses(t *testing.T) {
 				NetworkInterfaces: &[]compute.NetworkInterfaceReference{
 					{
 						NetworkInterfaceReferenceProperties: &compute.NetworkInterfaceReferenceProperties{
-							Primary: to.BoolPtr(true),
+							Primary: pointer.Bool(true),
 						},
-						ID: to.StringPtr("/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic"),
+						ID: pointer.String("/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic"),
 					},
 				},
 			},
@@ -401,9 +405,10 @@ func TestNodeAddresses(t *testing.T) {
 	}
 
 	expectedPIP := network.PublicIPAddress{
-		ID: to.StringPtr("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"),
+		Name: pointer.String("pip1"),
+		ID:   pointer.String("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"),
 		PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-			IPAddress: to.StringPtr("192.168.1.12"),
+			IPAddress: pointer.String("192.168.1.12"),
 		},
 	}
 
@@ -412,7 +417,7 @@ func TestNodeAddresses(t *testing.T) {
 			IPConfigurations: &[]network.InterfaceIPConfiguration{
 				{
 					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-						PrivateIPAddress: to.StringPtr("172.1.0.3"),
+						PrivateIPAddress: pointer.String("172.1.0.3"),
 						PublicIPAddress:  &expectedPIP,
 					},
 				},
@@ -644,7 +649,7 @@ func TestNodeAddresses(t *testing.T) {
 		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm2", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
 
 		mockPublicIPAddressesClient := cloud.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
-		mockPublicIPAddressesClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "pip1", gomock.Any()).Return(expectedPIP, nil).AnyTimes()
+		mockPublicIPAddressesClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]network.PublicIPAddress{expectedPIP}, nil).AnyTimes()
 
 		mockInterfaceClient := cloud.InterfacesClient.(*mockinterfaceclient.MockInterface)
 		mockInterfaceClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "nic", gomock.Any()).Return(expectedInterface, nil).AnyTimes()
@@ -711,7 +716,7 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
 		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
-		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 		exist, err := cloud.InstanceExistsByProviderID(context.Background(), test.providerID)
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
@@ -876,34 +881,35 @@ func TestInstanceMetadata(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVM := buildDefaultTestVirtualMachine("as", []string{"/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/k8s-agentpool1-00000000-nic-1"})
 		expectedVM.HardwareProfile = &compute.HardwareProfile{
-			VMSize: compute.VirtualMachineSizeTypesBasicA0,
+			VMSize: compute.BasicA0,
 		}
-		expectedVM.Location = to.StringPtr("westus2")
+		expectedVM.Location = pointer.String("westus2")
 		expectedVM.Zones = &[]string{"1"}
-		expectedVM.ID = to.StringPtr("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm")
+		expectedVM.ID = pointer.String("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm")
 		mockVMClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
 		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm", gomock.Any()).Return(expectedVM, nil)
 		expectedNIC := buildDefaultTestInterface(true, []string{})
-		(*expectedNIC.IPConfigurations)[0].PrivateIPAddress = to.StringPtr("1.2.3.4")
+		(*expectedNIC.IPConfigurations)[0].PrivateIPAddress = pointer.String("1.2.3.4")
 		(*expectedNIC.IPConfigurations)[0].PublicIPAddress = &network.PublicIPAddress{
-			ID: to.StringPtr("pip"),
+			ID: pointer.String("pip"),
 			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-				IPAddress: to.StringPtr("5.6.7.8"),
+				IPAddress: pointer.String("5.6.7.8"),
 			},
 		}
 		mockNICClient := cloud.InterfacesClient.(*mockinterfaceclient.MockInterface)
 		mockNICClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "k8s-agentpool1-00000000-nic-1", gomock.Any()).Return(expectedNIC, nil)
 		expectedPIP := network.PublicIPAddress{
+			Name: pointer.String("pip"),
 			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-				IPAddress: to.StringPtr("5.6.7.8"),
+				IPAddress: pointer.String("5.6.7.8"),
 			},
 		}
 		mockPIPClient := cloud.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
-		mockPIPClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "pip", gomock.Any()).Return(expectedPIP, nil)
+		mockPIPClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]network.PublicIPAddress{expectedPIP}, nil)
 
 		expectedMetadata := cloudprovider.InstanceMetadata{
 			ProviderID:   "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm",
-			InstanceType: string(compute.VirtualMachineSizeTypesBasicA0),
+			InstanceType: string(compute.BasicA0),
 			NodeAddresses: []v1.NodeAddress{
 				{
 					Type:    v1.NodeInternalIP,

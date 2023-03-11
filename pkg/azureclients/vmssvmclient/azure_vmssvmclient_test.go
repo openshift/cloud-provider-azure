@@ -27,14 +27,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
 	"k8s.io/client-go/util/flowcontrol"
+	"k8s.io/utils/pointer"
 
 	azclients "sigs.k8s.io/cloud-provider-azure/pkg/azureclients"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/armclient"
@@ -321,7 +321,7 @@ func TestListWithNextPage(t *testing.T) {
 
 	armClient := mockarmclient.NewMockInterface(ctrl)
 	vmssvmList := []compute.VirtualMachineScaleSetVM{getTestVMSSVM("vmss1", "1"), getTestVMSSVM("vmss1", "2"), getTestVMSSVM("vmss1", "3")}
-	partialResponse, err := json.Marshal(compute.VirtualMachineScaleSetVMListResult{Value: &vmssvmList, NextLink: to.StringPtr("nextLink")})
+	partialResponse, err := json.Marshal(compute.VirtualMachineScaleSetVMListResult{Value: &vmssvmList, NextLink: pointer.String("nextLink")})
 	assert.NoError(t, err)
 	pagedResponse, err := json.Marshal(compute.VirtualMachineScaleSetVMListResult{Value: &vmssvmList})
 	assert.NoError(t, err)
@@ -406,7 +406,7 @@ func TestListNextResultsMultiPages(t *testing.T) {
 	}
 
 	lastResult := compute.VirtualMachineScaleSetVMListResult{
-		NextLink: to.StringPtr("next"),
+		NextLink: pointer.String("next"),
 	}
 
 	for _, test := range tests {
@@ -462,7 +462,7 @@ func TestListNextResultsMultiPagesWithListResponderError(t *testing.T) {
 	}
 
 	lastResult := compute.VirtualMachineScaleSetVMListResult{
-		NextLink: to.StringPtr("next"),
+		NextLink: pointer.String("next"),
 	}
 
 	for _, test := range tests {
@@ -506,12 +506,16 @@ func TestUpdate(t *testing.T) {
 		StatusCode: http.StatusOK,
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
 	}
-	armClient.EXPECT().PutResource(gomock.Any(), to.String(vmssVM.ID), vmssVM).Return(response, nil).Times(1)
+	armClient.EXPECT().PutResource(gomock.Any(), pointer.StringDeref(vmssVM.ID, ""), vmssVM).Return(response, nil).Times(1)
 	armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
 
+	expected := &compute.VirtualMachineScaleSetVM{}
+	expected.Response = autorest.Response{Response: response}
+
 	vmssClient := getTestVMSSVMClient(armClient)
-	rerr := vmssClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
+	result, rerr := vmssClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
 	assert.Nil(t, rerr)
+	assert.Equal(t, expected, result)
 }
 
 func TestUpdateAsync(t *testing.T) {
@@ -520,7 +524,7 @@ func TestUpdateAsync(t *testing.T) {
 
 	vmssVM := getTestVMSSVM("vmss1", "0")
 	armClient := mockarmclient.NewMockInterface(ctrl)
-	armClient.EXPECT().PutResourceAsync(gomock.Any(), to.String(vmssVM.ID), vmssVM).Return(nil, nil).Times(1)
+	armClient.EXPECT().PutResourceAsync(gomock.Any(), pointer.StringDeref(vmssVM.ID, ""), vmssVM).Return(nil, nil).Times(1)
 
 	vmssClient := getTestVMSSVMClient(armClient)
 	future, rerr := vmssClient.UpdateAsync(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
@@ -573,10 +577,17 @@ func TestWaitForUpdateResult(t *testing.T) {
 	for _, test := range tests {
 		armClient := mockarmclient.NewMockInterface(ctrl)
 		armClient.EXPECT().WaitForAsyncOperationResult(gomock.Any(), gomock.Any(), "VMSSWaitForUpdateResult").Return(test.response, test.responseErr).Times(1)
+		armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
 
 		vmssClient := getTestVMSSVMClient(armClient)
-		err := vmssClient.WaitForUpdateResult(context.TODO(), &azure.Future{}, "rg", "test")
+		response, err := vmssClient.WaitForUpdateResult(context.TODO(), &azure.Future{}, "rg", "test")
 		assert.Equal(t, err, test.expectedResult)
+		var output *compute.VirtualMachineScaleSetVM
+		if err == nil {
+			output = &compute.VirtualMachineScaleSetVM{}
+			output.Response = autorest.Response{Response: test.response}
+		}
+		assert.Equal(t, response, output)
 	}
 }
 
@@ -590,12 +601,15 @@ func TestUpdateWithUpdateResponderError(t *testing.T) {
 		StatusCode: http.StatusNotFound,
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
 	}
-	armClient.EXPECT().PutResource(gomock.Any(), to.String(vmssVM.ID), vmssVM).Return(response, nil).Times(1)
+	armClient.EXPECT().PutResource(gomock.Any(), pointer.StringDeref(vmssVM.ID, ""), vmssVM).Return(response, nil).Times(1)
 	armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
+	expected := &compute.VirtualMachineScaleSetVM{}
+	expected.Response = autorest.Response{Response: response}
 
 	vmssvmClient := getTestVMSSVMClient(armClient)
-	rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
+	result, rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
 	assert.NotNil(t, rerr)
+	assert.Equal(t, expected, result)
 }
 
 func TestUpdateNeverRateLimiter(t *testing.T) {
@@ -610,9 +624,11 @@ func TestUpdateNeverRateLimiter(t *testing.T) {
 	armClient := mockarmclient.NewMockInterface(ctrl)
 	vmssvmClient := getTestVMSSVMClientWithNeverRateLimiter(armClient)
 	vmssVM := getTestVMSSVM("vmss1", "0")
-	rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
+	var expected *compute.VirtualMachineScaleSetVM
+	result, rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
 	assert.NotNil(t, rerr)
 	assert.Equal(t, vmssvmUpdateErr, rerr)
+	assert.Equal(t, expected, result)
 }
 
 func TestUpdateRetryAfterReader(t *testing.T) {
@@ -628,9 +644,11 @@ func TestUpdateRetryAfterReader(t *testing.T) {
 	vmssVM := getTestVMSSVM("vmss1", "0")
 	armClient := mockarmclient.NewMockInterface(ctrl)
 	vmClient := getTestVMSSVMClientWithRetryAfterReader(armClient)
-	rerr := vmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
+	var expected *compute.VirtualMachineScaleSetVM
+	result, rerr := vmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
 	assert.NotNil(t, rerr)
 	assert.Equal(t, vmssvmUpdateErr, rerr)
+	assert.Equal(t, expected, result)
 }
 
 func TestUpdateThrottle(t *testing.T) {
@@ -650,13 +668,15 @@ func TestUpdateThrottle(t *testing.T) {
 
 	vmssVM := getTestVMSSVM("vmss1", "0")
 	armClient := mockarmclient.NewMockInterface(ctrl)
-	armClient.EXPECT().PutResource(gomock.Any(), to.String(vmssVM.ID), vmssVM).Return(response, throttleErr).Times(1)
+	armClient.EXPECT().PutResource(gomock.Any(), pointer.StringDeref(vmssVM.ID, ""), vmssVM).Return(response, throttleErr).Times(1)
 	armClient.EXPECT().CloseResponse(gomock.Any(), gomock.Any()).Times(1)
 
 	vmssvmClient := getTestVMSSVMClient(armClient)
-	rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
+	var expected *compute.VirtualMachineScaleSetVM
+	result, rerr := vmssvmClient.Update(context.TODO(), "rg", "vmss1", "0", vmssVM, "test")
 	assert.NotNil(t, rerr)
 	assert.Equal(t, throttleErr, rerr)
+	assert.Equal(t, expected, result)
 }
 
 func TestUpdateVMs(t *testing.T) {
@@ -670,18 +690,18 @@ func TestUpdateVMs(t *testing.T) {
 		"2": vmssVM2,
 	}
 	testvmssVMs := map[string]interface{}{
-		to.String(vmssVM1.ID): vmssVM1,
-		to.String(vmssVM2.ID): vmssVM2,
+		pointer.StringDeref(vmssVM1.ID, ""): vmssVM1,
+		pointer.StringDeref(vmssVM2.ID, ""): vmssVM2,
 	}
 	response := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
 	}
 	responses := map[string]*armclient.PutResourcesResponse{
-		to.String(vmssVM1.ID): {
+		pointer.StringDeref(vmssVM1.ID, ""): {
 			Response: response,
 		},
-		to.String(vmssVM2.ID): {
+		pointer.StringDeref(vmssVM2.ID, ""): {
 			Response: response,
 		},
 	}
@@ -704,14 +724,14 @@ func TestUpdateVMsWithUpdateVMsResponderError(t *testing.T) {
 		"1": vmssVM,
 	}
 	testvmssVMs := map[string]interface{}{
-		to.String(vmssVM.ID): vmssVM,
+		pointer.StringDeref(vmssVM.ID, ""): vmssVM,
 	}
 	response := &http.Response{
 		StatusCode: http.StatusNotFound,
 		Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
 	}
 	responses := map[string]*armclient.PutResourcesResponse{
-		to.String(vmssVM.ID): {
+		pointer.StringDeref(vmssVM.ID, ""): {
 			Response: response,
 		},
 	}
@@ -768,7 +788,7 @@ func TestUpdateVMsThrottle(t *testing.T) {
 		"1": vmssVM,
 	}
 	testvmssVMs := map[string]interface{}{
-		to.String(vmssVM.ID): vmssVM,
+		pointer.StringDeref(vmssVM.ID, ""): vmssVM,
 	}
 	throttleErr := retry.Error{
 		HTTPStatusCode: http.StatusTooManyRequests,
@@ -777,7 +797,7 @@ func TestUpdateVMsThrottle(t *testing.T) {
 		RetryAfter:     time.Unix(100, 0),
 	}
 	responses := map[string]*armclient.PutResourcesResponse{
-		to.String(vmssVM.ID): {
+		pointer.StringDeref(vmssVM.ID, ""): {
 			Response: &http.Response{
 				StatusCode: http.StatusTooManyRequests,
 				Body:       ioutil.NopCloser(bytes.NewReader([]byte("{}"))),
@@ -811,10 +831,10 @@ func TestUpdateVMsIgnoreError(t *testing.T) {
 		"4": vmssVM4,
 	}
 	testvmssVMs := map[string]interface{}{
-		to.String(vmssVM.ID):  vmssVM,
-		to.String(vmssVM2.ID): vmssVM2,
-		to.String(vmssVM3.ID): vmssVM3,
-		to.String(vmssVM4.ID): vmssVM4,
+		pointer.StringDeref(vmssVM.ID, ""):  vmssVM,
+		pointer.StringDeref(vmssVM2.ID, ""): vmssVM2,
+		pointer.StringDeref(vmssVM3.ID, ""): vmssVM3,
+		pointer.StringDeref(vmssVM4.ID, ""): vmssVM4,
 	}
 	notActiveError := retry.Error{
 		RawError:  fmt.Errorf(consts.VmssVMNotActiveErrorMessage),
@@ -833,16 +853,16 @@ func TestUpdateVMsIgnoreError(t *testing.T) {
 		Retriable: false,
 	}
 	responses := map[string]*armclient.PutResourcesResponse{
-		to.String(vmssVM.ID): {
+		pointer.StringDeref(vmssVM.ID, ""): {
 			Error: &notActiveError,
 		},
-		to.String(vmssVM2.ID): {
+		pointer.StringDeref(vmssVM2.ID, ""): {
 			Error: &parentResourceNotFoundError,
 		},
-		to.String(vmssVM3.ID): {
+		pointer.StringDeref(vmssVM3.ID, ""): {
 			Error: &concurrentRequestConflictError,
 		},
-		to.String(vmssVM4.ID): {
+		pointer.StringDeref(vmssVM4.ID, ""): {
 			Error: &beingDeletedError,
 		},
 	}
@@ -860,9 +880,9 @@ func TestUpdateVMsIgnoreError(t *testing.T) {
 func getTestVMSSVM(vmssName, instanceID string) compute.VirtualMachineScaleSetVM {
 	resourceID := fmt.Sprintf("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/%s/virtualMachines/%s", vmssName, instanceID)
 	return compute.VirtualMachineScaleSetVM{
-		ID:         to.StringPtr(resourceID),
-		InstanceID: to.StringPtr(instanceID),
-		Location:   to.StringPtr("eastus"),
+		ID:         pointer.String(resourceID),
+		InstanceID: pointer.String(instanceID),
+		Location:   pointer.String("eastus"),
 	}
 }
 

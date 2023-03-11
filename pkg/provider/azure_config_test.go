@@ -20,25 +20,27 @@ import (
 	"context"
 	"testing"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
+
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 
 	"github.com/golang/mock/gomock"
+
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/zoneclient/mockzoneclient"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/pointer"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/auth"
 	"sigs.k8s.io/yaml"
 )
 
 func getTestConfig() *Config {
 	return &Config{
-		AzureAuthConfig: auth.AzureAuthConfig{
+		AzureAuthConfig: config.AzureAuthConfig{
 			TenantID:        "TenantID",
 			SubscriptionID:  "SubscriptionID",
 			AADClientID:     "AADClientID",
@@ -53,13 +55,13 @@ func getTestConfig() *Config {
 		PrimaryAvailabilitySetName:  "PrimaryAvailabilitySetName",
 		PrimaryScaleSetName:         "PrimaryScaleSetName",
 		LoadBalancerSku:             "LoadBalancerSku",
-		ExcludeMasterFromStandardLB: to.BoolPtr(true),
+		ExcludeMasterFromStandardLB: pointer.Bool(true),
 	}
 }
 
 func getTestCloudConfigTypeSecretConfig() *Config {
 	return &Config{
-		AzureAuthConfig: auth.AzureAuthConfig{
+		AzureAuthConfig: config.AzureAuthConfig{
 			TenantID:       "TenantID",
 			SubscriptionID: "SubscriptionID",
 		},
@@ -73,7 +75,7 @@ func getTestCloudConfigTypeSecretConfig() *Config {
 
 func getTestCloudConfigTypeMergeConfig() *Config {
 	return &Config{
-		AzureAuthConfig: auth.AzureAuthConfig{
+		AzureAuthConfig: config.AzureAuthConfig{
 			TenantID:       "TenantID",
 			SubscriptionID: "SubscriptionID",
 		},
@@ -283,7 +285,7 @@ func TestInitializeCloudFromSecret(t *testing.T) {
 			mockZoneClient.EXPECT().GetZones(gomock.Any(), gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).MaxTimes(1)
 			az.ZoneClient = mockZoneClient
 
-			err := az.InitializeCloudFromSecret()
+			err := az.InitializeCloudFromSecret(context.Background())
 			assert.Equal(t, test.expectErr, err != nil)
 		})
 	}

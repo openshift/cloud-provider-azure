@@ -10,8 +10,6 @@ Azure Private Link Service (PLS) is an infrastructure component that allows user
 
 Before Private Link Service integration, users who wanted private connectivity from on-premises or other VNETs to their services in the Azure Kubernetes cluster were required to create a Private Link Service (PLS) to reference the Azure LoadBalancer. The user would then create a Private Endpoint (PE) to connect to the PLS to enable private connectivity. With this feature, a managed PLS to the LB would be created automatically, and the user would only be required to create PE connections to it for private connectivity.
 
-Currently, private link service connectivity is broken with Azure external Standard Load Balancer and floating ip enabled (default). To use managed private link service, users can either create an internal service by setting annotation `service.beta.kubernetes.io/azure-load-balancer-internal` to `true` or disable floating ip by setting annotation `service.beta.kubernetes.io/service.beta.kubernetes.io/azure-disable-load-balancer-floating-ip` to `true` ([more details here](../loadbalancer)).
-
 ## PrivateLinkService annotations
 
 Below is a list of annotations supported for Kubernetes services with Azure PLS created:
@@ -35,7 +33,7 @@ For more details about each configuration, please refer to [Azure Private Link S
 
 ### Creating managed PrivateLinkService
 
-When a `LoadBalancer` typed service is created without the `loadBalancerIP` field specified, an LB frontend IP configuration is created with a dynamically generated IP. If the service has `loadBalancerIP` in its spec, an existing LB frontend IP configuration may be reused if one exists; otherwise a static configuration is created with the specified IP. When a service is created with annotation `service.beta.kubernetes.io/azure-pls-create` set to `true` or updated later with the annotation added, a PLS resource attached to the LB frontend is created in the default resource group or the resource group user set in config file with key `PrivateLinkServiceResourceGroup`.
+When a `LoadBalancer` typed service is created without the annotations `service.beta.kubernetes.io/azure-load-balancer-ipv4`, `service.beta.kubernetes.io/azure-load-balancer-ipv6` or field `Service.Spec.LoadBalancerIP` set, an LB frontend IP configuration is created with a dynamically generated IP. If the service has the annotation `service.beta.kubernetes.io/azure-load-balancer-ipv4` or `service.beta.kubernetes.io/azure-load-balancer-ipv6` set, an existing LB frontend IP configuration may be reused if one exists; otherwise a static configuration is created with the specified IP. When a service is created with annotation `service.beta.kubernetes.io/azure-pls-create` set to `true` or updated later with the annotation added, a PLS resource attached to the LB frontend is created in the default resource group or the resource group user set in config file with key `PrivateLinkServiceResourceGroup`.
 
 The Kubernetes service creating the PLS is assigned as the owner of the resource. Azure cloud provider tags the PLS with cluster name and service name `kubernetes-owner-service: <namespace>/<service name>`. Only the owner service can later update the properties of the PLS resource.
 
@@ -51,7 +49,7 @@ If there are active PE connections to the PLS, all connections are removed and t
 
 ### Sharing managed PrivateLinkService
 
-Multiple Kubernetes services can share the same LB frontend by specifying the same `loadBalancerIP` (for more details, please refer to [Multiple Services Sharing One IP Address](../shared-ip)). Once a PLS is attached to the LB frontend, these services automatically share the PLS. Users can access these services via the same PE but different ports.
+Multiple Kubernetes services can share the same LB frontend by specifying the same annotations `service.beta.kubernetes.io/azure-load-balancer-ipv4`, `service.beta.kubernetes.io/azure-load-balancer-ipv6` or field `Service.Spec.LoadBalancerIP` (for more details, please refer to [Multiple Services Sharing One IP Address](../shared-ip)). Once a PLS is attached to the LB frontend, these services automatically share the PLS. Users can access these services via the same PE but different ports.
 
 Azure cloud provider tags the service creating the PLS as the owner (`kubernetes-owner-service: <namespace>/<service name>`) and only allows that service to update the configurations of the PLS. If the owner service is deleted or if user wants some other service to take control, user can modify the tag value to a new service in `<namespace>/<service name>` pattern.
 
@@ -90,6 +88,8 @@ spec:
 ## Restrictions
 
 * PLS does not support basic Load Balancer or IP-based Load Balancer.
-* PLS connectivity is broken with Azure external Standard Load Balancer and floating ip enabled (default). Users can either use an internal Load Balancer or disable floating ip on loadbalancing rules (described above).
-* At this moment, PLS connectivity is broken if [AzureCNI V2](https://docs.microsoft.com/en-us/azure/aks/configure-azure-cni#dynamic-allocation-of-ips-and-enhanced-subnet-support) is used in cluster. Azure networking team is working on supporting the feature.
+* PLS connectivity is broken with Azure external Standard Load Balancer and floating ip enabled (default). To use managed private link service, users can either create an internal service by setting annotation `service.beta.kubernetes.io/azure-load-balancer-internal` to `true` or disable floating ip by setting annotation `service.beta.kubernetes.io/service.beta.kubernetes.io/azure-disable-load-balancer-floating-ip` to `true` ([more details here](../loadbalancer)).
+* In most Azure regions, PLS connectivity is broken if [AzureCNI V2](https://docs.microsoft.com/en-us/azure/aks/configure-azure-cni#dynamic-allocation-of-ips-and-enhanced-subnet-support) is used in cluster. Feature support is only available in eastus, westcentralus, and northcentralus regions at this moment.
 * Due to limitation of [kubernetes#95555](https://github.com/kubernetes/kubernetes/issues/95555), when the service's externalTrafficPolicy set to Local, PLS need to use a different subnet from Pod's subnet. If the same subnet is required, then the service should use Cluster externalTrafficPolicy.
+* PLS only works with IPv4 and cannot be deployed to an SLB with IPv6 frontend ipConfigurations. In dual-stack clusters, users cannot create a service with PLS if there's existing IPv6 service deployed on the same load balancer.
+* For other limitations, please check [Azure Private Link Service Doc](https://learn.microsoft.com/en-us/azure/private-link/private-link-service-overview).

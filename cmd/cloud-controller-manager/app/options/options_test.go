@@ -22,10 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/controller-manager/pkg/leadermigration/options"
-
 	"github.com/spf13/pflag"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -36,6 +33,8 @@ import (
 	componentbaseconfig "k8s.io/component-base/config"
 	kubectrlmgrconfig "k8s.io/controller-manager/config"
 	cmoptions "k8s.io/controller-manager/options"
+	"k8s.io/controller-manager/pkg/leadermigration/options"
+
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	"sigs.k8s.io/cloud-provider-azure/pkg/nodeipam/config"
 )
@@ -46,8 +45,7 @@ func TestDefaultFlags(t *testing.T) {
 	expected := &CloudControllerManagerOptions{
 		Generic: &cmoptions.GenericControllerManagerConfigurationOptions{
 			GenericControllerManagerConfiguration: &kubectrlmgrconfig.GenericControllerManagerConfiguration{
-				Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+				Address:         "0.0.0.0",
 				MinResyncPeriod: metav1.Duration{Duration: 12 * time.Hour},
 				ClientConnection: componentbaseconfig.ClientConnectionConfiguration{
 					ContentType: "application/vnd.kubernetes.protobuf",
@@ -110,11 +108,6 @@ func TestDefaultFlags(t *testing.T) {
 			},
 			HTTP2MaxStreamsPerConnection: 0,
 		}).WithLoopback(),
-		InsecureServing: (&apiserveroptions.DeprecatedInsecureServingOptions{
-			BindAddress: net.ParseIP("0.0.0.0"),
-			BindPort:    int(0),
-			BindNetwork: "tcp",
-		}).WithLoopback(),
 		Authentication: &apiserveroptions.DelegatingAuthenticationOptions{
 			CacheTTL:            10 * time.Second,
 			TokenRequestTimeout: 10 * time.Second,
@@ -159,7 +152,6 @@ func TestAddFlags(t *testing.T) {
 	}
 
 	args := []string{
-		"--address=192.168.4.10",
 		"--allocate-node-cidrs=true",
 		"--bind-address=192.168.4.21",
 		"--cert-dir=/a/b/c",
@@ -184,7 +176,6 @@ func TestAddFlags(t *testing.T) {
 		"--master=192.168.4.20",
 		"--min-resync-period=100m",
 		"--node-status-update-frequency=10m",
-		"--port=10000",
 		"--profiling=false",
 		"--route-reconciliation-period=30s",
 		"--secure-port=10001",
@@ -200,8 +191,7 @@ func TestAddFlags(t *testing.T) {
 	expected := &CloudControllerManagerOptions{
 		Generic: &cmoptions.GenericControllerManagerConfigurationOptions{
 			GenericControllerManagerConfiguration: &kubectrlmgrconfig.GenericControllerManagerConfiguration{
-				Port:            DefaultInsecureCloudControllerManagerPort, // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
-				Address:         "0.0.0.0",                                 // Note: InsecureServingOptions.ApplyTo will write the flag value back into the component config
+				Address:         "0.0.0.0",
 				MinResyncPeriod: metav1.Duration{Duration: 100 * time.Minute},
 				ClientConnection: componentbaseconfig.ClientConnectionConfiguration{
 					ContentType: "application/vnd.kubernetes.protobuf",
@@ -262,11 +252,6 @@ func TestAddFlags(t *testing.T) {
 				PairName:      "cloud-controller-manager",
 			},
 			HTTP2MaxStreamsPerConnection: 47,
-		}).WithLoopback(),
-		InsecureServing: (&apiserveroptions.DeprecatedInsecureServingOptions{
-			BindAddress: net.ParseIP("192.168.4.10"),
-			BindPort:    int(10000),
-			BindNetwork: "tcp",
 		}).WithLoopback(),
 		Authentication: &apiserveroptions.DelegatingAuthenticationOptions{
 			CacheTTL:            10 * time.Second,

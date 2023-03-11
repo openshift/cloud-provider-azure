@@ -42,11 +42,14 @@ const (
 	ExecAgnhostPod = "exec-agnhost-pod"
 )
 
-// DeleteService deletes a service
+// DeleteService deletes a service if it exists, return nil if not exists.
 func DeleteService(cs clientset.Interface, ns string, serviceName string) error {
-	Logf("Deleting service %s in namespace %s", serviceName, ns)
-	err := cs.CoreV1().Services(ns).Delete(context.TODO(), serviceName, metav1.DeleteOptions{})
-	if err != nil {
+	Logf("Deleting service %q in namespace %q", serviceName, ns)
+	if err := cs.CoreV1().Services(ns).Delete(context.TODO(), serviceName, metav1.DeleteOptions{}); err != nil {
+		if apierrs.IsNotFound(err) {
+			Logf("Service %q does not exist, no need to delete", serviceName)
+			return nil
+		}
 		return err
 	}
 	return wait.PollImmediate(poll, deletionTimeout, func() (bool, error) {
@@ -55,16 +58,6 @@ func DeleteService(cs clientset.Interface, ns string, serviceName string) error 
 		}
 		return false, nil
 	})
-}
-
-// DeleteServiceIfExists deletes a service if it exists, return nil if not exists
-func DeleteServiceIfExists(cs clientset.Interface, ns string, serviceName string) error {
-	err := DeleteService(cs, ns, serviceName)
-	if apierrs.IsNotFound(err) {
-		Logf("Service %s does not exist, no need to delete", serviceName)
-		return nil
-	}
-	return err
 }
 
 // GetServiceDomainName cat prefix and azure suffix
@@ -122,7 +115,7 @@ func WaitServiceExposureAndValidateConnectivity(cs clientset.Interface, namespac
 		}
 	}()
 	if !result || err != nil {
-		return "", fmt.Errorf("failed to create ExecAgnhostPod, result: %v, error: %v", result, err)
+		return "", fmt.Errorf("failed to create ExecAgnhostPod, result: %v, error: %w", result, err)
 	}
 
 	// TODO: Check if other WaitServiceExposureAndValidateConnectivity() callers with internal Service
@@ -198,7 +191,7 @@ func ValidateServiceConnectivity(ns, execPod, serviceIP string, port int, protoc
 			Logf("Expected output to contain 'succeeded', got %q; retrying...", stdout)
 			return false, nil
 		}
-		Logf("Validation succeeded: Service addr %s:%d with protocol %v", serviceIP, port, protocol)
+		Logf("Validation succeeded: Service addr %s and port %d with protocol %v", serviceIP, port, protocol)
 		return true, nil
 	})
 	return pollErr

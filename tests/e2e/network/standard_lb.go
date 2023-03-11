@@ -21,16 +21,15 @@ import (
 	"os"
 	"strings"
 
-	azcompute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
+	azcompute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clientset "k8s.io/client-go/kubernetes"
+
 	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
 )
 
@@ -114,7 +113,7 @@ var _ = Describe("[StandardLoadBalancer] Standard load balancer", func() {
 		utils.Logf("got BackendIPConfigurations IDs: %v", ipcIDs)
 
 		// Check if it is a cluster with VMSS
-		vmsses, err := utils.ListVMSSes(tc)
+		vmsses, err := utils.ListUniformVMSSes(tc)
 		Expect(err).NotTo(HaveOccurred())
 		if len(vmsses) != 0 {
 			allVMs := []azcompute.VirtualMachineScaleSetVM{}
@@ -140,6 +139,7 @@ var _ = Describe("[StandardLoadBalancer] Standard load balancer", func() {
 			}
 			utils.Logf("Validation succeeded for a VMSS cluster")
 		} else {
+			// AvSet VMs, standalone VMs, VMSS Flex VMs
 			vms, err := utils.ListVMs(tc)
 			Expect(err).NotTo(HaveOccurred())
 			for _, vm := range *vms {
@@ -199,7 +199,7 @@ var _ = Describe("[StandardLoadBalancer] Standard load balancer", func() {
 			Skip("skip validating outbound IPs since outbound rules are not configured on SLB")
 		}
 
-		podTemplate := createPodGetIP()
+		podTemplate := utils.CreatePodGetIPManifest()
 		err = utils.CreatePod(cs, ns.Name, podTemplate)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -209,26 +209,3 @@ var _ = Describe("[StandardLoadBalancer] Standard load balancer", func() {
 		Expect(found).To(BeTrue())
 	})
 })
-
-func createPodGetIP() *v1.Pod {
-	podName := "test-pod"
-	return &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: podName,
-		},
-		Spec: v1.PodSpec{
-			Hostname: podName,
-			Containers: []v1.Container{
-				{
-					Name:            "test-app",
-					Image:           "k8s.gcr.io/e2e-test-images/agnhost:2.36",
-					ImagePullPolicy: v1.PullIfNotPresent,
-					Command: []string{
-						"/bin/sh", "-c", "curl -s -m 5 --retry-delay 5 --retry 10 ifconfig.me",
-					},
-				},
-			},
-			RestartPolicy: v1.RestartPolicyNever,
-		},
-	}
-}

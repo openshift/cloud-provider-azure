@@ -18,16 +18,18 @@ package provider
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 
+	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
 
@@ -101,75 +103,75 @@ func TestReconcileTags(t *testing.T) {
 		{
 			description: "reconcileTags should add missing tags and update existing tags",
 			currentTagsOnResource: map[string]*string{
-				"a": to.StringPtr("b"),
+				"a": pointer.String("b"),
 			},
 			newTags: map[string]*string{
-				"a": to.StringPtr("c"),
-				"b": to.StringPtr("d"),
+				"a": pointer.String("c"),
+				"b": pointer.String("d"),
 			},
 			expectedTags: map[string]*string{
-				"a": to.StringPtr("c"),
-				"b": to.StringPtr("d"),
+				"a": pointer.String("c"),
+				"b": pointer.String("d"),
 			},
 			expectedChanged: true,
 		},
 		{
 			description: "reconcileTags should remove the tags that are not included in systemTags",
 			currentTagsOnResource: map[string]*string{
-				"a": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"a": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 			newTags: map[string]*string{
-				"a": to.StringPtr("c"),
+				"a": pointer.String("c"),
 			},
 			systemTags: "a, b",
 			expectedTags: map[string]*string{
-				"a": to.StringPtr("c"),
+				"a": pointer.String("c"),
 			},
 			expectedChanged: true,
 		},
 		{
 			description: "reconcileTags should ignore the case of keys when comparing",
 			currentTagsOnResource: map[string]*string{
-				"A": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"A": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 			newTags: map[string]*string{
-				"a": to.StringPtr("b"),
-				"C": to.StringPtr("d"),
+				"a": pointer.String("b"),
+				"C": pointer.String("d"),
 			},
 			expectedTags: map[string]*string{
-				"A": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"A": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 		},
 		{
 			description: "reconcileTags should ignore the case of values when comparing",
 			currentTagsOnResource: map[string]*string{
-				"A": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"A": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 			newTags: map[string]*string{
-				"a": to.StringPtr("B"),
-				"C": to.StringPtr("D"),
+				"a": pointer.String("B"),
+				"C": pointer.String("D"),
 			},
 			expectedTags: map[string]*string{
-				"A": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"A": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 		},
 		{
 			description: "reconcileTags should ignore the case of keys when checking systemTags",
 			currentTagsOnResource: map[string]*string{
-				"a": to.StringPtr("b"),
-				"c": to.StringPtr("d"),
+				"a": pointer.String("b"),
+				"c": pointer.String("d"),
 			},
 			newTags: map[string]*string{
-				"a": to.StringPtr("c"),
+				"a": pointer.String("c"),
 			},
 			systemTags: "A, b",
 			expectedTags: map[string]*string{
-				"a": to.StringPtr("c"),
+				"a": pointer.String("c"),
 			},
 			expectedChanged: true,
 		},
@@ -269,18 +271,18 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 			description: "no duplicated rules",
 			rules: []network.SecurityRule{
 				{
-					Name: to.StringPtr("rule1"),
+					Name: pointer.String("rule1"),
 				},
 				{
-					Name: to.StringPtr("rule2"),
+					Name: pointer.String("rule2"),
 				},
 			},
 			expected: []network.SecurityRule{
 				{
-					Name: to.StringPtr("rule1"),
+					Name: pointer.String("rule1"),
 				},
 				{
-					Name: to.StringPtr("rule2"),
+					Name: pointer.String("rule2"),
 				},
 			},
 		},
@@ -288,21 +290,21 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 			description: "duplicated rules",
 			rules: []network.SecurityRule{
 				{
-					Name: to.StringPtr("rule1"),
+					Name: pointer.String("rule1"),
 				},
 				{
-					Name: to.StringPtr("rule2"),
+					Name: pointer.String("rule2"),
 				},
 				{
-					Name: to.StringPtr("rule1"),
+					Name: pointer.String("rule1"),
 				},
 			},
 			expected: []network.SecurityRule{
 				{
-					Name: to.StringPtr("rule2"),
+					Name: pointer.String("rule2"),
 				},
 				{
-					Name: to.StringPtr("rule1"),
+					Name: pointer.String("rule1"),
 				},
 			},
 		},
@@ -312,5 +314,137 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 			rules = removeDuplicatedSecurityRules(rules)
 			assert.Equal(t, testCase.expected, rules)
 		})
+	}
+}
+
+func TestGetVMSSVMCacheKey(t *testing.T) {
+	tests := []struct {
+		description       string
+		resourceGroupName string
+		vmssName          string
+		cacheKey          string
+	}{
+		{
+			description:       "Resource group and Vmss Name are in lower case",
+			resourceGroupName: "resgrp",
+			vmssName:          "vmss",
+			cacheKey:          "resgrp/vmss",
+		},
+		{
+			description:       "Resource group has upper case and Vmss Name is in lower case",
+			resourceGroupName: "Resgrp",
+			vmssName:          "vmss",
+			cacheKey:          "resgrp/vmss",
+		},
+		{
+			description:       "Resource group is in lower case and Vmss Name has upper case",
+			resourceGroupName: "resgrp",
+			vmssName:          "Vmss",
+			cacheKey:          "resgrp/vmss",
+		},
+		{
+			description:       "Resource group and Vmss Name are both in upper case",
+			resourceGroupName: "Resgrp",
+			vmssName:          "Vmss",
+			cacheKey:          "resgrp/vmss",
+		},
+	}
+
+	for _, test := range tests {
+		result := getVMSSVMCacheKey(test.resourceGroupName, test.vmssName)
+		assert.Equal(t, result, test.cacheKey, test.description)
+	}
+}
+
+func TestIsNodeInVMSSVMCache(t *testing.T) {
+
+	getter := func(key string) (interface{}, error) {
+		return nil, nil
+	}
+	emptyCacheEntryTimedCache, _ := azcache.NewTimedcache(fakeCacheTTL, getter)
+	emptyCacheEntryTimedCache.Set("key", nil)
+
+	cacheEntryTimedCache, _ := azcache.NewTimedcache(fakeCacheTTL, getter)
+	syncMap := &sync.Map{}
+	syncMap.Store("node", nil)
+	cacheEntryTimedCache.Set("key", syncMap)
+
+	tests := []struct {
+		description    string
+		nodeName       string
+		vmssVMCache    *azcache.TimedCache
+		expectedResult bool
+	}{
+		{
+			description:    "nil cache",
+			vmssVMCache:    nil,
+			expectedResult: false,
+		},
+		{
+			description:    "empty CacheEntry timed cache",
+			vmssVMCache:    emptyCacheEntryTimedCache,
+			expectedResult: false,
+		},
+		{
+			description:    "node name in the cache",
+			nodeName:       "node",
+			vmssVMCache:    cacheEntryTimedCache,
+			expectedResult: true,
+		},
+		{
+			description:    "node name not in the cache",
+			nodeName:       "node2",
+			vmssVMCache:    cacheEntryTimedCache,
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isNodeInVMSSVMCache(test.nodeName, test.vmssVMCache)
+		assert.Equal(t, test.expectedResult, result, test.description)
+	}
+}
+
+func TestExtractVmssVMName(t *testing.T) {
+	cases := []struct {
+		description        string
+		vmName             string
+		expectError        bool
+		expectedScaleSet   string
+		expectedInstanceID string
+	}{
+		{
+			description: "wrong vmss VM name should report error",
+			vmName:      "vm1234",
+			expectError: true,
+		},
+		{
+			description: "wrong VM name separator should report error",
+			vmName:      "vm-1234",
+			expectError: true,
+		},
+		{
+			description:        "correct vmss VM name should return correct ScaleSet and instanceID",
+			vmName:             "vm_1234",
+			expectedScaleSet:   "vm",
+			expectedInstanceID: "1234",
+		},
+		{
+			description:        "correct vmss VM name with Extra Separator should return correct ScaleSet and instanceID",
+			vmName:             "vm_test_1234",
+			expectedScaleSet:   "vm_test",
+			expectedInstanceID: "1234",
+		},
+	}
+
+	for _, c := range cases {
+		ssName, instanceID, err := extractVmssVMName(c.vmName)
+		if c.expectError {
+			assert.Error(t, err, c.description)
+			continue
+		}
+
+		assert.Equal(t, c.expectedScaleSet, ssName, c.description)
+		assert.Equal(t, c.expectedInstanceID, instanceID, c.description)
 	}
 }

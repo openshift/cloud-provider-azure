@@ -179,7 +179,7 @@ func NewCloudCIDRAllocator(
 		}
 	}
 
-	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: nodeutil.CreateAddNodeHandler(ca.AllocateOrOccupyCIDR),
 		UpdateFunc: nodeutil.CreateUpdateNodeHandler(func(_, newNode *v1.Node) error {
 			if newNode.Spec.PodCIDR == "" {
@@ -211,7 +211,7 @@ func (ca *cloudCIDRAllocator) updateMaxSubnetMaskSizes() {
 		maxNodeSubnetMaskSizes[i] = 0
 	}
 
-	// find the max maks sizes on all existing nodes
+	// find the max mask sizes on all existing nodes
 	for _, sizes := range ca.nodeNameSubnetMaskSizesMap {
 		for i := 0; i < len(ca.clusterCIDRs); i++ {
 			if sizes[i] > maxNodeSubnetMaskSizes[i] {

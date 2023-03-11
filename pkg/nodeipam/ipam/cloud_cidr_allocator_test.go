@@ -22,8 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-12-01/compute"
-	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
@@ -31,7 +30,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/pointer"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/mockvmclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssclient/mockvmssclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	azureprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
@@ -190,8 +191,8 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			description: "updateNodeSubnetMaskSizes should put the correct mask sizes on the map",
 			providerID:  "azure:///subscriptions/sub/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0",
 			tags: map[string]*string{
-				consts.VMSetCIDRIPV4TagKey: to.StringPtr("25"),
-				consts.VMSetCIDRIPV6TagKey: to.StringPtr("65"),
+				consts.VMSetCIDRIPV4TagKey: pointer.String("25"),
+				consts.VMSetCIDRIPV6TagKey: pointer.String("65"),
 			},
 			expectedNodeNameSubnetMaskSizesMap: map[string][]int{"vmss-0": {25, 65}},
 		},
@@ -199,8 +200,8 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			description: "updateNodeSubnetMaskSizes should put the default mask sizes on the map if the providerID is invalid",
 			providerID:  "invalid",
 			tags: map[string]*string{
-				consts.VMSetCIDRIPV4TagKey: to.StringPtr("24"),
-				consts.VMSetCIDRIPV6TagKey: to.StringPtr("64"),
+				consts.VMSetCIDRIPV4TagKey: pointer.String("24"),
+				consts.VMSetCIDRIPV6TagKey: pointer.String("64"),
 			},
 			expectedNodeNameSubnetMaskSizesMap: map[string][]int{"vmss-0": {24, 64}},
 		},
@@ -208,8 +209,8 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			description: "updateNodeSubnetMaskSizes should report an error if the ipv4 mask is smaller than the cluster mask",
 			providerID:  "azure:///subscriptions/sub/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0",
 			tags: map[string]*string{
-				consts.VMSetCIDRIPV4TagKey: to.StringPtr("15"),
-				consts.VMSetCIDRIPV6TagKey: to.StringPtr("65"),
+				consts.VMSetCIDRIPV4TagKey: pointer.String("15"),
+				consts.VMSetCIDRIPV6TagKey: pointer.String("65"),
 			},
 			expectedNodeNameSubnetMaskSizesMap: map[string][]int{},
 			expectedErr:                        fmt.Errorf("updateNodeSubnetMaskSizes: invalid ipv4 mask size %d of node %s because it is out of the range of the cluster CIDR with the mask size %d", 15, "vmss-0", 16),
@@ -218,8 +219,8 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			description: "updateNodeSubnetMaskSizes should report an error if the ipv6 mask is smaller than the cluster mask",
 			providerID:  "azure:///subscriptions/sub/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachineScaleSets/vmss/virtualMachines/0",
 			tags: map[string]*string{
-				consts.VMSetCIDRIPV4TagKey: to.StringPtr("25"),
-				consts.VMSetCIDRIPV6TagKey: to.StringPtr("45"),
+				consts.VMSetCIDRIPV4TagKey: pointer.String("25"),
+				consts.VMSetCIDRIPV6TagKey: pointer.String("45"),
 			},
 			expectedNodeNameSubnetMaskSizesMap: map[string][]int{},
 			expectedErr:                        fmt.Errorf("updateNodeSubnetMaskSizes: invalid ipv6 mask size %d of node %s because it is out of the range of the cluster CIDR with the mask size %d", 45, "vmss-0", 48),
@@ -231,12 +232,17 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			assert.NoError(t, err)
 
 			expectedVMSS := compute.VirtualMachineScaleSet{
-				Name: to.StringPtr("vmss"),
+				Name: pointer.String("vmss"),
 				Tags: tc.tags,
+				VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
+					OrchestrationMode: compute.Uniform,
+				},
 			}
 			mockVMSSClient := ss.VirtualMachineScaleSetsClient.(*mockvmssclient.MockInterface)
 			mockVMSSClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]compute.VirtualMachineScaleSet{expectedVMSS}, nil).MaxTimes(1)
 			cloud.VMSet = ss
+			mockVMsClient := ss.VirtualMachinesClient.(*mockvmclient.MockInterface)
+			mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachine{}, nil).AnyTimes()
 
 			clusterCIDRs := func() []*net.IPNet {
 				_, cidrIPV4, _ := net.ParseCIDR("10.240.0.0/16")

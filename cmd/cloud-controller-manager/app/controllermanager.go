@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apiserver/pkg/server"
 	"k8s.io/apiserver/pkg/server/healthz"
 	cacheddiscovery "k8s.io/client-go/discovery/cached"
 	"k8s.io/client-go/informers"
@@ -296,16 +295,6 @@ func StartHTTPServer(c *cloudcontrollerconfig.CompletedConfig, stopCh <-chan str
 
 		healthz.InstallReadyzHandler(unsecuredMux, checks...)
 	}
-	if c.InsecureServing != nil {
-		unsecuredMux := genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, healthzHandler)
-		insecureSuperuserAuthn := server.AuthenticationInfo{Authenticator: &server.InsecureSuperuser{}}
-		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, nil, &insecureSuperuserAuthn)
-		if err := c.InsecureServing.Serve(handler, 0, stopCh); err != nil {
-			return nil, err
-		}
-
-		healthz.InstallReadyzHandler(unsecuredMux, checks...)
-	}
 
 	return healthzHandler, nil
 }
@@ -321,12 +310,12 @@ func Run(ctx context.Context, c *cloudcontrollerconfig.CompletedConfig, h *contr
 	)
 
 	if c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile != "" {
-		cloud, err = provider.NewCloudFromConfigFile(c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile, true)
+		cloud, err = provider.NewCloudFromConfigFile(ctx, c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile, true)
 		if err != nil {
 			klog.Fatalf("Cloud provider azure could not be initialized: %v", err)
 		}
 	} else if c.DynamicReloadingConfig.EnableDynamicReloading && c.DynamicReloadingConfig.CloudConfigSecretName != "" {
-		cloud, err = provider.NewCloudFromSecret(c.ClientBuilder, c.DynamicReloadingConfig.CloudConfigSecretName, c.DynamicReloadingConfig.CloudConfigSecretNamespace, c.DynamicReloadingConfig.CloudConfigKey)
+		cloud, err = provider.NewCloudFromSecret(ctx, c.ClientBuilder, c.DynamicReloadingConfig.CloudConfigSecretName, c.DynamicReloadingConfig.CloudConfigSecretNamespace, c.DynamicReloadingConfig.CloudConfigKey)
 		if err != nil {
 			klog.Fatalf("Run: Cloud provider azure could not be initialized dynamically from secret %s/%s: %v", c.DynamicReloadingConfig.CloudConfigSecretNamespace, c.DynamicReloadingConfig.CloudConfigSecretName, err)
 		}
@@ -464,7 +453,7 @@ func CreateControllerContext(s *cloudcontrollerconfig.CompletedConfig, clientBui
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start apiserver and controller manager at the same time.
 	if err := genericcontrollermanager.WaitForAPIServer(versionedClient, 10*time.Second); err != nil {
-		return genericcontrollermanager.ControllerContext{}, fmt.Errorf("failed to wait for apiserver being healthy: %v", err)
+		return genericcontrollermanager.ControllerContext{}, fmt.Errorf("failed to wait for apiserver being healthy: %w", err)
 	}
 
 	// Use a discovery client capable of being refreshed.
@@ -514,7 +503,7 @@ func GetAvailableResources(clientBuilder clientbuilder.ControllerClientBuilder) 
 	discoveryClient := client.Discovery()
 	_, resourceMap, err := discoveryClient.ServerGroupsAndResources()
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("unable to get all supported resources from server: %v", err))
+		utilruntime.HandleError(fmt.Errorf("unable to get all supported resources from server: %w", err))
 	}
 	if len(resourceMap) == 0 {
 		return nil, fmt.Errorf("unable to get any supported resources from server")

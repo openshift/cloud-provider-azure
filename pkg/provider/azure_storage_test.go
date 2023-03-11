@@ -21,8 +21,10 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-09-01/storage"
+	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/golang/mock/gomock"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/blobclient/mockblobclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/fileclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/fileclient/mockfileclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/storageaccountclient/mockstorageaccountclient"
@@ -35,7 +37,16 @@ func TestCreateFileShare(t *testing.T) {
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
-	cloud := &Cloud{controllerCommon: &controllerCommon{resourceGroup: "rg"}}
+	cloud := &Cloud{
+		controllerCommon: &controllerCommon{
+			cloud: &Cloud{
+				Environment: azure.Environment{
+					StorageEndpointSuffix: "core.windows.net",
+				},
+			},
+		},
+	}
+	cloud.ResourceGroup = "rg"
 	name := "baz"
 	sku := "sku"
 	kind := "StorageV2"
@@ -150,13 +161,19 @@ func TestCreateFileShare(t *testing.T) {
 		mockFileClient := mockfileclient.NewMockInterface(ctrl)
 		cloud.FileClient = mockFileClient
 		mockFileClient.EXPECT().WithSubscriptionID(gomock.Any()).Return(mockFileClient).AnyTimes()
-		mockFileClient.EXPECT().CreateFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(test.err).AnyTimes()
+		mockFileClient.EXPECT().CreateFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.FileShare{}, test.err).AnyTimes()
 
 		mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
 		cloud.StorageAccountClient = mockStorageAccountsClient
 		mockStorageAccountsClient.EXPECT().ListKeys(gomock.Any(), "", "rg", gomock.Any()).Return(test.keys, nil).AnyTimes()
 		mockStorageAccountsClient.EXPECT().ListByResourceGroup(gomock.Any(), gomock.Any(), "rg").Return(test.accounts, nil).AnyTimes()
 		mockStorageAccountsClient.EXPECT().Create(gomock.Any(), "", "rg", gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+		mockBlobClient := mockblobclient.NewMockInterface(ctrl)
+		cloud.BlobClient = mockBlobClient
+		mockBlobClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.BlobServiceProperties{
+			BlobServicePropertiesProperties: &storage.BlobServicePropertiesProperties{}}, nil).AnyTimes()
+		mockBlobClient.EXPECT().SetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.BlobServiceProperties{}, nil).AnyTimes()
 
 		mockAccount := &AccountOptions{
 			Name:          test.acct,
@@ -227,7 +244,7 @@ func TestDeleteFileShare(t *testing.T) {
 		mockFileClient := mockfileclient.NewMockInterface(ctrl)
 		cloud.FileClient = mockFileClient
 		mockFileClient.EXPECT().WithSubscriptionID(gomock.Any()).Return(mockFileClient).AnyTimes()
-		mockFileClient.EXPECT().DeleteFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(test.err).Times(1)
+		mockFileClient.EXPECT().DeleteFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(test.err).Times(1)
 
 		err := cloud.DeleteFileShare(ctx, "", test.rg, test.acct, test.name)
 		if test.expectErr && err == nil {
@@ -298,7 +315,7 @@ func TestGetFileShare(t *testing.T) {
 	cloud := &Cloud{}
 	mockFileClient := mockfileclient.NewMockInterface(ctrl)
 	mockFileClient.EXPECT().WithSubscriptionID(gomock.Any()).Return(mockFileClient).AnyTimes()
-	mockFileClient.EXPECT().GetFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.FileShare{}, nil).AnyTimes()
+	mockFileClient.EXPECT().GetFileShare(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.FileShare{}, nil).AnyTimes()
 	cloud.FileClient = mockFileClient
 
 	tests := []struct {

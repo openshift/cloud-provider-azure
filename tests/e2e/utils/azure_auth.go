@@ -24,10 +24,10 @@ import (
 	azauth "github.com/Azure/azure-sdk-for-go/services/authorization/mgmt/2015-07-01/authorization"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/to"
 
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 )
 
 // Environmental variables for validating Azure resource status.
@@ -44,6 +44,10 @@ const (
 	// If "E2E_ON_AKS_CLUSTER" is true, the test is running on a AKS cluster.
 	AKSTestCCM     = "E2E_ON_AKS_CLUSTER"
 	AKSClusterType = "CLUSTER_TYPE"
+	// If "INGEST_TEST_RESULT" is true, the test result needs ingestion to kusto
+	IngestTestResult = "INGEST_TEST_RESULT"
+
+	TrueValue = "true"
 )
 
 // AzureAuthConfig holds auth related part of cloud config
@@ -114,8 +118,8 @@ func (tc *AzureTestClient) assignRoleByID(scope, roleDefinitionID string) (resul
 		string(uuid.NewUUID()),
 		azauth.RoleAssignmentCreateParameters{
 			Properties: &azauth.RoleAssignmentProperties{
-				PrincipalID:      to.StringPtr(authconfig.AADClientID),
-				RoleDefinitionID: to.StringPtr(roleDefinitionID),
+				PrincipalID:      pointer.String(authconfig.AADClientID),
+				RoleDefinitionID: pointer.String(roleDefinitionID),
 			},
 		})
 }

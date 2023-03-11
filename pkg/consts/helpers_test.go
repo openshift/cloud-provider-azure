@@ -23,9 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 )
 
 func TestIsK8sServiceHasHAModeEnabled(t *testing.T) {
@@ -184,13 +184,13 @@ func Test_extractInt32FromString(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "value is not a number", args: args{val: "cookies"}, wantErr: true},
-		{name: "value is zero", args: args{val: "0"}, wantErr: false, want: to.Int32Ptr(0)},
+		{name: "value is zero", args: args{val: "0"}, wantErr: false, want: pointer.Int32(0)},
 		{name: "value is a float number", args: args{val: "0.1"}, wantErr: true},
-		{name: "value is a positive integer", args: args{val: "24"}, want: to.Int32Ptr(24), wantErr: false},
-		{name: "value negative integer", args: args{val: "-6"}, want: to.Int32Ptr(-6), wantErr: false},
+		{name: "value is a positive integer", args: args{val: "24"}, want: pointer.Int32(24), wantErr: false},
+		{name: "value negative integer", args: args{val: "-6"}, want: pointer.Int32(-6), wantErr: false},
 		{name: "validator is nil", args: args{val: "-6", businessValidator: []Int32BusinessValidator{
 			nil,
-		}}, want: to.Int32Ptr(-6), wantErr: false},
+		}}, want: pointer.Int32(-6), wantErr: false},
 		{name: "validation failed", args: args{val: "-6", businessValidator: []Int32BusinessValidator{
 			func(i *int32) error {
 				return fmt.Errorf("validator failed")
@@ -349,7 +349,7 @@ func TestGetInt32HealthProbeConfigOfPortFromK8sSvcAnnotation(t *testing.T) {
 				port:        80,
 				key:         HealthProbeParamsNumOfProbe,
 			},
-			want:    to.Int32Ptr(2),
+			want:    pointer.Int32(2),
 			wantErr: false,
 		},
 		{
@@ -372,6 +372,42 @@ func TestGetInt32HealthProbeConfigOfPortFromK8sSvcAnnotation(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetInt32HealthProbeConfigOfPortFromK8sSvcAnnotation() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildAnnotationKeyForPort(t *testing.T) {
+	type args struct {
+		port int32
+		key  PortParams
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "no lb rule",
+			args: args{
+				port: 80,
+				key:  PortAnnotationNoLBRule,
+			},
+			want: "service.beta.kubernetes.io/port_80_no_lb_rule",
+		},
+		{
+			name: "no lb rule",
+			args: args{
+				port: 80,
+				key:  PortAnnotationNoHealthProbeRule,
+			},
+			want: "service.beta.kubernetes.io/port_80_no_probe_rule",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := BuildAnnotationKeyForPort(tt.args.port, tt.args.key); got != tt.want {
+				t.Errorf("BuildAnnotationKeyForPort() = %v, want %v", got, tt.want)
 			}
 		})
 	}
