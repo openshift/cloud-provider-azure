@@ -2342,7 +2342,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			desc:            "getExpectedLBRules shall return corresponding probe and lbRule(blb)",
 			service:         getTestService("test1", v1.ProtocolTCP, map[string]string{}, false, 80),
 			loadBalancerSku: "basic",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(false),
 		},
 		{
@@ -2351,7 +2351,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "basic",
 			probeProtocol:   "Mongodb",
 			expectedRules:   getDefaultTestRules(false),
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 		},
 		{
 			desc:            "getExpectedLBRules shall return tcp probe on https protocols when basic lb sku is used",
@@ -2359,7 +2359,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "basic",
 			probeProtocol:   "Https",
 			expectedRules:   getDefaultTestRules(false),
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 		},
 		{
 			desc:            "getExpectedLBRules shall return error (slb with external mode and SCTP)",
@@ -2371,7 +2371,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			desc:            "getExpectedLBRules shall return corresponding probe and lbRule(slb with tcp reset)",
 			service:         getTestService("test1", v1.ProtocolTCP, nil, false, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2380,7 +2380,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "standard",
 			probeProtocol:   "Http",
 			probePath:       "/healthy",
-			expectedProbes:  getDefaultTestProbes("Http", "/healthy"),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthy", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2389,7 +2389,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "standard",
 			probeProtocol:   "Https",
 			probePath:       "/healthy1",
-			expectedProbes:  getDefaultTestProbes("Https", "/healthy1"),
+			expectedProbes:  getDefaultTestProbes("Https", "/healthy1", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2398,7 +2398,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerInternal: "true",
 			}, true, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultInternalIPv6Rules(true),
 		},
 		{
@@ -2408,7 +2408,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerInternal:                    "true",
 			}, false, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 			expectedRules: map[bool][]network.LoadBalancingRule{
 				false: getHATestRules(true, true, v1.ProtocolTCP, false),
 				true:  getHATestRules(true, true, v1.ProtocolTCP, true),
@@ -2433,7 +2433,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerInternal:                    "true",
 			}, false, 80, 8080),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 			expectedRules: map[bool][]network.LoadBalancingRule{
 				false: getHATestRules(true, true, v1.ProtocolTCP, false),
 				true:  getHATestRules(true, true, v1.ProtocolTCP, true),
@@ -2444,7 +2444,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			service:         getTestService("test1", v1.ProtocolTCP, nil, false, 80),
 			loadBalancerSku: "standard",
 			probeProtocol:   "Tcp",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2454,7 +2454,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			loadBalancerSku: "standard",
 			probeProtocol:   "TCP1",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2464,7 +2464,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			loadBalancerSku: "basic",
 			probeProtocol:   "TCP1",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 			expectedRules:   getDefaultTestRules(false),
 		},
 		{
@@ -2474,7 +2474,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerHealthProbeProtocol:                              "https",
 			}, false, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Https", "/healthy1"),
+			expectedProbes:  getDefaultTestProbes("Https", "/healthy1", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2484,7 +2484,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerHealthProbeProtocol:                              "http",
 			}, false, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Http", "/healthy1"),
+			expectedProbes:  getDefaultTestProbes("Http", "/healthy1", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2494,7 +2494,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				consts.ServiceAnnotationLoadBalancerHealthProbeProtocol:                              "tcp",
 			}, false, 80),
 			loadBalancerSku: "standard",
-			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedProbes:  getDefaultTestProbes("Tcp", "", 10080),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2504,7 +2504,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			loadBalancerSku: "standard",
 			probeProtocol:   "Https",
-			expectedProbes:  getDefaultTestProbes("Https", "/healthy1"),
+			expectedProbes:  getDefaultTestProbes("Https", "/healthy1", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2515,7 +2515,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			loadBalancerSku: "standard",
 			probeProtocol:   "Https",
-			expectedProbes:  getDefaultTestProbes("Https", "/healthy2"),
+			expectedProbes:  getDefaultTestProbes("Https", "/healthy2", consts.HealthProbeDefaultRequestPort),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2549,18 +2549,18 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "standard",
 			probeProtocol:   "Https",
 			probePath:       "/healthy1",
-			expectedProbes:  getTestProbes("Https", "/healthy1", pointer.Int32(20), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(5)),
+			expectedProbes:  getTestProbes("Https", "/healthy1", pointer.Int32(20), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(5)),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
-			desc: "getExpectedLBRules should return correct rule when health probe annotations are added,default path should be /",
+			desc: "getExpectedLBRules should return correct rule when health probe annotations are added,default path should be /healthz",
 			service: getTestService("test1", v1.ProtocolTCP, map[string]string{
 				consts.BuildHealthProbeAnnotationKeyForPort(80, consts.HealthProbeParamsProbeInterval): "20",
 				consts.BuildHealthProbeAnnotationKeyForPort(80, consts.HealthProbeParamsNumOfProbe):    "5",
 			}, false, 80),
 			loadBalancerSku: "standard",
 			probeProtocol:   "Http",
-			expectedProbes:  getTestProbes("Http", "/", pointer.Int32(20), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(5)),
+			expectedProbes:  getTestProbes("Http", "/healthz", pointer.Int32(20), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(5)),
 			expectedRules:   getDefaultTestRules(true),
 		},
 		{
@@ -2622,7 +2622,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				false: {getFloatingIPTestRule(false, false, 80, false)},
 				true:  {getFloatingIPTestRule(false, false, 80, true)},
 			},
-			expectedProbes: getDefaultTestProbes("Tcp", ""),
+			expectedProbes: getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 		},
 		{
 			desc: "getExpectedLBRules should prioritize port specific probe protocol over defaults",
@@ -2630,7 +2630,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 				"service.beta.kubernetes.io/port_80_health-probe_protocol": "HtTp",
 			}, false, 80),
 			expectedRules:  getDefaultTestRules(false),
-			expectedProbes: getDefaultTestProbes("Http", "/"),
+			expectedProbes: getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 		},
 		{
 			desc: "getExpectedLBRules should prioritize port specific probe protocol over appProtocol",
@@ -2639,7 +2639,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			probeProtocol:  "Mongodb",
 			expectedRules:  getDefaultTestRules(false),
-			expectedProbes: getDefaultTestProbes("Http", "/"),
+			expectedProbes: getDefaultTestProbes("Http", "/healthz", consts.HealthProbeDefaultRequestPort),
 		},
 		{
 			desc: "getExpectedLBRules should prioritize port specific probe protocol over deprecated annotation",
@@ -2650,7 +2650,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			loadBalancerSku: "standard",
 			probeProtocol:   "Https",
 			expectedRules:   getDefaultTestRules(true),
-			expectedProbes:  getDefaultTestProbes("Https", "/"),
+			expectedProbes:  getDefaultTestProbes("Https", "/healthz", consts.HealthProbeDefaultRequestPort),
 		},
 		{
 			desc: "getExpectedLBRules should default to Tcp on invalid port specific probe protocol",
@@ -2659,7 +2659,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			}, false, 80),
 			probeProtocol:  "Http",
 			expectedRules:  getDefaultTestRules(false),
-			expectedProbes: getDefaultTestProbes("Tcp", ""),
+			expectedProbes: getDefaultTestProbes("Tcp", "", 10080),
 		},
 		{
 			desc: "getExpectedLBRules should support customize health probe port in multi-port service",
@@ -2672,12 +2672,12 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			},
 			expectedProbes: map[bool][]network.Probe{
 				false: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), false),
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), false),
 				},
 				true: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), true),
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), true),
 				},
 			},
 		},
@@ -2698,12 +2698,12 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			},
 			expectedProbes: map[bool][]network.Probe{
 				false: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), false),
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), false),
 				},
 				true: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), true),
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(8000), pointer.Int32(10080), pointer.Int32(2), true),
 				},
 			},
 		},
@@ -2732,10 +2732,10 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			},
 			expectedProbes: map[bool][]network.Probe{
 				false: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), false),
 				},
 				true: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), true),
 				},
 			},
 		},
@@ -2754,10 +2754,10 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			},
 			expectedProbes: map[bool][]network.Probe{
 				false: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), false),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), false),
 				},
 				true: {
-					getTestProbe("Tcp", "/", pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2), true),
+					getTestProbe("Http", "/healthz", pointer.Int32(5), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(2), true),
 				},
 			},
 		},
@@ -2858,7 +2858,7 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 	}, 80)
 	svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 	svc.Spec.HealthCheckNodePort = 34567
-	probes = getTestProbes("Https", "/broken/local/path", pointer.Int32(10), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(10))
+	probes = getTestProbes("Https", "/broken/local/path", pointer.Int32(10), pointer.Int32(80), pointer.Int32(consts.HealthProbeDefaultRequestPort), pointer.Int32(10))
 	testCases = append(testCases, struct {
 		desc            string
 		service         v1.Service
@@ -2936,8 +2936,8 @@ func getTestProbe(protocol, path string, interval, servicePort, probePort, numOf
 	return expectedProbes
 }
 
-func getDefaultTestProbes(protocol, path string) map[bool][]network.Probe {
-	return getTestProbes(protocol, path, pointer.Int32(5), pointer.Int32(80), pointer.Int32(10080), pointer.Int32(2))
+func getDefaultTestProbes(protocol, path string, port int32) map[bool][]network.Probe {
+	return getTestProbes(protocol, path, pointer.Int32(5), pointer.Int32(80), pointer.Int32(port), pointer.Int32(2))
 }
 
 func getDefaultTestRules(enableTCPReset bool) map[bool][]network.LoadBalancingRule {
@@ -3085,8 +3085,9 @@ func getTestLoadBalancer(name, rgName, clusterName, identifier *string, service 
 					Name: pointer.String(*identifier + "-" + string(service.Spec.Ports[0].Protocol) +
 						"-" + strconv.Itoa(int(service.Spec.Ports[0].Port))),
 					ProbePropertiesFormat: &network.ProbePropertiesFormat{
-						Port:              pointer.Int32(10080),
-						Protocol:          network.ProbeProtocolTCP,
+						Port:              pointer.Int32(consts.HealthProbeDefaultRequestPort),
+						Protocol:          network.ProbeProtocolHTTP,
+						RequestPath:       pointer.StringPtr("/healthz"),
 						IntervalInSeconds: pointer.Int32(5),
 						ProbeThreshold:    pointer.Int32(2),
 					},
@@ -3144,8 +3145,9 @@ func getTestLoadBalancerDualStack(name, rgName, clusterName, identifier *string,
 		Name: pointer.String(*identifier + "-" + string(service.Spec.Ports[0].Protocol) +
 			"-" + strconv.Itoa(int(service.Spec.Ports[0].Port)) + "-IPv6"),
 		ProbePropertiesFormat: &network.ProbePropertiesFormat{
-			Port:              pointer.Int32(10080),
-			Protocol:          network.ProbeProtocolTCP,
+			Port:              pointer.Int32(consts.HealthProbeDefaultRequestPort),
+			Protocol:          network.ProbeProtocolHTTP,
+			RequestPath:       pointer.StringPtr("/healthz"),
 			IntervalInSeconds: pointer.Int32(5),
 			ProbeThreshold:    pointer.Int32(2),
 		},
@@ -3175,6 +3177,7 @@ func getTestLoadBalancerDualStack(name, rgName, clusterName, identifier *string,
 			},
 		},
 	})
+
 	return lb
 }
 
@@ -3244,28 +3247,36 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 				Name: pointer.String("aservice1-" + string(service3.Spec.Ports[0].Protocol) +
 					"-" + strconv.Itoa(int(service3.Spec.Ports[0].Port))),
 				ProbePropertiesFormat: &network.ProbePropertiesFormat{
-					Port: pointer.Int32(10080),
+					Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+					Protocol:    network.ProbeProtocolHTTP,
+					RequestPath: pointer.StringPtr("/healthz"),
 				},
 			},
 			{
 				Name: pointer.String("aservice1-" + string(service3.Spec.Ports[0].Protocol) +
 					"-" + strconv.Itoa(int(service3.Spec.Ports[0].Port))),
 				ProbePropertiesFormat: &network.ProbePropertiesFormat{
-					Port: pointer.Int32(10081),
+					Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+					Protocol:    network.ProbeProtocolHTTP,
+					RequestPath: pointer.StringPtr("/healthz"),
 				},
 			},
 			{
 				Name: pointer.String("aservice1-" + string(service3.Spec.Ports[0].Protocol) +
 					"-" + strconv.Itoa(int(service3.Spec.Ports[0].Port)) + "-IPv6"),
 				ProbePropertiesFormat: &network.ProbePropertiesFormat{
-					Port: pointer.Int32(10080),
+					Protocol:    network.ProbeProtocolHTTP,
+					RequestPath: pointer.StringPtr("/healthz"),
+					Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
 				},
 			},
 			{
 				Name: pointer.String("aservice1-" + string(service3.Spec.Ports[0].Protocol) +
 					"-" + strconv.Itoa(int(service3.Spec.Ports[0].Port)) + "-IPv6"),
 				ProbePropertiesFormat: &network.ProbePropertiesFormat{
-					Port: pointer.Int32(10081),
+					Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+					Protocol:    network.ProbeProtocolHTTP,
+					RequestPath: pointer.StringPtr("/healthz"),
 				},
 			},
 		}
@@ -3339,28 +3350,36 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port))),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10080),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port))),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10081),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port)) + "-IPv6"),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10080),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port)) + "-IPv6"),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10081),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 	}
@@ -3440,28 +3459,36 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port))),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10080),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port))),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10081),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port)) + "-IPv6"),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10080),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 		{
 			Name: pointer.String("aservice1-" + string(service4.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service4.Spec.Ports[0].Port)) + "-IPv6"),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port: pointer.Int32(10081),
+				Port:        pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				RequestPath: pointer.StringPtr("/healthz"),
+				Protocol:    network.ProbeProtocolHTTP,
 			},
 		},
 	}
@@ -3619,8 +3646,9 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 			Name: pointer.String("aservice1-" + string(service8.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service7.Spec.Ports[0].Port))),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port:              pointer.Int32(10080),
-				Protocol:          network.ProbeProtocolTCP,
+				Port:              pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				Protocol:          network.ProbeProtocolHTTP,
+				RequestPath:       pointer.StringPtr("/healthz"),
 				IntervalInSeconds: pointer.Int32(5),
 				ProbeThreshold:    pointer.Int32(2),
 			},
@@ -3629,8 +3657,9 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 			Name: pointer.String("aservice1-" + string(service8.Spec.Ports[0].Protocol) +
 				"-" + strconv.Itoa(int(service7.Spec.Ports[0].Port)) + "-IPv6"),
 			ProbePropertiesFormat: &network.ProbePropertiesFormat{
-				Port:              pointer.Int32(10080),
-				Protocol:          network.ProbeProtocolTCP,
+				Port:              pointer.Int32(consts.HealthProbeDefaultRequestPort),
+				Protocol:          network.ProbeProtocolHTTP,
+				RequestPath:       pointer.StringPtr("/healthz"),
 				IntervalInSeconds: pointer.Int32(5),
 				ProbeThreshold:    pointer.Int32(2),
 			},
