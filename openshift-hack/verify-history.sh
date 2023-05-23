@@ -40,7 +40,7 @@ while read -r message; do
     exit 1
   fi
   echo "$message"
-done < <(git log "$check_base".."$check_sha" --pretty=%s --no-merges)
+done < <(git log "$check_base".."$check_sha" --pretty=%s --no-merges --ancestry-path)
 
 echo
 echo "All looks good"
