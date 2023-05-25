@@ -42,5 +42,19 @@ while read -r message; do
   echo "$message"
 done < <(git log "$check_base".."$check_sha" --pretty=%s --no-merges --ancestry-path)
 
+if [[ "$CI" == "true" ]]; then
+    merge_base=$(git merge-base "$PULL_BASE_SHA" "$PULL_PULL_SHA")
+    echo "Comparing the base branch (${PULL_BASE_REF} - commit: ${PULL_BASE_SHA}) and the merge base (${merge_base})."
+    if [[ "$PULL_BASE_SHA" != "$merge_base" ]]; then
+        echo "ERROR: This pull request is not based on the latest commit of the base branch."
+        echo "To resolve this issue, please rebase your pull request on top of the latest base branch commit."
+        echo
+        echo "Additional commits on the base branch (${PULL_BASE_REF}) that are not included in this pull request:"
+        git log --oneline "$PULL_BASE_SHA" ^"$PULL_PULL_SHA"
+        exit 1
+    fi
+    echo "SUCCESS: This pull request includes all commits from the base branch."
+fi
+
 echo
 echo "All looks good"
