@@ -1294,7 +1294,14 @@ func (az *Cloud) updateNodeCaches(prevNode, newNode *v1.Node) {
 
 		case hasExcludeBalancerLabel:
 			az.excludeLoadBalancerNodes.Insert(newNode.ObjectMeta.Name)
-			klog.V(6).Infof("excluding Node %q from LoadBalancer because it has exclude-from-external-load-balancers label", newNode.ObjectMeta.Name)
+
+		case !isNodeReady(newNode) && !isNodeMaster(newNode) && nodemanager.GetCloudTaint(newNode.Spec.Taints) == nil:
+			// If not in ready state and not a newly created node, add to excludeLoadBalancerNodes cache.
+			// New nodes (tainted with "node.cloudprovider.kubernetes.io/uninitialized") should not be
+			// excluded from load balancers regardless of their state, so as to reduce the number of
+			// VMSS API calls and not provoke VMScaleSetActiveModelsCountLimitReached.
+			// (https://github.com/kubernetes-sigs/cloud-provider-azure/issues/851)
+			az.excludeLoadBalancerNodes.Insert(newNode.ObjectMeta.Name)
 
 		default:
 			// Nodes not falling into the three cases above are valid backends and
@@ -1451,4 +1458,15 @@ func (az *Cloud) getActiveNodesByLoadBalancerName(lbName string) sets.Set[string
 	}
 
 	return sets.New[string]()
+}
+
+func isNodeMaster(node *v1.Node) bool {
+	labels := node.GetLabels()
+	for l := range labels {
+		if l == "node-role.kubernetes.io/master" || l == "node-role.kubernetes.io/control-plane" {
+			return true
+		}
+	}
+
+	return false
 }
