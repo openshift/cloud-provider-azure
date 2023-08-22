@@ -194,6 +194,15 @@ const (
 	BackoffJitterDefault = 1.0
 )
 
+// IP family variables
+const (
+	IPVersionIPv6            bool   = true
+	IPVersionIPv4            bool   = false
+	IPVersionIPv4String      string = "IPv4"
+	IPVersionIPv6String      string = "IPv6"
+	IPVersionDualStackString string = "DualStack"
+)
+
 // LB variables for dual-stack
 var (
 	// Service.Spec.LoadBalancerIP has been deprecated and may be removed in a future release. Those two annotations are introduced as alternatives to set IPv4/IPv6 LoadBalancer IPs.
@@ -241,7 +250,7 @@ const (
 
 	// ServiceAnnotationLoadBalancerMode is the annotation used on the service to specify
 	// which load balancer should be associated with the service. This is valid when using the basic
-	// load balancer or turn on the multiple standard load balancers mode, or it would be ignored.
+	// sku load balancer, or it would be ignored.
 	// 1. Default mode - service has no annotation ("service.beta.kubernetes.io/azure-load-balancer-mode")
 	//	  In this case the Loadbalancer of the primary VMSS/VMAS is selected.
 	// 2. "__auto__" mode - service is annotated with __auto__ value, this when loadbalancer from any VMSS/VMAS
@@ -315,10 +324,14 @@ const (
 	// If omitted, the default value is false
 	ServiceAnnotationDisableLoadBalancerFloatingIP = "service.beta.kubernetes.io/azure-disable-load-balancer-floating-ip"
 
-	// ServiceAnnotationAzurePIPTags sets the additional Public IPs (split by comma) besides the service's Public IP configured on LoadBalancer.
+	// ServiceAnnotationAdditionalPublicIPs sets the additional Public IPs (split by comma) besides the service's Public IP configured on LoadBalancer.
 	// These additional Public IPs would be consumed by kube-proxy to configure the iptables rules on each node. Note they would not be configured
 	// automatically on Azure LoadBalancer. Instead, they need to be configured manually (e.g. on Azure cross-region LoadBalancer by another operator).
 	ServiceAnnotationAdditionalPublicIPs = "service.beta.kubernetes.io/azure-additional-public-ips"
+
+	// ServiceAnnotationLoadBalancerConfigurations is the list of load balancer configurations the service can use.
+	// The list is separated by comma. It will be omitted if multi-slb is not used.
+	ServiceAnnotationLoadBalancerConfigurations = "service.beta.kubernetes.io/azure-load-balancer-configurations"
 
 	// ServiceTagKey is the service key applied for public IP tags.
 	ServiceTagKey       = "k8s-azure-service"
@@ -417,6 +430,9 @@ const (
 const (
 	RouteNameFmt       = "%s____%s"
 	RouteNameSeparator = "____"
+
+	// DefaultRouteUpdateIntervalInSeconds defines the route reconciling interval.
+	DefaultRouteUpdateIntervalInSeconds = 30
 )
 
 // cloud provider config secret
@@ -451,10 +467,8 @@ const (
 	HealthProbeParamsProtocol HealthProbeParams = "protocol"
 
 	// HealthProbeParamsPort determines the probe port for the health probe params.
-	// It always takes priority over the NodePort of the spec.ports in a Service.
-	// If not set, the kube-proxy health port (10256) will be configured by default.
-	HealthProbeParamsPort         HealthProbeParams = "port"
-	HealthProbeDefaultRequestPort int32             = 10256
+	// It always takes priority over the NodePort of the spec.ports in a Service
+	HealthProbeParamsPort HealthProbeParams = "port"
 
 	// HealthProbeParamsProbeInterval determines the probe interval of the load balancer health probe.
 	// The minimum probe interval is 5 seconds and the default value is 5. The total duration of all intervals cannot exceed 120 seconds.
@@ -470,7 +484,7 @@ const (
 	// This is only useful for the HTTP and HTTPS, and would be ignored when using TCP. If not set,
 	// `/healthz` would be configured by default.
 	HealthProbeParamsRequestPath  HealthProbeParams = "request-path"
-	HealthProbeDefaultRequestPath string            = "/healthz"
+	HealthProbeDefaultRequestPath string            = "/"
 )
 
 type HealthProbeParams string
@@ -523,4 +537,15 @@ const (
 
 const (
 	VMSSTagForBatchOperation = "aks-managed-coordination"
+)
+
+type LoadBalancerBackendPoolUpdateOperation string
+
+const (
+	LoadBalancerBackendPoolUpdateOperationAdd    LoadBalancerBackendPoolUpdateOperation = "add"
+	LoadBalancerBackendPoolUpdateOperationRemove LoadBalancerBackendPoolUpdateOperation = "remove"
+
+	DefaultLoadBalancerBackendPoolUpdateIntervalInSeconds = 30
+
+	ServiceNameLabel = "kubernetes.io/service-name"
 )

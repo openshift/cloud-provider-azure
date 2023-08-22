@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient/mocksubnetclient"
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
@@ -459,14 +458,13 @@ func TestGetVMSSVMCacheKey(t *testing.T) {
 }
 
 func TestIsNodeInVMSSVMCache(t *testing.T) {
-
 	getter := func(key string) (interface{}, error) {
 		return nil, nil
 	}
-	emptyCacheEntryTimedCache, _ := azcache.NewTimedcache(fakeCacheTTL, getter)
+	emptyCacheEntryTimedCache, _ := azcache.NewTimedCache(fakeCacheTTL, getter, false)
 	emptyCacheEntryTimedCache.Set("key", nil)
 
-	cacheEntryTimedCache, _ := azcache.NewTimedcache(fakeCacheTTL, getter)
+	cacheEntryTimedCache, _ := azcache.NewTimedCache(fakeCacheTTL, getter, false)
 	syncMap := &sync.Map{}
 	syncMap.Store("node", nil)
 	cacheEntryTimedCache.Set("key", syncMap)
@@ -474,7 +472,7 @@ func TestIsNodeInVMSSVMCache(t *testing.T) {
 	tests := []struct {
 		description    string
 		nodeName       string
-		vmssVMCache    *azcache.TimedCache
+		vmssVMCache    azcache.Resource
 		expectedResult bool
 	}{
 		{
@@ -484,26 +482,28 @@ func TestIsNodeInVMSSVMCache(t *testing.T) {
 		},
 		{
 			description:    "empty CacheEntry timed cache",
-			vmssVMCache:    emptyCacheEntryTimedCache,
+			vmssVMCache:    emptyCacheEntryTimedCache.(*azcache.TimedCache),
 			expectedResult: false,
 		},
 		{
 			description:    "node name in the cache",
 			nodeName:       "node",
-			vmssVMCache:    cacheEntryTimedCache,
+			vmssVMCache:    cacheEntryTimedCache.(*azcache.TimedCache),
 			expectedResult: true,
 		},
 		{
 			description:    "node name not in the cache",
 			nodeName:       "node2",
-			vmssVMCache:    cacheEntryTimedCache,
+			vmssVMCache:    cacheEntryTimedCache.(*azcache.TimedCache),
 			expectedResult: false,
 		},
 	}
 
 	for _, test := range tests {
-		result := isNodeInVMSSVMCache(test.nodeName, test.vmssVMCache)
-		assert.Equal(t, test.expectedResult, result, test.description)
+		t.Run(test.description, func(t *testing.T) {
+			result := isNodeInVMSSVMCache(test.nodeName, test.vmssVMCache)
+			assert.Equal(t, test.expectedResult, result)
+		})
 	}
 }
 
@@ -676,16 +676,50 @@ func TestSetServiceLoadBalancerIP(t *testing.T) {
 		expectedSvc *v1.Service
 	}{
 		{
+			"IPv4",
+			"10.0.0.1",
+			&v1.Service{},
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						consts.ServiceAnnotationLoadBalancerIPDualStack[consts.IPVersionIPv4]: "10.0.0.1",
+					},
+				},
+			},
+		},
+		{
 			"IPv6",
 			"2001::1",
 			&v1.Service{},
 			&v1.Service{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						consts.ServiceAnnotationLoadBalancerIPDualStack[true]: "2001::1",
+						consts.ServiceAnnotationLoadBalancerIPDualStack[consts.IPVersionIPv6]: "2001::1",
 					},
 				},
 			},
+		},
+		{
+			"empty IP",
+			"",
+			&v1.Service{},
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{},
+			},
+		},
+		{
+			"invalid IP",
+			"invalid-ip",
+			&v1.Service{},
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{},
+			},
+		},
+		{
+			"empty Service",
+			"10.0.0.1",
+			nil,
+			nil,
 		},
 	}
 	for _, tc := range testcases {
@@ -900,136 +934,62 @@ func TestGetResourceByIPFamily(t *testing.T) {
 func TestIsFIPIPv6(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	svc := v1.Service{}
 
 	testcases := []struct {
 		desc           string
+		svc            v1.Service
 		fip            *network.FrontendIPConfiguration
-		pips           []network.PublicIPAddress
-		isInternal     bool
 		expectedIsIPv6 bool
 	}{
 		{
-			"Internal IPv4 with PrivateIPAddressVersion",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
-					PrivateIPAddressVersion: network.IPv4,
-					PrivateIPAddress:        pointer.String("10.0.0.1"),
+			desc: "IPv4",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{v1.IPv4Protocol},
 				},
 			},
-			[]network.PublicIPAddress{},
-			true,
-			false,
+			fip:            nil,
+			expectedIsIPv6: false,
 		},
 		{
-			"Internal IPv4 with PrivateIPAddress",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
-					PrivateIPAddress: pointer.String("10.0.0.1"),
+			desc: "IPv6",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{v1.IPv6Protocol},
 				},
 			},
-			[]network.PublicIPAddress{},
-			true,
-			false,
+			fip:            nil,
+			expectedIsIPv6: true,
 		},
 		{
-			"Internal IPv4 no info so default to IPv4",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{},
+			desc: "DualStack IPv4",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol},
+				},
 			},
-			[]network.PublicIPAddress{},
-			true,
-			false,
+			fip: &network.FrontendIPConfiguration{
+				Name: pointer.StringPtr("fip"),
+			},
+			expectedIsIPv6: false,
 		},
 		{
-			"External IPv6 with PublicIPAddressVersion",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
-					PublicIPAddress: &network.PublicIPAddress{ID: pointer.String("pip-id0")},
+			desc: "DualStack IPv6",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol},
 				},
 			},
-			[]network.PublicIPAddress{
-				{
-					Name: pointer.String("pip0"),
-					ID:   pointer.String("pip-id0"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-						PublicIPAddressVersion: network.IPv6,
-						IPAddress:              pointer.String("2001::1"),
-					},
-				},
-				{
-					Name: pointer.String("pip1"),
-					ID:   pointer.String("pip-id1"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-						PublicIPAddressVersion: network.IPv4,
-						IPAddress:              pointer.String("10.0.0.1"),
-					},
-				},
+			fip: &network.FrontendIPConfiguration{
+				Name: pointer.StringPtr("fip-IPv6"),
 			},
-			false,
-			true,
-		},
-		{
-			"External IPv6 with PIP IPAddress",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
-					PublicIPAddress: &network.PublicIPAddress{ID: pointer.String("pip-id0")},
-				},
-			},
-			[]network.PublicIPAddress{
-				{
-					Name: pointer.String("pip0"),
-					ID:   pointer.String("pip-id0"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-						IPAddress: pointer.String("2001::1"),
-					},
-				},
-				{
-					Name: pointer.String("pip1"),
-					ID:   pointer.String("pip-id1"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-						PublicIPAddressVersion: network.IPv4,
-						IPAddress:              pointer.String("10.0.0.1"),
-					},
-				},
-			},
-			false,
-			true,
-		},
-		{
-			"External IPv4 with no info so default to IPv4",
-			&network.FrontendIPConfiguration{
-				FrontendIPConfigurationPropertiesFormat: &network.FrontendIPConfigurationPropertiesFormat{
-					PublicIPAddress: &network.PublicIPAddress{ID: pointer.String("pip-id0")},
-				},
-			},
-			[]network.PublicIPAddress{
-				{
-					Name:                            pointer.String("pip0"),
-					ID:                              pointer.String("pip-id0"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{},
-				},
-				{
-					Name: pointer.String("pip1"),
-					ID:   pointer.String("pip-id1"),
-					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-						PublicIPAddressVersion: network.IPv4,
-						IPAddress:              pointer.String("10.0.0.1"),
-					},
-				},
-			},
-			false,
-			false,
+			expectedIsIPv6: true,
 		},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.desc, func(t *testing.T) {
 			az := GetTestCloud(ctrl)
-			mockPIPsClient := az.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
-			if !tc.isInternal {
-				mockPIPsClient.EXPECT().List(gomock.Any(), "rg").Return(tc.pips, nil)
-			}
-			isIPv6, err := az.isFIPIPv6(&svc, tc.fip, tc.isInternal)
+			isIPv6, err := az.isFIPIPv6(&tc.svc, "rg", tc.fip)
 			assert.Nil(t, err)
 			assert.Equal(t, tc.expectedIsIPv6, isIPv6)
 		})

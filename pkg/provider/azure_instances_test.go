@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
@@ -245,9 +246,9 @@ func TestInstanceID(t *testing.T) {
 			t.Errorf("Test [%s] unexpected error: %v", test.name, err)
 		}
 		if test.useCustomImsCache {
-			cloud.Metadata.imsCache, err = azcache.NewTimedcache(consts.MetadataCacheTTL, func(key string) (interface{}, error) {
+			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(key string) (interface{}, error) {
 				return nil, fmt.Errorf("getError")
-			})
+			}, false)
 			if err != nil {
 				t.Errorf("Test [%s] unexpected error: %v", test.name, err)
 			}
@@ -640,9 +641,9 @@ func TestNodeAddresses(t *testing.T) {
 		}
 
 		if test.useCustomImsCache {
-			cloud.Metadata.imsCache, err = azcache.NewTimedcache(consts.MetadataCacheTTL, func(key string) (interface{}, error) {
+			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(key string) (interface{}, error) {
 				return nil, fmt.Errorf("getError")
-			})
+			}, false)
 			if err != nil {
 				t.Errorf("Test [%s] unexpected error: %v", test.name, err)
 			}
@@ -880,7 +881,20 @@ func TestInstanceMetadata(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	t.Run("", func(t *testing.T) {
+	t.Run("instance not exists", func(t *testing.T) {
+		cloud := GetTestCloud(ctrl)
+		cloud.unmanagedNodes = sets.New("node0")
+
+		meta, err := cloud.InstanceMetadata(context.Background(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node0",
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, cloudprovider.InstanceMetadata{}, *meta)
+	})
+
+	t.Run("instance exists", func(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVM := buildDefaultTestVirtualMachine("as", []string{"/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/k8s-agentpool1-00000000-nic-1"})
 		expectedVM.HardwareProfile = &compute.HardwareProfile{
@@ -974,5 +988,22 @@ func TestCloud_InstanceExists(t *testing.T) {
 		exist, err := cloud.InstanceExists(ctx, node)
 		assert.NoError(t, err)
 		assert.False(t, exist)
+	})
+	t.Run("should return true when instance is not managed by azure", func(t *testing.T) {
+		ctx := context.Background()
+		cloud := GetTestCloud(ctrl)
+		cloud.unmanagedNodes = sets.New("foo")
+		node := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "foo",
+				Labels: map[string]string{
+					"kubernetes.azure.com/managed": "false",
+				},
+			},
+		}
+
+		exist, err := cloud.InstanceExists(ctx, node)
+		assert.NoError(t, err)
+		assert.True(t, exist)
 	})
 }

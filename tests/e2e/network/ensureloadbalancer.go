@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -25,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	aznetwork "github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -460,7 +460,7 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 		}
 
 		serviceNames := []string{}
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			serviceLabels := labels
 			deploymentName := testDeploymentName
 			tcpPort := int32(80 + i)
@@ -479,6 +479,7 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
+			var service *v1.Service
 			serviceName := fmt.Sprintf("%s-%d", testServiceName, i)
 			utils.Logf("Creating Service %q", serviceName)
 			serviceNames = append(serviceNames, serviceName)
@@ -486,8 +487,20 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 				Port:       tcpPort,
 				TargetPort: intstr.FromInt(int(tcpPort)),
 			}}
-			service := utils.CreateLoadBalancerServiceManifest(serviceName, nil, serviceLabels, ns.Name, servicePort)
-			service = updateServiceLBIPs(service, false, targetIPs)
+			service = utils.CreateLoadBalancerServiceManifest(serviceName, nil, serviceLabels, ns.Name, servicePort)
+			if i < 2 {
+				service = updateServiceLBIPs(service, false, targetIPs)
+			} else {
+				var pipNames []string
+				if v4Enabled {
+					pipNames = append(pipNames, utils.GetNameWithSuffix(ipNameBase, utils.Suffixes[consts.IPVersionIPv4]))
+				}
+				if v6Enabled {
+					pipNames = append(pipNames, utils.GetNameWithSuffix(ipNameBase, utils.Suffixes[consts.IPVersionIPv6]))
+				}
+				utils.Logf("update pip names %s", strings.Join(pipNames, ","))
+				service = updateServicePIPNames(tc.IPFamily, service, pipNames)
+			}
 			_, err := cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 			defer func() {
 				err = utils.DeleteService(cs, ns.Name, serviceName)
@@ -504,7 +517,7 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 	})
 
 	It("should support multiple external services sharing one newly created public IP addresses", func() {
-		serviceCount := 2
+		serviceCount := 3
 		sharedIPs := []string{}
 		serviceNames := []string{}
 		var serviceLabels map[string]string
@@ -534,8 +547,19 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 				TargetPort: intstr.FromInt(int(tcpPort)),
 			}}
 			service := utils.CreateLoadBalancerServiceManifest(serviceName, nil, serviceLabels, ns.Name, servicePort)
-			if len(sharedIPs) != 0 {
-				service = updateServiceLBIPs(service, false, sharedIPs)
+			if i < 2 {
+				if len(sharedIPs) != 0 {
+					service = updateServiceLBIPs(service, false, sharedIPs)
+				}
+			} else {
+				var pipNames []string
+				for _, sharedIP := range sharedIPs {
+					pip, err := tc.GetPublicIPFromAddress(tc.GetResourceGroup(), sharedIP)
+					Expect(err).NotTo(HaveOccurred())
+					pipNames = append(pipNames, pointer.StringDeref(pip.Name, ""))
+				}
+				utils.Logf("update pip names %s", strings.Join(pipNames, ","))
+				service = updateServicePIPNames(tc.IPFamily, service, pipNames)
 			}
 			_, err := cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -649,14 +673,17 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 		}
 	})
 
-	It("should support node label `node.kubernetes.io/exclude-from-external-load-balancers`", func() {
+	It("should support node label `node.kubernetes.io/exclude-from-external-load-balancers`", Label(utils.TestSuiteLabelNonMultiSLB), func() {
 		label := "node.kubernetes.io/exclude-from-external-load-balancers"
 		By("Checking the number of the node pools")
 		nodes, err := utils.GetAgentNodes(cs)
 		Expect(err).NotTo(HaveOccurred())
-		initNodepoolNodeMap := utils.GetNodepoolNodeMap(&nodes)
-		if len(initNodepoolNodeMap) != 1 {
-			Skip("single node pool is needed in this scenario")
+		if os.Getenv(utils.AKSTestCCM) != "" {
+			// AKS
+			initNodepoolNodeMap := utils.GetNodepoolNodeMap(&nodes)
+			if len(initNodepoolNodeMap) != 1 {
+				Skip("single node pool is needed in this scenario")
+			}
 		}
 
 		By("Creating a service to trigger the LB reconcile")
@@ -664,43 +691,75 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 		_, err = cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		publicIPs, err := utils.WaitServiceExposureAndValidateConnectivity(cs, tc.IPFamily, ns.Name, testServiceName, []string{})
+		defer func() {
+			deleteSvcErr := utils.DeleteService(cs, ns.Name, testServiceName)
+			Expect(deleteSvcErr).NotTo(HaveOccurred())
+		}()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(publicIPs)).NotTo(BeZero())
 		publicIP := publicIPs[0]
 
 		By("Checking the initial node number in the LB backend pool")
 		lb := getAzureLoadBalancerFromPIP(tc, publicIP, tc.GetResourceGroup(), "")
-		lbBackendPoolIPConfigsCount := 0
-		if utils.IsAutoscalingAKSCluster() {
-			for _, ipconfig := range *(*lb.BackendAddressPools)[getLBBackendPoolIndex(lb)].BackendIPConfigurations {
-				if !strings.Contains(*ipconfig.ID, utils.SystemPool) {
-					lbBackendPoolIPConfigsCount++
-				}
-			}
+		if lb.Sku != nil && lb.Sku.Name == aznetwork.LoadBalancerSkuNameBasic {
+			// For a basic lb, not autoscaling pipeline
+			idxes := getLBBackendPoolIndex(lb)
+			Expect(idxes).NotTo(BeZero())
+			ipConfigs := (*lb.BackendAddressPools)[idxes[0]].BackendIPConfigurations
+			Expect(ipConfigs).NotTo(BeNil())
+			lbBackendPoolIPConfigCount := len(*ipConfigs)
+			Expect(lbBackendPoolIPConfigCount).To(Equal(len(nodes)))
+			utils.Logf("Initial node number in the LB backend pool is %d", lbBackendPoolIPConfigCount)
 		} else {
-			lbBackendPoolIPConfigsCount = len(*(*lb.BackendAddressPools)[getLBBackendPoolIndex(lb)].BackendIPConfigurations)
+			// SLB: Here we use BackendPool IP instead of IP config because this works for both NIC based LB and IP based LB.
+			lbBackendPoolIPCount := 0
+			idxes := getLBBackendPoolIndex(lb)
+			Expect(idxes).NotTo(BeZero())
+			lbBackendPoolIPs := (*lb.BackendAddressPools)[idxes[0]].LoadBalancerBackendAddresses
+			Expect(lbBackendPoolIPs).NotTo(BeNil())
+			if utils.IsAutoscalingAKSCluster() {
+				for _, ip := range *lbBackendPoolIPs {
+					Expect(ip.LoadBalancerBackendAddressPropertiesFormat).NotTo(BeNil())
+					Expect(ip.LoadBalancerBackendAddressPropertiesFormat.NetworkInterfaceIPConfiguration).NotTo(BeNil())
+					ipConfigID := pointer.StringDeref(ip.LoadBalancerBackendAddressPropertiesFormat.NetworkInterfaceIPConfiguration.ID, "")
+					if !strings.Contains(ipConfigID, utils.SystemPool) {
+						lbBackendPoolIPCount++
+					}
+				}
+			} else {
+				lbBackendPoolIPCount = len(*lbBackendPoolIPs)
+			}
+			Expect(lbBackendPoolIPCount).To(Equal(len(nodes)))
+			utils.Logf("Initial node number in the LB backend pool is %d", lbBackendPoolIPCount)
 		}
-		nodes, err = utils.GetAgentNodes(cs)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(lbBackendPoolIPConfigsCount).To(Equal(len(nodes)))
+		nodeToLabel := nodes[0]
 
-		By("Labeling node")
-		node, err := utils.LabelNode(cs, &nodes[0], label, false)
+		By(fmt.Sprintf("Labeling node %q", nodeToLabel.Name))
+		node, err := utils.LabelNode(cs, &nodeToLabel, label, false)
+		defer func() {
+			node, err = utils.GetNode(cs, node.Name)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = utils.LabelNode(cs, node, label, true)
+			Expect(err).NotTo(HaveOccurred())
+		}()
 		Expect(err).NotTo(HaveOccurred())
+		addDummyAnnotationWithServiceName(cs, ns.Name, testServiceName)
 		var expectedCount int
 		if len(nodes) == 1 {
 			expectedCount = 1
 		} else {
 			expectedCount = len(nodes) - 1
 		}
+
 		err = waitForNodesInLBBackendPool(tc, publicIP, expectedCount)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Unlabeling node")
+		By(fmt.Sprintf("Unlabeling node %q", nodeToLabel.Name))
 		node, err = utils.GetNode(cs, node.Name)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = utils.LabelNode(cs, node, label, true)
 		Expect(err).NotTo(HaveOccurred())
+		addDummyAnnotationWithServiceName(cs, ns.Name, testServiceName)
 		err = waitForNodesInLBBackendPool(tc, publicIP, len(nodes))
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -746,7 +805,7 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 
 		By("testing if floating IP disabled in load balancer rule")
 		Expect(len(targetIPs)).NotTo(Equal(0))
-		pipFrontendConfigID := getPIPFrontendConfigurationID(tc, targetIPs[0], tc.GetResourceGroup(), "")
+		pipFrontendConfigID := getPIPFrontendConfigurationID(tc, targetIPs[0], tc.GetResourceGroup(), false)
 		pipFrontendConfigIDSplit := strings.Split(pipFrontendConfigID, "/")
 		Expect(len(pipFrontendConfigIDSplit)).NotTo(Equal(0))
 		configID := pipFrontendConfigIDSplit[len(pipFrontendConfigIDSplit)-1]
@@ -758,7 +817,7 @@ var _ = Describe("Ensure LoadBalancer", Label(utils.TestSuiteLabelLB), func() {
 			utils.Logf("Checking LB rule %q", *lbRule.Name)
 			lbRuleSplit := strings.Split(*lbRule.Name, "-")
 			Expect(len(lbRuleSplit)).NotTo(Equal(0))
-			// id is like xxx-IPv4 or xxx-IPv6 and lbRuleSplit[0] is like xxx.
+			// id is like xxx or xxx-IPv6 and lbRuleSplit[0] is like xxx.
 			if !strings.Contains(configID, lbRuleSplit[0]) {
 				continue
 			}
@@ -830,7 +889,7 @@ var _ = Describe("EnsureLoadBalancer should not update any resources when servic
 			consts.ServiceAnnotationLoadBalancerHealthProbeNumOfProbe:  "8",
 		}
 
-		if strings.EqualFold(os.Getenv(utils.LoadBalancerSkuEnv), string(network.PublicIPAddressSkuNameStandard)) &&
+		if strings.EqualFold(os.Getenv(utils.LoadBalancerSkuEnv), string(aznetwork.PublicIPAddressSkuNameStandard)) &&
 			tc.IPFamily == utils.IPv4 {
 			// Routing preference is only supported in standard public IPs
 			annotation[consts.ServiceAnnotationIPTagsForPublicIP] = "RoutingPreference=Internet"
@@ -886,7 +945,7 @@ var _ = Describe("EnsureLoadBalancer should not update any resources when servic
 			annotation[consts.ServiceAnnotationPIPNameDualStack[false]] = utils.GetNameWithSuffix(ipNameBase, utils.Suffixes[false])
 			annotation[consts.ServiceAnnotationPIPNameDualStack[true]] = utils.GetNameWithSuffix(ipNameBase, utils.Suffixes[true])
 		} else {
-			annotation[consts.ServiceAnnotationPIPNameDualStack[false]] = ipNameBase
+			annotation[consts.ServiceAnnotationPIPNameDualStack[false]] = utils.GetNameWithSuffix(ipNameBase, utils.Suffixes[tc.IPFamily == utils.IPv6])
 		}
 
 		service := utils.CreateLoadBalancerServiceManifest(testServiceName, annotation, labels, ns.Name, ports)
@@ -917,7 +976,7 @@ var _ = Describe("EnsureLoadBalancer should not update any resources when servic
 	})
 
 	It("should respect service with BYO public IP prefix with various configurations", func() {
-		if !strings.EqualFold(os.Getenv(utils.LoadBalancerSkuEnv), string(network.PublicIPAddressSkuNameStandard)) {
+		if !strings.EqualFold(os.Getenv(utils.LoadBalancerSkuEnv), string(aznetwork.PublicIPAddressSkuNameStandard)) {
 			Skip("pip-prefix-id only work with Standard Load Balancer")
 		}
 
@@ -1016,18 +1075,37 @@ var _ = Describe("EnsureLoadBalancer should not update any resources when servic
 	})
 })
 
+func addDummyAnnotationWithServiceName(cs clientset.Interface, namespace string, serviceName string) {
+	service, err := cs.CoreV1().Services(namespace).Get(context.TODO(), serviceName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	addDummyAnnotationWithService(cs, namespace, service)
+}
+
+func addDummyAnnotationWithService(cs clientset.Interface, namespace string, service *v1.Service) {
+	utils.Logf("Adding a dummy annotation to trigger Service reconciliation")
+	Expect(service).NotTo(BeNil())
+	annotation := service.GetAnnotations()
+	if annotation == nil {
+		annotation = make(map[string]string)
+	}
+	// e2e test should not have 100+ dummy annotations.
+	for i := 0; i < 100; i++ {
+		if _, ok := annotation["dummy-annotation"+strconv.Itoa(i)]; !ok {
+			annotation["dummy-annotation"+strconv.Itoa(i)] = "dummy"
+			break
+		}
+	}
+	service = updateServiceAnnotation(service, annotation)
+	utils.Logf("Service's annotations: %v", annotation)
+	_, err := cs.CoreV1().Services(namespace).Update(context.TODO(), service, metav1.UpdateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+}
+
 func updateServiceAndCompareEtags(tc *utils.AzureTestClient, cs clientset.Interface, ns *v1.Namespace, service *v1.Service, ip string, isInternal bool) {
 	utils.Logf("Retrieving etags from resources")
 	lbEtag, nsgEtag, pipEtag := getResourceEtags(tc, ip, cloudprovider.DefaultLoadBalancerName(service), isInternal)
 
-	utils.Logf("Adding a dummy annotation to trigger a second service reconciliation")
-	Expect(service).NotTo(BeNil())
-	annotation := service.GetAnnotations()
-	annotation["dummy-annotation"] = "dummy"
-	service = updateServiceAnnotation(service, annotation)
-	utils.Logf("service's annotations: %v", annotation)
-	_, err := cs.CoreV1().Services(ns.Name).Update(context.TODO(), service, metav1.UpdateOptions{})
-	Expect(err).NotTo(HaveOccurred())
+	addDummyAnnotationWithService(cs, ns.Name, service)
 	ips, err := utils.WaitServiceExposureAndValidateConnectivity(cs, tc.IPFamily, ns.Name, testServiceName, []string{})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(len(ips)).NotTo(BeZero())
@@ -1040,11 +1118,11 @@ func updateServiceAndCompareEtags(tc *utils.AzureTestClient, cs clientset.Interf
 	Expect(pipEtag).To(Equal(newPipEtag), "pip etag")
 }
 
-func createNewSubnet(tc *utils.AzureTestClient, subnetName string) (*network.Subnet, bool) {
+func createNewSubnet(tc *utils.AzureTestClient, subnetName string) (*aznetwork.Subnet, bool) {
 	vNet, err := tc.GetClusterVirtualNetwork()
 	Expect(err).NotTo(HaveOccurred())
 
-	var subnetToReturn *network.Subnet
+	var subnetToReturn *aznetwork.Subnet
 	isNew := false
 	for i := range *vNet.Subnets {
 		existingSubnet := (*vNet.Subnets)[i]
@@ -1103,7 +1181,7 @@ func getResourceEtags(tc *utils.AzureTestClient, ip, nsgRulePrefix string, inter
 	return
 }
 
-func getAzureInternalLoadBalancerFromPrivateIP(tc *utils.AzureTestClient, ip, lbResourceGroup string) *network.LoadBalancer {
+func getAzureInternalLoadBalancerFromPrivateIP(tc *utils.AzureTestClient, ip, lbResourceGroup string) *aznetwork.LoadBalancer {
 	if lbResourceGroup == "" {
 		lbResourceGroup = tc.GetResourceGroup()
 	}
@@ -1111,7 +1189,7 @@ func getAzureInternalLoadBalancerFromPrivateIP(tc *utils.AzureTestClient, ip, lb
 	lbList, err := tc.ListLoadBalancers(lbResourceGroup)
 	Expect(err).NotTo(HaveOccurred())
 
-	var ilb *network.LoadBalancer
+	var ilb *aznetwork.LoadBalancer
 	utils.Logf("Looking for internal load balancer frontend config ID with private ip as frontend")
 	for i := range lbList {
 		lb := lbList[i]
@@ -1130,24 +1208,64 @@ func getAzureInternalLoadBalancerFromPrivateIP(tc *utils.AzureTestClient, ip, lb
 func waitForNodesInLBBackendPool(tc *utils.AzureTestClient, ip string, expectedNum int) error {
 	return wait.PollImmediate(10*time.Second, 10*time.Minute, func() (done bool, err error) {
 		lb := getAzureLoadBalancerFromPIP(tc, ip, tc.GetResourceGroup(), "")
-		lbBackendPoolIPConfigs := (*lb.BackendAddressPools)[getLBBackendPoolIndex(lb)].BackendIPConfigurations
-		ipConfigNum := 0
-		if lbBackendPoolIPConfigs != nil {
-			if utils.IsAutoscalingAKSCluster() {
-				for _, ipconfig := range *lbBackendPoolIPConfigs {
-					if !strings.Contains(*ipconfig.ID, utils.SystemPool) {
-						ipConfigNum++
-					}
+		if lb.Sku != nil && lb.Sku.Name == aznetwork.LoadBalancerSkuNameBasic {
+			// basic lb
+			idxes := getLBBackendPoolIndex(lb)
+			if len(idxes) == 0 {
+				return false, errors.New("no backend pool found")
+			}
+			failed := false
+			for _, idx := range idxes {
+				bp := (*lb.BackendAddressPools)[idx]
+				lbBackendPoolIPConfigs := bp.BackendIPConfigurations
+				ipConfigNum := 0
+				if lbBackendPoolIPConfigs != nil {
+					ipConfigNum = len(*lbBackendPoolIPConfigs)
 				}
+				if expectedNum == ipConfigNum {
+					utils.Logf("Number of IP configs in the LB backend pool %q matches expected number %d. Success", *bp.Name, expectedNum)
+				} else {
+					utils.Logf("Number of IP configs: %d in the LB backend pool %q, expected %d, will retry soon", ipConfigNum, *bp.Name, expectedNum)
+					failed = true
+				}
+			}
+			return !failed, nil
+		}
+		// SLB
+		idxes := getLBBackendPoolIndex(lb)
+		if len(idxes) == 0 {
+			return false, errors.New("no backend pool found")
+		}
+		failed := false
+		for _, idx := range idxes {
+			bp := (*lb.BackendAddressPools)[idx]
+			lbBackendPoolIPs := bp.LoadBalancerBackendAddresses
+			ipNum := 0
+			if lbBackendPoolIPs != nil {
+				if utils.IsAutoscalingAKSCluster() {
+					// Autoscaling tests don't include IP based LB.
+					for _, ip := range *lbBackendPoolIPs {
+						if ip.LoadBalancerBackendAddressPropertiesFormat == nil ||
+							ip.LoadBalancerBackendAddressPropertiesFormat.NetworkInterfaceIPConfiguration == nil {
+							return false, fmt.Errorf("LB backendPool address's NIC IP config ID is nil")
+						}
+						ipConfigID := pointer.StringDeref(ip.LoadBalancerBackendAddressPropertiesFormat.NetworkInterfaceIPConfiguration.ID, "")
+						if !strings.Contains(ipConfigID, utils.SystemPool) {
+							ipNum++
+						}
+					}
+				} else {
+					ipNum = len(*lbBackendPoolIPs)
+				}
+			}
+			if ipNum == expectedNum {
+				utils.Logf("Number of IPs in the LB backend pool %q matches expected number %d. Success", *bp.Name, expectedNum)
 			} else {
-				ipConfigNum = len(*lbBackendPoolIPConfigs)
+				utils.Logf("Number of IPs: %d in the LB backend pool %q, expected %d, will retry soon", ipNum, *bp.Name, expectedNum)
+				failed = true
 			}
 		}
-		if expectedNum == ipConfigNum {
-			return true, nil
-		}
-		utils.Logf("Number of IP configs: %d in the LB backend pool, expected %d, will retry soon", ipConfigNum, expectedNum)
-		return false, nil
+		return !failed, nil
 	})
 }
 
@@ -1155,15 +1273,14 @@ func judgeInternal(service v1.Service) bool {
 	return service.Annotations[consts.ServiceAnnotationLoadBalancerInternal] == utils.TrueValue
 }
 
-func getLBBackendPoolIndex(lb *aznetwork.LoadBalancer) int {
-	if os.Getenv(utils.AKSTestCCM) != "" {
-		for index, backendPool := range *lb.BackendAddressPools {
-			if *backendPool.Name != "aksOutboundBackendPool" {
-				return index
-			}
+func getLBBackendPoolIndex(lb *aznetwork.LoadBalancer) []int {
+	idxes := []int{}
+	for index, backendPool := range *lb.BackendAddressPools {
+		if !strings.Contains(strings.ToLower(*backendPool.Name), "outboundbackendpool") {
+			idxes = append(idxes, index)
 		}
 	}
-	return 0
+	return idxes
 }
 
 func updateServiceLBIPs(service *v1.Service, isInternal bool, ips []string) (result *v1.Service) {
@@ -1190,6 +1307,23 @@ func updateServiceLBIPs(service *v1.Service, isInternal bool, ips []string) (res
 	return
 }
 
+func updateServicePIPNames(ipFamily utils.IPFamily, service *v1.Service, pipNames []string) *v1.Service {
+	if service.Annotations == nil {
+		service.Annotations = map[string]string{}
+	}
+
+	isDualStack := ipFamily == utils.DualStack
+	for _, pipName := range pipNames {
+		if !isDualStack || !strings.HasSuffix(pipName, "-IPv6") {
+			service.Annotations[consts.ServiceAnnotationPIPNameDualStack[consts.IPVersionIPv4]] = pipName
+		} else {
+			service.Annotations[consts.ServiceAnnotationPIPNameDualStack[consts.IPVersionIPv6]] = pipName
+		}
+	}
+
+	return service
+}
+
 func defaultPublicIPAddress(ipName string, isIPv6 bool) aznetwork.PublicIPAddress {
 	// The default sku for LoadBalancer and PublicIP is basic.
 	skuName := aznetwork.PublicIPAddressSkuNameBasic
@@ -1209,7 +1343,7 @@ func defaultPublicIPAddress(ipName string, isIPv6 bool) aznetwork.PublicIPAddres
 		},
 	}
 	if isIPv6 {
-		pip.PublicIPAddressPropertiesFormat.PublicIPAddressVersion = network.IPv6
+		pip.PublicIPAddressPropertiesFormat.PublicIPAddressVersion = aznetwork.IPv6
 	}
 	return pip
 }

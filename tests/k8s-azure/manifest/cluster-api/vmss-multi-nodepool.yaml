@@ -419,6 +419,14 @@ data:
           - get
           - create
           - update
+      - apiGroups:
+          - discovery.k8s.io
+        resources:
+          - endpointslices
+        verbs:
+          - get
+          - list
+          - watch
     ---
     kind: ClusterRoleBinding
     apiVersion: rbac.authorization.k8s.io/v1
@@ -497,7 +505,7 @@ data:
                 - "--leader-elect=true"
                 - "--route-reconciliation-period=10s"
                 - "--v=4"
-                - "--port=10267"
+                - "--secure-port=10267"
               resources:
                 requests:
                   cpu: 100m
@@ -509,6 +517,7 @@ data:
                 httpGet:
                   path: /healthz
                   port: 10267
+                  scheme: HTTPS
                 initialDelaySeconds: 20
                 periodSeconds: 10
                 timeoutSeconds: 5

@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-09-01/storage"
+	"github.com/Azure/go-autorest/autorest/date"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/utils/pointer"
@@ -37,6 +39,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/storageaccountclient/mockstorageaccountclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient/mocksubnetclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/virtualnetworklinksclient/mockvirtualnetworklinksclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
 
@@ -51,20 +54,27 @@ func TestGetStorageAccessKeys(t *testing.T) {
 
 	cloud := &Cloud{}
 	value := "foo bar"
+	oldTime := date.Time{}
+	oldTime.Time = time.Now().Add(-time.Hour)
+	newValue := "newkey"
+	newTime := date.Time{}
+	newTime.Time = time.Now()
 
 	tests := []struct {
-		results     storage.AccountListKeysResult
-		expectedKey string
-		expectErr   bool
-		err         error
+		results             storage.AccountListKeysResult
+		getLatestAccountKey bool
+		expectedKey         string
+		expectErr           bool
+		err                 error
 	}{
-		{storage.AccountListKeysResult{}, "", true, nil},
+		{storage.AccountListKeysResult{}, false, "", true, nil},
 		{
 			storage.AccountListKeysResult{
 				Keys: &[]storage.AccountKey{
 					{Value: &value},
 				},
 			},
+			false,
 			"bar",
 			false,
 			nil,
@@ -76,18 +86,43 @@ func TestGetStorageAccessKeys(t *testing.T) {
 					{Value: &value},
 				},
 			},
+			false,
 			"bar",
 			false,
 			nil,
 		},
-		{storage.AccountListKeysResult{}, "", true, fmt.Errorf("test error")},
+		{
+			storage.AccountListKeysResult{
+				Keys: &[]storage.AccountKey{
+					{Value: &value, CreationTime: &oldTime},
+					{Value: &newValue, CreationTime: &newTime},
+				},
+			},
+			true,
+			"newkey",
+			false,
+			nil,
+		},
+		{
+			storage.AccountListKeysResult{
+				Keys: &[]storage.AccountKey{
+					{Value: &value, CreationTime: &oldTime},
+					{Value: &newValue, CreationTime: &newTime},
+				},
+			},
+			false,
+			"bar",
+			false,
+			nil,
+		},
+		{storage.AccountListKeysResult{}, false, "", true, fmt.Errorf("test error")},
 	}
 
 	for _, test := range tests {
 		mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
 		cloud.StorageAccountClient = mockStorageAccountsClient
 		mockStorageAccountsClient.EXPECT().ListKeys(gomock.Any(), "", "rg", gomock.Any()).Return(test.results, nil).AnyTimes()
-		key, err := cloud.GetStorageAccesskey(ctx, "", "acct", "rg")
+		key, err := cloud.GetStorageAccesskey(ctx, "", "acct", "rg", test.getLatestAccountKey)
 		if test.expectErr && err == nil {
 			t.Errorf("Unexpected non-error")
 			continue
@@ -102,7 +137,7 @@ func TestGetStorageAccessKeys(t *testing.T) {
 	}
 }
 
-func TestGetStorageAccount(t *testing.T) {
+func TestGetStorageAccounts(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -526,6 +561,61 @@ func TestEnsureStorageAccount(t *testing.T) {
 	}
 }
 
+func TestGetStorageAccountWithCache(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	cloud := &Cloud{}
+
+	tests := []struct {
+		name                    string
+		subsID                  string
+		resourceGroup           string
+		account                 string
+		setStorageAccountClient bool
+		setStorageAccountCache  bool
+		expectedErr             string
+	}{
+		{
+			name:        "[failure] StorageAccountClient is nil",
+			expectedErr: "StorageAccountClient is nil",
+		},
+		{
+			name:                    "[failure] storageAccountCache is nil",
+			setStorageAccountClient: true,
+			expectedErr:             "storageAccountCache is nil",
+		},
+		{
+			name:                    "[Success]",
+			setStorageAccountClient: true,
+			setStorageAccountCache:  true,
+			expectedErr:             "",
+		},
+	}
+
+	for _, test := range tests {
+		if test.setStorageAccountClient {
+			mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
+			cloud.StorageAccountClient = mockStorageAccountsClient
+			mockStorageAccountsClient.EXPECT().GetProperties(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.Account{}, nil).AnyTimes()
+		}
+
+		if test.setStorageAccountCache {
+			getter := func(key string) (interface{}, error) { return nil, nil }
+			cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
+		}
+
+		_, err := cloud.getStorageAccountWithCache(ctx, test.subsID, test.resourceGroup, test.account)
+		assert.Equal(t, err == nil, test.expectedErr == "", fmt.Sprintf("returned error: %v", err), test.name)
+		if test.expectedErr != "" && err != nil {
+			assert.Equal(t, err.RawError.Error(), test.expectedErr, err.RawError.Error(), test.name)
+		}
+	}
+}
+
 func TestIsPrivateEndpointAsExpected(t *testing.T) {
 	tests := []struct {
 		account        storage.Account
@@ -816,7 +906,7 @@ func TestIsAllowBlobPublicAccessEqual(t *testing.T) {
 				},
 			},
 			accountOptions: &AccountOptions{},
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			account: storage.Account{
@@ -825,7 +915,7 @@ func TestIsAllowBlobPublicAccessEqual(t *testing.T) {
 			accountOptions: &AccountOptions{
 				AllowBlobPublicAccess: pointer.Bool(false),
 			},
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			account: storage.Account{
@@ -845,7 +935,7 @@ func TestIsAllowBlobPublicAccessEqual(t *testing.T) {
 			accountOptions: &AccountOptions{
 				AllowBlobPublicAccess: pointer.Bool(true),
 			},
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			account: storage.Account{
@@ -879,7 +969,7 @@ func TestIsAllowSharedKeyAccessEqual(t *testing.T) {
 				},
 			},
 			accountOptions: &AccountOptions{},
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			account: storage.Account{
@@ -888,7 +978,7 @@ func TestIsAllowSharedKeyAccessEqual(t *testing.T) {
 			accountOptions: &AccountOptions{
 				AllowSharedKeyAccess: pointer.Bool(false),
 			},
-			expectedResult: true,
+			expectedResult: false,
 		},
 		{
 			account: storage.Account{
@@ -908,7 +998,7 @@ func TestIsAllowSharedKeyAccessEqual(t *testing.T) {
 			accountOptions: &AccountOptions{
 				AllowSharedKeyAccess: pointer.Bool(true),
 			},
-			expectedResult: false,
+			expectedResult: true,
 		},
 		{
 			account: storage.Account{

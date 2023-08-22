@@ -26,12 +26,18 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+)
+
+const (
+	IPVersionIPv6 bool = true
+	IPVersionIPv4 bool = false
 )
 
 var strToExtendedLocationType = map[string]network.ExtendedLocationTypes{
@@ -281,17 +287,17 @@ func getVMSSVMCacheKey(resourceGroup, vmssName string) string {
 }
 
 // isNodeInVMSSVMCache check whether nodeName is in vmssVMCache
-func isNodeInVMSSVMCache(nodeName string, vmssVMCache *azcache.TimedCache) bool {
+func isNodeInVMSSVMCache(nodeName string, vmssVMCache azcache.Resource) bool {
 	if vmssVMCache == nil {
 		return false
 	}
 
 	var isInCache bool
 
-	vmssVMCache.Lock.Lock()
-	defer vmssVMCache.Lock.Unlock()
+	vmssVMCache.Lock()
+	defer vmssVMCache.Unlock()
 
-	for _, entry := range vmssVMCache.Store.List() {
+	for _, entry := range vmssVMCache.GetStore().List() {
 		if entry != nil {
 			e := entry.(*azcache.AzureCacheEntry)
 			e.Lock.Lock()
@@ -392,10 +398,20 @@ func getServiceLoadBalancerIPs(service *v1.Service) []string {
 
 // setServiceLoadBalancerIP sets LB IP to a Service
 func setServiceLoadBalancerIP(service *v1.Service, ip string) {
+	if service == nil {
+		klog.Warning("setServiceLoadBalancerIP: Service is nil")
+		return
+	}
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		klog.Warning("setServiceLoadBalancerIP: IP %q is not valid for Service", ip, service.Name)
+		return
+	}
+
+	isIPv6 := parsedIP.To4() == nil
 	if service.Annotations == nil {
 		service.Annotations = map[string]string{}
 	}
-	isIPv6 := net.ParseIP(ip).To4() == nil
 	service.Annotations[consts.ServiceAnnotationLoadBalancerIPDualStack[isIPv6]] = ip
 }
 
@@ -409,6 +425,14 @@ func getServicePIPName(service *v1.Service, isIPv6 bool) string {
 	}
 
 	return service.Annotations[consts.ServiceAnnotationPIPNameDualStack[isIPv6]]
+}
+
+func getServicePIPNames(service *v1.Service) []string {
+	var ips []string
+	for _, ipVersion := range []bool{IPVersionIPv4, IPVersionIPv6} {
+		ips = append(ips, getServicePIPName(service, ipVersion))
+	}
+	return ips
 }
 
 func getServicePIPPrefixID(service *v1.Service, isIPv6 bool) string {
@@ -435,50 +459,13 @@ func getResourceByIPFamily(resource string, isDualStack, isIPv6 bool) string {
 }
 
 // isFIPIPv6 checks if the frontend IP configuration is of IPv6.
-func (az *Cloud) isFIPIPv6(service *v1.Service, fip *network.FrontendIPConfiguration, isInternal bool) (bool, error) {
-	if isInternal {
-		if fip.FrontendIPConfigurationPropertiesFormat != nil {
-			if fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddressVersion != "" {
-				return fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddressVersion == network.IPv6, nil
-			}
-			if fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddress != nil {
-				return net.ParseIP(*fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddress).To4() == nil, nil
-			}
-		}
-		klog.Errorf("Checking IP Family of frontend IP configuration %q of internal Service but "+
-			"it is not clear. It's considered to be IPv4",
-			pointer.StringDeref(fip.Name, ""))
-		return false, nil
+// NOTICE: isFIPIPv6 assumes the FIP is owned by the Service and it is the primary Service.
+func (az *Cloud) isFIPIPv6(service *v1.Service, pipRG string, fip *network.FrontendIPConfiguration) (bool, error) {
+	isDualStack := isServiceDualStack(service)
+	if !isDualStack {
+		return service.Spec.IPFamilies[0] == v1.IPv6Protocol, nil
 	}
-	var fipPIPID string
-	if fip.FrontendIPConfigurationPropertiesFormat != nil && fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress != nil {
-		fipPIPID = pointer.StringDeref(fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress.ID, "")
-	}
-	pipResourceGroup := az.getPublicIPAddressResourceGroup(service)
-	pips, err := az.listPIP(pipResourceGroup, azcache.CacheReadTypeDefault)
-	if err != nil {
-		return false, err
-	}
-	for _, pip := range pips {
-		id := pointer.StringDeref(pip.ID, "")
-		if !strings.EqualFold(fipPIPID, id) {
-			continue
-		}
-		if pip.PublicIPAddressPropertiesFormat != nil {
-			// First check PublicIPAddressVersion, then IPAddress
-			if pip.PublicIPAddressPropertiesFormat.PublicIPAddressVersion != "" {
-				return pip.PublicIPAddressPropertiesFormat.PublicIPAddressVersion == network.IPv6, nil
-			}
-			if pip.PublicIPAddressPropertiesFormat.IPAddress != nil {
-				return net.ParseIP(pointer.StringDeref(pip.PublicIPAddressPropertiesFormat.IPAddress, "")).To4() == nil, nil
-			}
-		}
-		klog.Errorf("Checking IP Family of PIP %q of corresponding frontend IP configuration %q of external Service but "+
-			"it is not clear. It's considered to be IPv4",
-			pointer.StringDeref(pip.Name, ""), pointer.StringDeref(fip.Name, ""))
-		break
-	}
-	return false, nil
+	return managedResourceHasIPv6Suffix(pointer.StringDeref(fip.Name, "")), nil
 }
 
 // getResourceIDPrefix returns a substring from the provided one between beginning and the last "/".
@@ -541,4 +528,79 @@ func countIPsOnBackendPool(backendPool network.BackendAddressPool) int {
 	}
 
 	return ipsCount
+}
+
+// StringInSlice check if string in a list
+func StringInSlice(s string, list []string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// stringSlice returns a string slice value for the passed string slice pointer. It returns a nil
+// slice if the pointer is nil.
+func stringSlice(s *[]string) []string {
+	if s != nil {
+		return *s
+	}
+	return nil
+}
+
+// IntInSlice checks if an int is in a list
+func IntInSlice(i int, list []int) bool {
+	for _, item := range list {
+		if item == i {
+			return true
+		}
+	}
+	return false
+}
+
+func safeAddKeyToStringsSet(set sets.Set[string], key string) sets.Set[string] {
+	if set != nil {
+		set.Insert(key)
+	} else {
+		set = sets.New[string](key)
+	}
+
+	return set
+}
+
+func safeRemoveKeyFromStringsSet(set sets.Set[string], key string) (sets.Set[string], bool) {
+	var has bool
+	if set != nil {
+		if set.Has(key) {
+			has = true
+		}
+		set.Delete(key)
+	}
+
+	return set, has
+}
+
+func setToStrings(set sets.Set[string]) []string {
+	var res []string
+	for key := range set {
+		res = append(res, key)
+	}
+	return res
+}
+
+func isLocalService(service *v1.Service) bool {
+	return service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyLocal
+}
+
+func getServiceIPFamily(service *v1.Service) string {
+	if len(service.Spec.IPFamilies) > 1 {
+		return consts.IPVersionDualStackString
+	}
+	for _, ipFamily := range service.Spec.IPFamilies {
+		if ipFamily == v1.IPv6Protocol {
+			return consts.IPVersionIPv6String
+		}
+	}
+	return consts.IPVersionIPv4String
 }

@@ -5,13 +5,13 @@
 {{- else if eq .Capabilities.KubeVersion.Minor "23" -}}
   {{- $_ := set . "cloudProviderAzureVersion" "v1.23.30" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "24" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.24.18" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.24.22" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "25" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.25.12" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.25.17" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "26" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.26.8" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.26.13" }}
 {{- else if eq .Capabilities.KubeVersion.Minor "27" -}}
-  {{- $_ := set . "cloudProviderAzureVersion" "v1.27.1" }}
+  {{- $_ := set . "cloudProviderAzureVersion" "v1.27.7" }}
 {{- end -}}
 {{- if .Values.cloudControllerManager.enabled }}
 apiVersion: v1
@@ -112,6 +112,14 @@ rules:
       - get
       - create
       - update
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -408,6 +416,7 @@ spec:
             {{- if hasKey .Values.cloudNodeManager "waitRoutes" }}
             - "--wait-routes={{ .Values.cloudNodeManager.waitRoutes }}"
             {{- end }}
+            - "--v={{ .Values.cloudNodeManager.logVerbosity }}"
           env:
             - name: NODE_NAME
               valueFrom:
@@ -434,18 +443,18 @@ data:
   start.ps1: |
     $cm = "$env:CONTAINER_SANDBOX_MOUNT_POINT/cloud-node-manager.exe"
 
-    ((Get-Content -path $env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig.conf -Raw) -replace '/var',"$($env:CONTAINER_SANDBOX_MOUNT_POINT)/var") | Set-Content -Path $env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig.conf
+    ((Get-Content -path $env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig.conf -Raw) -replace '/var',"$($env:CONTAINER_SANDBOX_MOUNT_POINT)/var") | Set-Content -Path $env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig-cnm.conf
 
     $argList = @()
 
-    foreach ($var in @("CLOUD_CONFIG", "KUBE_API_BURST", "KUBE_API_CONTENT_TYPE", "KUBE_API_QPS", "MASTER", "MIN_RESYNC_PERIOD", "NODE_STATUS_UPDATE_FREQUENCY", "WAIT_ROUTES")) {
+    foreach ($var in @("LOG_VERBOSITY", "CLOUD_CONFIG", "KUBE_API_BURST", "KUBE_API_CONTENT_TYPE", "KUBE_API_QPS", "MASTER", "MIN_RESYNC_PERIOD", "NODE_STATUS_UPDATE_FREQUENCY", "WAIT_ROUTES")) {
       if ([System.Environment]::GetEnvironmentVariable($var) -NE $null) {
         $argList += [System.Environment]::GetEnvironmentVariable($var)
       }
     }
 
-    Write-Host "Running $cm $argList --node-name=$env:NODE_NAME --use-instance-metadata=true --kubeconfig=$env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig.conf"
-    Invoke-Expression "$cm $argList --node-name=$env:NODE_NAME --use-instance-metadata=true --kubeconfig=$env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig.conf"
+    Write-Host "Running $cm $argList --node-name=$env:NODE_NAME --use-instance-metadata=true --kubeconfig=$env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig-cnm.conf"
+    Invoke-Expression "$cm $argList --node-name=$env:NODE_NAME --use-instance-metadata=true --kubeconfig=$env:CONTAINER_SANDBOX_MOUNT_POINT/var/lib/cpaw/kubeconfig-cnm.conf"
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -500,6 +509,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        {{- if hasKey .Values.cloudNodeManager "logVerbosity" }}
+        - name: LOG_VERBOSITY
+          value: "--v={{ .Values.cloudNodeManager.logVerbosity }}"
+        {{- end }}
         {{- if hasKey .Values.cloudNodeManager "cloudConfig" }}
         - name: CLOUD_CONFIG
           value: "--cloud-config={{ .Values.cloudNodeManager.cloudConfig }}"

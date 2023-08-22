@@ -34,8 +34,10 @@ type TypeScaffoldOptions struct {
 	Package      string
 	PackageAlias string
 	ClientName   string
+	PropertyName string
 	Verbs        []string
 	Expand       bool
+	RateLimitKey string
 }
 
 var (
@@ -68,39 +70,37 @@ import (
 )
 `
 	TypeResourceTemplate = `
-// +azure:client:verbs={{join .Verbs ";"}},resource={{.Resource}},packageName={{.Package}},packageAlias={{tolower .PackageAlias}},clientName={{.ClientName}},expand={{.Expand}}
+// +azure:client:verbs={{join .Verbs ";"}},resource={{.Resource}},packageName={{.Package}},packageAlias={{tolower .PackageAlias}},clientName={{.ClientName}},expand={{.Expand}}{{with .RateLimitKey}},rateLimitKey={{.}}{{end}}
 type Interface interface {
 {{ $expandable := .Expand}}
 {{ $packageAlias := .PackageAlias}}
 {{ $resource := .Resource}}
 {{range $index,$element := .Verbs}}
 {{if strequal $element "Get"}}
-    {{ if $expandable }}utils.GetWithExpandFunc[{{tolower $packageAlias}}.{{$resource}}]{{ else }}utils.GetFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}{{end}}
-{{if or (strequal $element "ListByRG") (strequal $element "List") }}
-	utils.ListFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{if strequal $element "CreateOrUpdate"}}
-	utils.CreateOrUpdateFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{if strequal $element "Delete"}}
-	utils.DeleteFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{end}}
+{{ if $expandable }}utils.GetWithExpandFunc[{{tolower $packageAlias}}.{{$resource}}]{{ else }}utils.GetFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{- end -}}
+{{if or (strequal $element "ListByRG") (strequal $element "List") }}utils.ListFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{if strequal $element "CreateOrUpdate"}}utils.CreateOrUpdateFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{if strequal $element "Delete"}}utils.DeleteFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{- end -}}
 }
 `
 	TypeSubResourceTemplate = `
-// +azure:client:verbs={{join .Verbs ";"}},resource={{.Resource}},subResource={{.SubResource}},packageName={{.Package}},packageAlias={{tolower .PackageAlias}},clientName={{.ClientName}},expand={{.Expand}}
+// +azure:client:verbs={{join .Verbs ";"}},resource={{.Resource}},subResource={{.SubResource}},packageName={{.Package}},packageAlias={{tolower .PackageAlias}},clientName={{.ClientName}},expand={{.Expand}}{{with .RateLimitKey}},rateLimitKey={{.}}{{end}}
 type Interface interface {
 {{ $expandable := .Expand}}
 {{ $packageAlias := .PackageAlias}}
 {{ $resource := .SubResource}}
 {{range $index,$element := .Verbs}}
 {{if strequal $element "Get"}}
-    {{ if $expandable }}utils.SubResourceGetWithExpandFunc[{{tolower $packageAlias}}.{{$resource}}]{{ else }}utils.SubResourceGetFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}{{end}}
-{{if or (strequal $element "ListByRG") (strequal $element "List") }}
-	utils.SubResourceListFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{if strequal $element "CreateOrUpdate"}}
-	utils.SubResourceCreateOrUpdateFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{if strequal $element "Delete"}}
-	utils.SubResourceDeleteFunc[{{tolower $packageAlias}}.{{$resource}}]{{end}}
-{{end}}
+{{ if $expandable }}utils.SubResourceGetWithExpandFunc[{{tolower $packageAlias}}.{{$resource}}]{{ else }}utils.SubResourceGetFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{- end -}}
+{{if or (strequal $element "ListByRG") (strequal $element "List") }}utils.SubResourceListFunc[{{tolower $packageAlias}}.{{$resource}}]
+{{- end -}}
+{{if strequal $element "CreateOrUpdate"}}utils.SubResourceCreateOrUpdateFunc[{{tolower $packageAlias}}.{{$resource}}]
+{{- end -}}
+{{if strequal $element "Delete"}}utils.SubResourceDeleteFunc[{{tolower $packageAlias}}.{{$resource}}]{{- end -}}
+{{- end -}}
 }
 `
 	typesTemplateHelpers = template.FuncMap{
@@ -109,7 +109,7 @@ type Interface interface {
 		"join":     strings.Join,
 		"strequal": strings.EqualFold,
 	}
-	typesSubResourceTemplate = template.Must(template.New("object-scaffolding").Funcs(typesTemplateHelpers).Parse(TypeTemplateHeader + TypeSubResourceTemplate))
+	typesSubResourceTemplate = template.Must(template.New("object-scaffolding-subresource").Funcs(typesTemplateHelpers).Parse(TypeTemplateHeader + TypeSubResourceTemplate))
 
 	typesResourceTemplate = template.Must(template.New("object-scaffolding").Funcs(typesTemplateHelpers).Parse(TypeTemplateHeader + TypeResourceTemplate))
 )
@@ -153,7 +153,7 @@ func main() {
 				return
 			}
 			if _, err = os.Lstat(fileName + "/interface.go"); err == nil {
-				fmt.Printf("file %s already exists, skip\n", fileName+"/interface.go")
+				fmt.Printf("interface file %s already exists, skip\n", fileName+"/interface.go")
 				return
 			}
 			err = os.WriteFile(fileName+"/interface.go", formattedContent, 0600)
@@ -190,6 +190,7 @@ func main() {
 	rootCmd.Flags().StringSliceVar(&scaffoldOptions.Verbs, "verbs", []string{"get", "createorupdate", "delete", "listbyrg"}, "verbs")
 	rootCmd.Flags().BoolVar(&scaffoldOptions.Expand, "expand", false, "get support expand params")
 	rootCmd.Flags().StringVar(&scaffoldOptions.SubResource, "subresource", "", "subresource name")
+	rootCmd.Flags().StringVar(&scaffoldOptions.RateLimitKey, "ratelimitkey", "", "ratelimit config key")
 
 	err := rootCmd.Execute()
 	if err != nil {
