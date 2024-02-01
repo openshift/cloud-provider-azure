@@ -11,7 +11,11 @@ azure-cloud-node-manager:
 	openshift-hack/build-go.sh cloud-node-manager
 .PHONY: azure-cloud-node-manager
 
-binaries: azure-cloud-controller-manager azure-cloud-node-manager
+azure-acr-credential-provider:
+	openshift-hack/build-go.sh acr-credential-provider 
+.PHONY: azure-acr-credential-provider
+
+binaries: azure-cloud-controller-manager azure-cloud-node-manager azure-acr-credential-provider
 .PHONY: binaries
 
 verify-history:
