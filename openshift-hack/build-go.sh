@@ -4,7 +4,7 @@ set -eu
 
 
 REPO=github.com/openshift/cloud-provider-azure
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT=${REPO_ROOT_OVERRIDE:=$(git rev-parse --show-toplevel)}
 WHAT=${1:-cloud-controller-manager}
 GLDFLAGS=${GLDFLAGS:-}
 
