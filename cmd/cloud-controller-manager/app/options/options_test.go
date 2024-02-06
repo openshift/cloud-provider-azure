@@ -317,8 +317,8 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
-			desc:     "should return an error when validating options with concurrent service syncs not equal to 1",
-			expected: "--concurrent-service-syncs is limited to 1 only",
+			desc:     "should not return an error when validating options with concurrent service syncs not equal to 1",
+			expected: "",
 			generateTestCloudControllerManagerOptions: func() *CloudControllerManagerOptions {
 				s, _ := NewCloudControllerManagerOptions()
 				s.ServiceController.ConcurrentServiceSyncs = 10
