@@ -248,10 +248,6 @@ func (o *CloudControllerManagerOptions) Validate(allControllers, disabledByDefau
 		errors = append(errors, fmt.Errorf("--cloud-provider cannot be empty"))
 	}
 
-	if o.ServiceController.ConcurrentServiceSyncs != 1 {
-		errors = append(errors, fmt.Errorf("--concurrent-service-syncs is limited to 1 only"))
-	}
-
 	if !o.DynamicReloading.EnableDynamicReloading && o.KubeCloudShared.CloudProvider.CloudConfigFile == "" {
 		errors = append(errors, fmt.Errorf("--cloud-config cannot be empty when --enable-dynamic-reloading is not set to true"))
 	}
