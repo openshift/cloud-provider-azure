@@ -5,3 +5,7 @@ exclude:
   global:
     - "vendor/**"
     - "**/vendor/**"
+    - "examples/**"
+    - "tests/**"
+    - "helm/**"
+    - "health-probe-proxy/example.yaml"
