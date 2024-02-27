@@ -256,6 +256,9 @@ func ParseAzureEnvironment(cloudName, resourceManagerEndpoint, identitySystem st
 	} else {
 		klog.V(4).Infof("Using %s environment", cloudName)
 		env, err = azure.EnvironmentFromName(cloudName)
+		if err == nil {
+			azureStackOverrides(&env, env.ResourceManagerEndpoint, identitySystem)
+		}
 	}
 	return &env, err
 }

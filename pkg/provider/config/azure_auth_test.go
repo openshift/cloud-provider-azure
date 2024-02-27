@@ -392,6 +392,9 @@ func TestGetNetworkResourceServicePrincipalTokenNegative(t *testing.T) {
 }
 
 func TestParseAzureEnvironment(t *testing.T) {
+	modifiedChinaCloud := azure.ChinaCloud
+	modifiedChinaCloud.ManagementPortalURL = "https://portal.chinacloudapi.cn/"
+	modifiedChinaCloud.ServiceManagementEndpoint = "https://management.chinacloudapi.cn/"
 	cases := []struct {
 		cloudName               string
 		resourceManagerEndpoint string
@@ -408,7 +411,7 @@ func TestParseAzureEnvironment(t *testing.T) {
 			cloudName:               "AZURECHINACLOUD",
 			resourceManagerEndpoint: "",
 			identitySystem:          "",
-			expected:                &azure.ChinaCloud,
+			expected:                &modifiedChinaCloud,
 		},
 	}
 
