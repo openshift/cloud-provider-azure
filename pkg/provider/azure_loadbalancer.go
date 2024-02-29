@@ -1789,13 +1789,16 @@ func (az *Cloud) reconcileLoadBalancer(clusterName string, service *v1.Service, 
 				klog.Errorf("reconcileLoadBalancer for service(%s) abort backoff: lb(%s) - updating: %s", serviceName, lbName, err.Error())
 				return nil, err
 			}
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - updating (finished)", serviceName, lbName)
 
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - getAzureLoadBalancer - starting", serviceName, lbName)
 			// Refresh updated lb which will be used later in other places.
 			newLB, exist, err := az.getAzureLoadBalancer(lbName, azcache.CacheReadTypeDefault)
 			if err != nil {
 				klog.Errorf("reconcileLoadBalancer for service(%s): getAzureLoadBalancer(%s) failed: %v", serviceName, lbName, err)
 				return nil, err
 			}
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - getAzureLoadBalancer - finshed", serviceName, lbName)
 			if !exist {
 				return nil, fmt.Errorf("load balancer %q not found", lbName)
 			}
@@ -1810,14 +1813,19 @@ func (az *Cloud) reconcileLoadBalancer(clusterName string, service *v1.Service, 
 		vmSetName := az.mapLoadBalancerNameToVMSet(lbName, clusterName)
 		// Etag would be changed when updating backend pools, so invalidate lbCache after it.
 		defer func() {
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - defer lbCache.Delete - starting", serviceName, lbName)
 			_ = az.lbCache.Delete(lbName)
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - defer lbCache.Delete - finished", serviceName, lbName)
 		}()
 
 		if az.useMultipleStandardLoadBalancers() {
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile multiple LBs - starting", serviceName, lbName)
 			err := az.reconcileMultipleStandardLoadBalancerBackendNodes(lbName, existingLBs, service, nodes)
 			if err != nil {
+				klog.Errorf("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile multiple LBs - failed: %v", serviceName, lbName, err)
 				return nil, err
 			}
+			klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile multiple LBs - finished", serviceName, lbName)
 		}
 
 		// Need to reconcile every managed backend pools of all managed load balancers in
@@ -1829,14 +1837,18 @@ func (az *Cloud) reconcileLoadBalancer(clusterName string, service *v1.Service, 
 		if az.useMultipleStandardLoadBalancers() {
 			lbToReconcile = *existingLBs
 		}
+		klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile backend pool hosts - starting", serviceName, lbName)
 		lb, err = az.reconcileBackendPoolHosts(lb, lbToReconcile, service, nodes, clusterName, vmSetName, lbBackendPoolIDs)
 		if err != nil {
 			return nil, err
 		}
+		klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile backend pool hosts - finsihed", serviceName, lbName)
 	}
 
 	if fipChanged {
+		klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reconcile multiple config status - starting", serviceName, lbName)
 		az.reconcileMultipleStandardLoadBalancerConfigurationStatus(wantLb, serviceName, lbName)
+		klog.V(2).Infof("reconcileLoadBalancer: reconcileLoadBalancer for service(%s): lb(%s) - reocncile multiple config status - finished", serviceName, lbName)
 	}
 
 	klog.V(2).Infof("reconcileLoadBalancer for service(%s): lb(%s) finished", serviceName, lbName)
@@ -1934,7 +1946,7 @@ func (az *Cloud) removeDeletedNodesFromLoadBalancerConfigurations(nodes []*v1.No
 				if nodeNamesSet.Has(nodeName) {
 					nodeNameToLBConfigIDXMap[nodeName] = i
 				} else {
-					klog.V(4).Infof("reconcileMultipleStandardLoadBalancerBackendNodes: node(%s) is gone, remove it from lb(%s)", nodeName, multiSLBConfig.Name)
+					klog.V(2).Infof("reconcileMultipleStandardLoadBalancerBackendNodes: node(%s) is gone, remove it from lb(%s)", nodeName, multiSLBConfig.Name)
 					az.MultipleStandardLoadBalancerConfigurations[i].ActiveNodes, _ = safeRemoveKeyFromStringsSet(az.MultipleStandardLoadBalancerConfigurations[i].ActiveNodes, strings.ToLower(nodeName))
 				}
 			}
@@ -1967,13 +1979,13 @@ func (az *Cloud) accommodateNodesByPrimaryVMSet(
 			if strings.EqualFold(multiSLBConfig.PrimaryVMSet, vmSetName) {
 				foundPrimaryLB := isLBInList(lbs, multiSLBConfig.Name)
 				if !foundPrimaryLB && !strings.EqualFold(strings.TrimSuffix(lbName, consts.InternalLoadBalancerNameSuffix), multiSLBConfig.Name) {
-					klog.V(4).Infof("accommodateNodesByPrimaryVMSet: node(%s) should be on lb(%s) because of primary vmSet (%s), but the lb is not found and will not be created this time, will ignore the primaryVMSet", node.Name, multiSLBConfig.Name, vmSetName)
+					klog.V(2).Infof("accommodateNodesByPrimaryVMSet: node(%s) should be on lb(%s) because of primary vmSet (%s), but the lb is not found and will not be created this time, will ignore the primaryVMSet", node.Name, multiSLBConfig.Name, vmSetName)
 					continue
 				}
 
 				az.nodesWithCorrectLoadBalancerByPrimaryVMSet.Store(strings.ToLower(node.Name), sets.Empty{})
 				if !multiSLBConfig.ActiveNodes.Has(node.Name) {
-					klog.V(4).Infof("accommodateNodesByPrimaryVMSet: node(%s) should be on lb(%s) because of primary vmSet (%s)", node.Name, multiSLBConfig.Name, vmSetName)
+					klog.V(2).Infof("accommodateNodesByPrimaryVMSet: node(%s) should be on lb(%s) because of primary vmSet (%s)", node.Name, multiSLBConfig.Name, vmSetName)
 
 					az.removeNodeFromLBConfig(nodeNameToLBConfigIDXMap, node.Name)
 
@@ -2016,10 +2028,10 @@ func (az *Cloud) accommodateNodesByNodeSelector(
 					return err
 				}
 				if nodeSelector.Matches(labels.Set(node.Labels)) {
-					klog.V(4).Infof("accommodateNodesByNodeSelector: lb(%s) matches node(%s) labels", multiSLBConfig.Name, node.Name)
+					klog.V(2).Infof("accommodateNodesByNodeSelector: lb(%s) matches node(%s) labels", multiSLBConfig.Name, node.Name)
 					found := isLBInList(lbs, multiSLBConfig.Name)
 					if !found && !strings.EqualFold(strings.TrimSuffix(lbName, consts.InternalLoadBalancerNameSuffix), multiSLBConfig.Name) {
-						klog.V(4).Infof("accommodateNodesByNodeSelector: but the lb is not found and will not be created this time, will ignore this load balancer")
+						klog.V(2).Infof("accommodateNodesByNodeSelector: but the lb is not found and will not be created this time, will ignore this load balancer")
 						continue
 					}
 					eligibleLBsIDX = append(eligibleLBsIDX, i)
@@ -2040,13 +2052,13 @@ func (az *Cloud) accommodateNodesByNodeSelector(
 			multiSLBConfig := az.MultipleStandardLoadBalancerConfigurations[eligibleLBsIDX[i]]
 			found := isLBInList(lbs, multiSLBConfig.Name)
 			if !found && !strings.EqualFold(strings.TrimSuffix(lbName, consts.InternalLoadBalancerNameSuffix), multiSLBConfig.Name) {
-				klog.V(4).Infof("accommodateNodesByNodeSelector: the load balancer %s is a valid placement target for node %s, but the lb is not found and will not be created this time, ignore this load balancer", multiSLBConfig.Name, node.Name)
+				klog.V(2).Infof("accommodateNodesByNodeSelector: the load balancer %s is a valid placement target for node %s, but the lb is not found and will not be created this time, ignore this load balancer", multiSLBConfig.Name, node.Name)
 				eligibleLBsIDX = append(eligibleLBsIDX[:i], eligibleLBsIDX[i+1:]...)
 			}
 		}
 		if idx, ok := nodeNameToLBConfigIDXMap[node.Name]; ok {
 			if IntInSlice(idx, eligibleLBsIDX) {
-				klog.V(4).Infof("accommodateNodesByNodeSelector: node(%s) is already on the eligible lb(%s)", node.Name, az.MultipleStandardLoadBalancerConfigurations[idx].Name)
+				klog.V(2).Infof("accommodateNodesByNodeSelector: node(%s) is already on the eligible lb(%s)", node.Name, az.MultipleStandardLoadBalancerConfigurations[idx].Name)
 				continue
 			}
 		}
@@ -2075,7 +2087,7 @@ func (az *Cloud) accommodateNodesByNodeSelector(
 			continue
 		}
 
-		klog.V(4).Infof("accommodateNodesByNodeSelector: node(%s) should be on lb(%s) it is the eligible LB with fewest number of nodes", node.Name, az.MultipleStandardLoadBalancerConfigurations[minNodesIDX].Name)
+		klog.V(2).Infof("accommodateNodesByNodeSelector: node(%s) should be on lb(%s) it is the eligible LB with fewest number of nodes", node.Name, az.MultipleStandardLoadBalancerConfigurations[minNodesIDX].Name)
 		az.multipleStandardLoadBalancersActiveNodesLock.Lock()
 		az.MultipleStandardLoadBalancerConfigurations[minNodesIDX].ActiveNodes = safeAddKeyToStringsSet(az.MultipleStandardLoadBalancerConfigurations[minNodesIDX].ActiveNodes, strings.ToLower(node.Name))
 		az.multipleStandardLoadBalancersActiveNodesLock.Unlock()
@@ -2144,10 +2156,10 @@ func (az *Cloud) reconcileMultipleStandardLoadBalancerConfigurationStatus(wantLb
 			}
 
 			if wantLb {
-				klog.V(4).Infof("reconcileMultipleStandardLoadBalancerConfigurationStatus: service(%s) is active on lb(%s)", svcName, lbName)
+				klog.V(2).Infof("reconcileMultipleStandardLoadBalancerConfigurationStatus: service(%s) is active on lb(%s)", svcName, lbName)
 				az.MultipleStandardLoadBalancerConfigurations[i].ActiveServices.Insert(strings.ToLower(svcName))
 			} else {
-				klog.V(4).Infof("reconcileMultipleStandardLoadBalancerConfigurationStatus: service(%s) is not active on lb(%s) any more", svcName, lbName)
+				klog.V(2).Infof("reconcileMultipleStandardLoadBalancerConfigurationStatus: service(%s) is not active on lb(%s) any more", svcName, lbName)
 				az.MultipleStandardLoadBalancerConfigurations[i].ActiveServices, _ = safeRemoveKeyFromStringsSet(az.MultipleStandardLoadBalancerConfigurations[i].ActiveServices, strings.ToLower(svcName))
 			}
 			az.multipleStandardLoadBalancersActiveServicesLock.Unlock()
