@@ -224,19 +224,24 @@ func (c *Client) listLB(ctx context.Context, resourceGroupName string) ([]networ
 func (c *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, loadBalancerName string, parameters network.LoadBalancer, etag string) *retry.Error {
 	mc := metrics.NewMetricContext("load_balancers", "create_or_update", resourceGroupName, c.subscriptionID, "")
 
+	klog.V(2).Infof("LoadBalancer (%s) - rateLimiterWriter.TryAccept - start", loadBalancerName)
 	// Report errors if the client is rate limited.
 	if !c.rateLimiterWriter.TryAccept() {
 		mc.RateLimitedCount()
 		return retry.GetRateLimitError(true, "LBCreateOrUpdate")
 	}
+	klog.V(2).Infof("LoadBalancer (%s) - rateLimiterWriter.TryAccept - end", loadBalancerName)
 
+	klog.V(2).Infof("LoadBalancer (%s) - RetryAfterWriter.After - start", loadBalancerName)
 	// Report errors if the client is throttled.
 	if c.RetryAfterWriter.After(time.Now()) {
 		mc.ThrottledCount()
 		rerr := retry.GetThrottlingError("LBCreateOrUpdate", "client throttled", c.RetryAfterWriter)
 		return rerr
 	}
+	klog.V(2).Infof("LoadBalancer (%s) - RetryAfterWriter.After - end", loadBalancerName)
 
+	klog.V(2).Infof("LoadBalancer (%s) - createOrUpdateLB - start", loadBalancerName)
 	rerr := c.createOrUpdateLB(ctx, resourceGroupName, loadBalancerName, parameters, etag)
 	mc.Observe(rerr)
 	if rerr != nil {
@@ -247,6 +252,7 @@ func (c *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, l
 
 		return rerr
 	}
+	klog.V(2).Infof("LoadBalancer (%s) - createOrUpdateLB - end", loadBalancerName)
 
 	return nil
 }
@@ -264,19 +270,23 @@ func (c *Client) createOrUpdateLB(ctx context.Context, resourceGroupName string,
 		decorators = append(decorators, autorest.WithHeader("If-Match", autorest.String(etag)))
 	}
 
+	klog.V(2).Infof("LoadBalancer (%s) - armClient.PutResource - start", loadBalancerName)
 	response, rerr := c.armClient.PutResource(ctx, resourceID, parameters, decorators...)
 	defer c.armClient.CloseResponse(ctx, response)
 	if rerr != nil {
-		klog.V(5).Infof("Received error in %s: resourceID: %s, error: %s", "loadbalancer.put.request", resourceID, rerr.Error())
+		klog.V(2).Infof("Received error in %s: resourceID: %s, error: %s", "loadbalancer.put.request", resourceID, rerr.Error())
 		return rerr
 	}
+	klog.V(2).Infof("LoadBalancer (%s) - armClient.PutResource - end", loadBalancerName)
 
 	if response != nil && response.StatusCode != http.StatusNoContent {
+		klog.V(2).Infof("LoadBalancer (%s) - createOrUpdateResponder - start", loadBalancerName)
 		_, rerr = c.createOrUpdateResponder(response)
 		if rerr != nil {
-			klog.V(5).Infof("Received error in %s: resourceID: %s, error: %s", "loadbalancer.put.respond", resourceID, rerr.Error())
+			klog.V(2).Infof("Received error in %s: resourceID: %s, error: %s", "loadbalancer.put.respond", resourceID, rerr.Error())
 			return rerr
 		}
+		klog.V(2).Infof("LoadBalancer (%s) - createOrUpdateResponder - end", loadBalancerName)
 	}
 
 	return nil
