@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=linux/amd64 golang:1.21-bullseye@sha256:3b4ac7623c123263662ec6c62ef7b97a1e47b8c9e03de9e631651b293f5b8e41 AS builder
+FROM --platform=linux/amd64 golang:1.22-bullseye@sha256:1c3919e932f650b7f7304dc68d4b6a17bd0e9250e19bcf2efb62ad6b6ccd1936 AS builder
 
 ARG ENABLE_GIT_COMMAND=true
 ARG ARCH=amd64
@@ -22,8 +22,18 @@ ARG ARCH=amd64
 WORKDIR /go/src/sigs.k8s.io/cloud-provider-azure
 COPY . .
 
+# Build the Go app
 RUN make bin/azure-cloud-node-manager ENABLE_GIT_COMMAND=${ENABLE_GIT_COMMAND}
 
+# Use distroless static image for a lean production container.
+# Start a new build stage.
 FROM gcr.io/distroless/static
+
+# Create a group and user
+USER 65532:65532
+
+# Copy the pre-built binary file from the previous stage.
 COPY --from=builder /go/src/sigs.k8s.io/cloud-provider-azure/bin/azure-cloud-node-manager /usr/local/bin/cloud-node-manager
+
+# Run the web service on container startup.
 ENTRYPOINT [ "/usr/local/bin/cloud-node-manager" ]

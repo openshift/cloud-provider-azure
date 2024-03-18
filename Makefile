@@ -372,7 +372,11 @@ clean: ## Cleanup local builds.
 	rm -rf $(BIN_DIR) $(PKG_CONFIG) $(TEST_RESULTS_DIR)
 
 $(PKG_CONFIG):
+ifeq ($(OVERRIDE_PKG_CONFIG), true)
+	@echo "Overriding pkg-config script. Use an alternate method to generate .pkg_config"
+else
 	ENABLE_GIT_COMMAND=$(ENABLE_GIT_COMMAND) hack/pkg-config.sh > $@
+endif
 
 ## --------------------------------------
 ##@ Release
@@ -409,9 +413,3 @@ LINTER_VERSION = v1.55.2
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
 	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
-
-## --------------------------------------
-## Openshift specific include
-## --------------------------------------
-
-include openshift.mk

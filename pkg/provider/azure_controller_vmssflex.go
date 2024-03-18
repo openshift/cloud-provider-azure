@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,16 +36,16 @@ import (
 )
 
 // AttachDisk attaches a disk to vm
-func (fs *FlexScaleSet) AttachDisk(ctx context.Context, nodeName types.NodeName, diskMap map[string]*AttachDiskOptions) (*azure.Future, error) {
+func (fs *FlexScaleSet) AttachDisk(ctx context.Context, nodeName types.NodeName, diskMap map[string]*AttachDiskOptions) error {
 	vmName := mapNodeNameToVMName(nodeName)
 	vm, err := fs.getVmssFlexVM(vmName, azcache.CacheReadTypeDefault)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	nodeResourceGroup, err := fs.GetNodeResourceGroup(vmName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	disks := make([]compute.DataDisk, len(*vm.StorageProfile.DataDisks))
@@ -60,7 +61,7 @@ func (fs *FlexScaleSet) AttachDisk(ctx context.Context, nodeName types.NodeName,
 					attached = true
 					break
 				}
-				return nil, fmt.Errorf("disk(%s) already attached to node(%s) on LUN(%d), but target LUN is %d", diskURI, nodeName, *disk.Lun, opt.Lun)
+				return fmt.Errorf("disk(%s) already attached to node(%s) on LUN(%d), but target LUN is %d", diskURI, nodeName, *disk.Lun, opt.Lun)
 			}
 		}
 		if attached {
@@ -115,13 +116,13 @@ func (fs *FlexScaleSet) AttachDisk(ctx context.Context, nodeName types.NodeName,
 
 	klog.V(2).Infof("azureDisk - update(%s): vm(%s) - attach disk list(%+v) returned with %v", nodeResourceGroup, vmName, diskMap, rerr)
 	if rerr != nil {
-		return future, rerr.Error()
+		return rerr.Error()
 	}
-	return future, nil
+	return fs.WaitForUpdateResult(ctx, future, nodeName, "attach_disk")
 }
 
 // DetachDisk detaches a disk from VM
-func (fs *FlexScaleSet) DetachDisk(ctx context.Context, nodeName types.NodeName, diskMap map[string]string) error {
+func (fs *FlexScaleSet) DetachDisk(ctx context.Context, nodeName types.NodeName, diskMap map[string]string, forceDetach bool) error {
 	vmName := mapNodeNameToVMName(nodeName)
 	vm, err := fs.getVmssFlexVM(vmName, azcache.CacheReadTypeDefault)
 	if err != nil {
@@ -147,6 +148,9 @@ func (fs *FlexScaleSet) DetachDisk(ctx context.Context, nodeName types.NodeName,
 				// found the disk
 				klog.V(2).Infof("azureDisk - detach disk: name %s uri %s", diskName, diskURI)
 				disks[i].ToBeDetached = pointer.Bool(true)
+				if forceDetach {
+					disks[i].DetachOption = compute.ForceDetach
+				}
 				bFoundDisk = true
 			}
 		}
@@ -297,7 +301,7 @@ func (fs *FlexScaleSet) updateCache(nodeName string, vm *compute.VirtualMachine)
 }
 
 // GetDataDisks gets a list of data disks attached to the node.
-func (fs *FlexScaleSet) GetDataDisks(nodeName types.NodeName, crt azcache.AzureCacheReadType) ([]compute.DataDisk, *string, error) {
+func (fs *FlexScaleSet) GetDataDisks(nodeName types.NodeName, crt azcache.AzureCacheReadType) ([]*armcompute.DataDisk, *string, error) {
 	vm, err := fs.getVmssFlexVM(string(nodeName), crt)
 	if err != nil {
 		return nil, nil, err
@@ -306,6 +310,9 @@ func (fs *FlexScaleSet) GetDataDisks(nodeName types.NodeName, crt azcache.AzureC
 	if vm.StorageProfile.DataDisks == nil {
 		return nil, nil, nil
 	}
-
-	return *vm.StorageProfile.DataDisks, vm.ProvisioningState, nil
+	result, err := ToArmcomputeDisk(*vm.StorageProfile.DataDisks)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result, vm.ProvisioningState, nil
 }

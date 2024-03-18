@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/go-autorest/autorest/azure"
 	autorestmocks "github.com/Azure/go-autorest/autorest/mocks"
@@ -107,7 +108,7 @@ func TestAttachDiskWithVmssFlex(t *testing.T) {
 		mockVMClient.EXPECT().ListVmssFlexVMsWithOnlyInstanceView(gomock.Any(), gomock.Any()).Return(tc.testVMListWithOnlyInstanceView, tc.vmListErr).AnyTimes()
 
 		mockVMClient.EXPECT().UpdateAsync(gomock.Any(), gomock.Any(), tc.vmName, gomock.Any(), gomock.Any()).Return(nil, tc.vmssFlexVMUpdateError).AnyTimes()
-
+		mockVMClient.EXPECT().WaitForUpdateResult(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, tc.vmssFlexVMUpdateError).AnyTimes()
 		options := AttachDiskOptions{
 			Lun:                     1,
 			DiskName:                "diskname",
@@ -122,7 +123,7 @@ func TestAttachDiskWithVmssFlex(t *testing.T) {
 			"uri": &options,
 		}
 
-		_, err = fs.AttachDisk(ctx, tc.nodeName, diskMap)
+		err = fs.AttachDisk(ctx, tc.nodeName, diskMap)
 		if tc.expectedErr == nil {
 			assert.NoError(t, err)
 		} else {
@@ -143,6 +144,7 @@ func TestDettachDiskWithVmssFlex(t *testing.T) {
 		vmName                         string
 		testVMListWithoutInstanceView  []compute.VirtualMachine
 		testVMListWithOnlyInstanceView []compute.VirtualMachine
+		forceDetach                    bool
 		vmListErr                      error
 		vmssFlexVMUpdateError          *retry.Error
 		diskMap                        map[string]string
@@ -154,6 +156,18 @@ func TestDettachDiskWithVmssFlex(t *testing.T) {
 			vmName:                         testVM1Spec.VMName,
 			testVMListWithoutInstanceView:  testVMListWithoutInstanceView,
 			testVMListWithOnlyInstanceView: testVMListWithOnlyInstanceView,
+			vmListErr:                      nil,
+			vmssFlexVMUpdateError:          nil,
+			diskMap:                        map[string]string{"diskUri1": "dataDisktestvm1"},
+			expectedErr:                    nil,
+		},
+		{
+			description:                    "DetachDisk should work as expected with managed disk with forceDetach",
+			nodeName:                       types.NodeName(testVM1Spec.ComputerName),
+			vmName:                         testVM1Spec.VMName,
+			testVMListWithoutInstanceView:  testVMListWithoutInstanceView,
+			testVMListWithOnlyInstanceView: testVMListWithOnlyInstanceView,
+			forceDetach:                    true,
 			vmListErr:                      nil,
 			vmssFlexVMUpdateError:          nil,
 			diskMap:                        map[string]string{"diskUri1": "dataDisktestvm1"},
@@ -206,7 +220,7 @@ func TestDettachDiskWithVmssFlex(t *testing.T) {
 
 		mockVMClient.EXPECT().Update(gomock.Any(), gomock.Any(), tc.vmName, gomock.Any(), "detach_disk").Return(nil, tc.vmssFlexVMUpdateError).AnyTimes()
 
-		err = fs.DetachDisk(ctx, tc.nodeName, tc.diskMap)
+		err = fs.DetachDisk(ctx, tc.nodeName, tc.diskMap, tc.forceDetach)
 		if tc.expectedErr == nil {
 			assert.NoError(t, err)
 		} else {
@@ -296,7 +310,7 @@ func TestGetDataDisksWithVmssFlex(t *testing.T) {
 		testVMListWithoutInstanceView  []compute.VirtualMachine
 		testVMListWithOnlyInstanceView []compute.VirtualMachine
 		vmListErr                      error
-		expectedDataDisks              []compute.DataDisk
+		expectedDataDisks              []*armcompute.DataDisk
 		expectedErr                    error
 	}{
 		{
@@ -305,11 +319,11 @@ func TestGetDataDisksWithVmssFlex(t *testing.T) {
 			testVMListWithoutInstanceView:  testVMListWithoutInstanceView,
 			testVMListWithOnlyInstanceView: testVMListWithOnlyInstanceView,
 			vmListErr:                      nil,
-			expectedDataDisks: []compute.DataDisk{
+			expectedDataDisks: []*armcompute.DataDisk{
 				{
 					Lun:         pointer.Int32(1),
 					Name:        pointer.String("dataDisktestvm1"),
-					ManagedDisk: &compute.ManagedDiskParameters{ID: pointer.String("uri")},
+					ManagedDisk: &armcompute.ManagedDiskParameters{ID: pointer.String("uri")},
 				},
 			},
 			expectedErr: nil,

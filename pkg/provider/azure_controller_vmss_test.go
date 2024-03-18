@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/go-autorest/autorest/azure"
 	autorestmocks "github.com/Azure/go-autorest/autorest/mocks"
@@ -133,6 +134,7 @@ func TestAttachDiskWithVMSS(t *testing.T) {
 			mockVMSSVMClient.EXPECT().UpdateAsync(gomock.Any(), testCloud.ResourceGroup, scaleSetName, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
 		} else {
 			mockVMSSVMClient.EXPECT().UpdateAsync(gomock.Any(), testCloud.ResourceGroup, scaleSetName, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+			mockVMSSVMClient.EXPECT().WaitForUpdateResult(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 		}
 
 		diskMap := map[string]*AttachDiskOptions{}
@@ -152,7 +154,7 @@ func TestAttachDiskWithVMSS(t *testing.T) {
 				testCloud.SubscriptionID, testCloud.ResourceGroup, diskName)
 			diskMap[diskURI] = &options
 		}
-		_, err = ss.AttachDisk(ctx, test.vmssvmName, diskMap)
+		err = ss.AttachDisk(ctx, test.vmssvmName, diskMap)
 		assert.Equal(t, test.expectedErr, err, "TestCase[%d]: %s, expected error: %v, return error: %v", i, test.desc, test.expectedErr, err)
 	}
 }
@@ -173,6 +175,7 @@ func TestDetachDiskWithVMSS(t *testing.T) {
 		vmssName       types.NodeName
 		vmssvmName     types.NodeName
 		disks          []string
+		forceDetach    bool
 		expectedErr    bool
 		expectedErrMsg error
 	}{
@@ -199,6 +202,15 @@ func TestDetachDiskWithVMSS(t *testing.T) {
 			vmssName:    "vmss00",
 			vmssvmName:  "vmss00-vm-000000",
 			disks:       []string{diskName, "disk2"},
+			expectedErr: false,
+		},
+		{
+			desc:        "no error shall be returned with force detach",
+			vmssVMList:  []string{"vmss00-vm-000000", "vmss00-vm-000001", "vmss00-vm-000002"},
+			vmssName:    "vmss00",
+			vmssvmName:  "vmss00-vm-000000",
+			disks:       []string{diskName, "disk2"},
+			forceDetach: true,
 			expectedErr: false,
 		},
 		{
@@ -282,7 +294,7 @@ func TestDetachDiskWithVMSS(t *testing.T) {
 				testCloud.SubscriptionID, testCloud.ResourceGroup, diskName)
 			diskMap[diskURI] = diskName
 		}
-		err = ss.DetachDisk(ctx, test.vmssvmName, diskMap)
+		err = ss.DetachDisk(ctx, test.vmssvmName, diskMap, test.forceDetach)
 		assert.Equal(t, test.expectedErr, err != nil, "TestCase[%d]: %s, err: %v", i, test.desc, err)
 		if test.expectedErr {
 			assert.EqualError(t, test.expectedErrMsg, err.Error(), "TestCase[%d]: %s, expected error: %v, return error: %v", i, test.desc, test.expectedErrMsg, err)
@@ -426,7 +438,7 @@ func TestGetDataDisksWithVMSS(t *testing.T) {
 		desc              string
 		crt               azcache.AzureCacheReadType
 		nodeName          types.NodeName
-		expectedDataDisks []compute.DataDisk
+		expectedDataDisks []*armcompute.DataDisk
 		isDataDiskNull    bool
 		expectedErr       bool
 		expectedErrMsg    error
@@ -442,7 +454,7 @@ func TestGetDataDisksWithVMSS(t *testing.T) {
 		{
 			desc:     "correct list of data disks shall be returned if everything is good",
 			nodeName: "vmss00-vm-000000",
-			expectedDataDisks: []compute.DataDisk{
+			expectedDataDisks: []*armcompute.DataDisk{
 				{
 					Lun:  pointer.Int32(0),
 					Name: pointer.String("disk1"),
@@ -454,7 +466,7 @@ func TestGetDataDisksWithVMSS(t *testing.T) {
 		{
 			desc:     "correct list of data disks shall be returned if everything is good",
 			nodeName: "vmss00-vm-000000",
-			expectedDataDisks: []compute.DataDisk{
+			expectedDataDisks: []*armcompute.DataDisk{
 				{
 					Lun:  pointer.Int32(0),
 					Name: pointer.String("disk1"),
