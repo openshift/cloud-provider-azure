@@ -31,6 +31,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/stretchr/testify/assert"
+
 	"go.uber.org/mock/gomock"
 
 	"golang.org/x/text/cases"
@@ -51,6 +52,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/zoneclient/mockzoneclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
+	utilsets "sigs.k8s.io/cloud-provider-azure/pkg/util/sets"
 )
 
 // LBInUseRawError is the LoadBalancerInUseByVirtualMachineScaleSet raw error
@@ -63,11 +65,10 @@ const LBInUseRawError = `{
 }`
 
 const (
-	expectedPIPID  = "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"
-	rgprefix       = "/subscriptions/subscription/resourceGroups/rg"
-	resourcesuffix = "/providers/Microsoft.Network/publicIPAddresses/pip1"
-	ipv6Suffix     = "-IPv6"
-	svcPrefix      = "aservice1-"
+	expectedPIPID = "/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"
+	rgprefix      = "/subscriptions/subscription/resourceGroups/rg"
+	ipv6Suffix    = "-IPv6"
+	svcPrefix     = "aservice1-"
 )
 
 func TestExistsPip(t *testing.T) {
@@ -1653,7 +1654,7 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 				{
 					Name: "lb2",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveServices: sets.Set[string]{"default/test1": sets.Empty{}},
+						ActiveServices: utilsets.NewString("default/test1"),
 					},
 				},
 			},
@@ -1734,7 +1735,7 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 				{
 					Name: "lb2",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveServices: sets.Set[string]{"default/test1": sets.Empty{}},
+						ActiveServices: utilsets.NewString("default/test1"),
 					},
 				},
 			},
@@ -6751,9 +6752,9 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 		expectedDeleteCall            bool
 		expectedDecoupleErr           error
 		multiSLBConfigs               []MultipleStandardLoadBalancerConfiguration
-		nodesWithCorrectVMSet         sets.Set[string]
+		nodesWithCorrectVMSet         *utilsets.IgnoreCaseSet
 		expectedMultiSLBConfigs       []MultipleStandardLoadBalancerConfiguration
-		expectedNodesWithCorrectVMSet sets.Set[string]
+		expectedNodesWithCorrectVMSet *utilsets.IgnoreCaseSet
 		expectedErr                   *retry.Error
 	}{
 		{
@@ -6777,32 +6778,32 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 				{
 					Name: "test",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.New[string]("node1", "node2"),
+						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
 					Name: "test2",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.New[string]("node3"),
+						ActiveNodes: utilsets.NewString("node3"),
 					},
 				},
 			},
-			nodesWithCorrectVMSet: sets.New[string]("node1", "node2", "node3"),
+			nodesWithCorrectVMSet: utilsets.NewString("node1", "node2", "node3"),
 			expectedMultiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "test",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.New[string](),
+						ActiveNodes: utilsets.NewString(),
 					},
 				},
 				{
 					Name: "test2",
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.New[string]("node3"),
+						ActiveNodes: utilsets.NewString("node3"),
 					},
 				},
 			},
-			expectedNodesWithCorrectVMSet: sets.New[string]("node3"),
+			expectedNodesWithCorrectVMSet: utilsets.NewString("node3"),
 		},
 	}
 
@@ -6824,7 +6825,7 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 			cloud.LoadBalancerClient = mockLBClient
 			if len(tc.multiSLBConfigs) > 0 {
 				cloud.MultipleStandardLoadBalancerConfigurations = tc.multiSLBConfigs
-				for nodeName := range tc.nodesWithCorrectVMSet {
+				for _, nodeName := range tc.nodesWithCorrectVMSet.UnsortedList() {
 					cloud.nodesWithCorrectLoadBalancerByPrimaryVMSet.Store(nodeName, sets.Empty{})
 				}
 			}
@@ -6839,7 +6840,7 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 			assert.Equal(t, tc.expectedErr, err)
 			if len(tc.multiSLBConfigs) > 0 {
 				assert.Equal(t, tc.expectedMultiSLBConfigs, cloud.MultipleStandardLoadBalancerConfigurations)
-				actualNodesWithCorrectLoadBalancerByPrimaryVMSet := sets.New[string]()
+				actualNodesWithCorrectLoadBalancerByPrimaryVMSet := utilsets.NewString()
 				cloud.nodesWithCorrectLoadBalancerByPrimaryVMSet.Range(func(key, value interface{}) bool {
 					actualNodesWithCorrectLoadBalancerByPrimaryVMSet.Insert(key.(string))
 					return true
@@ -6948,6 +6949,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 						},
 					},
 				},
+				{
+					Name: "c",
+					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+				},
 			},
 			namespace: &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -6978,8 +6983,46 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 						},
 					},
 				},
+				{
+					Name: "c",
+					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+				},
 			},
 			expectedLBs: []string{"b"},
+		},
+		{
+			description: "should put the service to the load balancers that does not have label/namespace selector if there is no other choice",
+			svc:         getTestService("test", v1.ProtocolTCP, nil, false),
+			labels:      map[string]string{"k2": "v2", "k3": "v3"},
+			namespace: &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "ns1",
+					Labels: map[string]string{"k1": "v1"},
+				},
+			},
+			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+				{
+					Name: "fails to match service label",
+					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+						ServiceLabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"k1": "v1"},
+						},
+					},
+				},
+				{
+					Name: "fails to match service namespace",
+					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+						ServiceNamespaceSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"k2": "v2"},
+						},
+					},
+				},
+				{
+					Name: "empty",
+					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+				},
+			},
+			expectedLBs: []string{"empty"},
 		},
 		{
 			description: "should return the intersection of annotation, namespace and label selector",
@@ -7077,7 +7120,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 						},
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveServices: sets.New[string]("default/test"),
+						ActiveServices: utilsets.NewString("default/test"),
 					},
 				},
 			},
@@ -7142,7 +7185,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 						AllowServicePlacement: pointer.Bool(false),
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveServices: sets.New[string]("default/test"),
+						ActiveServices: utilsets.NewString("default/test"),
 					},
 				},
 				{
@@ -7418,6 +7461,33 @@ func TestGetMostEligibleLBName(t *testing.T) {
 			},
 			expectedLBName: "lb1",
 		},
+		{
+			description: "should respect internal load balancers",
+			eligibleLBs: []string{"lb1", "lb2", "lb3"},
+			existingLBs: &[]network.LoadBalancer{
+				{
+					Name: pointer.String("lb1-internal"),
+					LoadBalancerPropertiesFormat: &network.LoadBalancerPropertiesFormat{
+						LoadBalancingRules: &[]network.LoadBalancingRule{
+							{},
+						},
+					},
+				},
+				{
+					Name: pointer.String("lb2-internal"),
+					LoadBalancerPropertiesFormat: &network.LoadBalancerPropertiesFormat{
+						LoadBalancingRules: &[]network.LoadBalancingRule{},
+					},
+				},
+				{
+					Name: pointer.String("lb3-internal"),
+					LoadBalancerPropertiesFormat: &network.LoadBalancerPropertiesFormat{
+						LoadBalancingRules: &[]network.LoadBalancingRule{},
+					},
+				},
+			},
+			expectedLBName: "lb2",
+		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			lbName := getMostEligibleLBForService(tc.currentLBName, tc.eligibleLBs, tc.existingLBs)
@@ -7435,15 +7505,15 @@ func TestReconcileMultipleStandardLoadBalancerConfigurations(t *testing.T) {
 		useMultipleLB          bool
 		noPrimaryConfig        bool
 		nodes                  []*v1.Node
-		expectedActiveServices map[string]sets.Set[string]
+		expectedActiveServices map[string]*utilsets.IgnoreCaseSet
 		expectedErr            error
 	}{
 		{
 			description:   "should set active services correctly",
 			useMultipleLB: true,
-			expectedActiveServices: map[string]sets.Set[string]{
-				"kubernetes": sets.New[string]("default/lbsvconkubernetes"),
-				"lb1":        sets.New[string]("ns1/lbsvconlb1"),
+			expectedActiveServices: map[string]*utilsets.IgnoreCaseSet{
+				"kubernetes": utilsets.NewString("default/lbsvconkubernetes"),
+				"lb1":        utilsets.NewString("ns1/lbsvconlb1"),
 			},
 		},
 		{
@@ -7540,13 +7610,9 @@ func TestReconcileMultipleStandardLoadBalancerConfigurations(t *testing.T) {
 			err := az.reconcileMultipleStandardLoadBalancerConfigurations(&existingLBs, &svc, "kubernetes", &existingLBs, tc.nodes)
 			assert.Equal(t, err, tc.expectedErr)
 
-			activeServices := make(map[string]sets.Set[string])
+			activeServices := make(map[string]*utilsets.IgnoreCaseSet)
 			for _, multiSLBConfig := range az.MultipleStandardLoadBalancerConfigurations {
-				svcNames := sets.New[string]()
-				for activeService := range multiSLBConfig.ActiveServices {
-					svcNames.Insert(activeService)
-				}
-				activeServices[multiSLBConfig.Name] = svcNames
+				activeServices[multiSLBConfig.Name] = multiSLBConfig.ActiveServices
 			}
 			for lbConfigName, svcNames := range tc.expectedActiveServices {
 				assert.Equal(t, svcNames, activeServices[lbConfigName])
@@ -8012,7 +8078,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		existingNodes        []*v1.Node
 		existingLBs          []network.LoadBalancer
 		expectedPutLBTimes   int
-		expectedLBToNodesMap map[string]sets.Set[string]
+		expectedLBToNodesMap map[string]*utilsets.IgnoreCaseSet
 	}{
 		{
 			description: "should remove unwanted nodes and arrange existing nodes with primary vmSet as expected",
@@ -8023,7 +8089,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 						PrimaryVMSet: "vmss-1",
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.Set[string]{"node1": sets.Empty{}, "node2": sets.Empty{}},
+						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
@@ -8032,7 +8098,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 						PrimaryVMSet: "vmss-2",
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.Set[string]{"node3": sets.Empty{}, "node4": sets.Empty{}},
+						ActiveNodes: utilsets.NewString("node3", "node4"),
 					},
 				},
 			},
@@ -8096,9 +8162,9 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 			},
 			expectedPutLBTimes: 1,
-			expectedLBToNodesMap: map[string]sets.Set[string]{
-				"lb1": {"node1": sets.Empty{}},
-				"lb2": {"node2": sets.Empty{}, "node3": sets.Empty{}},
+			expectedLBToNodesMap: map[string]*utilsets.IgnoreCaseSet{
+				"lb1": utilsets.NewString("node1"),
+				"lb2": utilsets.NewString("node2", "node3"),
 			},
 		},
 		{
@@ -8114,7 +8180,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 						},
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.Set[string]{"node1": sets.Empty{}, "node2": sets.Empty{}},
+						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
@@ -8126,7 +8192,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 						},
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.Set[string]{"node3": sets.Empty{}, "node4": sets.Empty{}},
+						ActiveNodes: utilsets.NewString("node3", "node4"),
 					},
 				},
 				{
@@ -8200,11 +8266,11 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 					},
 				},
 			},
-			expectedLBToNodesMap: map[string]sets.Set[string]{
-				"lb1": {"node1": sets.Empty{}},
-				"lb2": {"node3": sets.Empty{}},
-				"lb3": {"node5": sets.Empty{}},
-				"lb4": {"node2": sets.Empty{}, "node6": sets.Empty{}},
+			expectedLBToNodesMap: map[string]*utilsets.IgnoreCaseSet{
+				"lb1": utilsets.NewString("node1"),
+				"lb2": utilsets.NewString("node3"),
+				"lb3": utilsets.NewString("node5"),
+				"lb4": utilsets.NewString("node2", "node6"),
 			},
 		},
 		{
@@ -8219,15 +8285,15 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 						},
 					},
 					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
-						ActiveNodes: sets.Set[string]{"node1": sets.Empty{}, "node2": sets.Empty{}},
+						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 			},
 			existingNodes: []*v1.Node{
 				getTestNodeWithMetadata("node1", "vmss-2", map[string]string{"k2": "v2"}, "10.1.0.1"),
 			},
-			expectedLBToNodesMap: map[string]sets.Set[string]{
-				"lb1": {},
+			expectedLBToNodesMap: map[string]*utilsets.IgnoreCaseSet{
+				"lb1": utilsets.NewString(),
 			},
 		},
 		{
@@ -8291,11 +8357,11 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				getTestNodeWithMetadata("node5", "vmss-3", map[string]string{"k2": "v2"}, "10.1.0.5"),
 				getTestNodeWithMetadata("node6", "vmss-3", map[string]string{"k3": "v3"}, "10.1.0.6"),
 			},
-			expectedLBToNodesMap: map[string]sets.Set[string]{
+			expectedLBToNodesMap: map[string]*utilsets.IgnoreCaseSet{
 				"lb1": nil,
-				"lb2": {"node3": sets.Empty{}, "node5": sets.Empty{}},
+				"lb2": utilsets.NewString("node3", "node5"),
 				"lb3": nil,
-				"lb4": {"node1": sets.Empty{}, "node2": sets.Empty{}, "node6": sets.Empty{}},
+				"lb4": utilsets.NewString("node1", "node2", "node6"),
 			},
 		},
 		{
@@ -8349,9 +8415,9 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				getTestNodeWithMetadata("node5", "vmss-3", map[string]string{"k2": "v2"}, "10.1.0.5"),
 				getTestNodeWithMetadata("node6", "vmss-3", map[string]string{"k3": "v3"}, "10.1.0.6"),
 			},
-			expectedLBToNodesMap: map[string]sets.Set[string]{
+			expectedLBToNodesMap: map[string]*utilsets.IgnoreCaseSet{
 				"lb1": nil,
-				"lb2": {"node3": sets.Empty{}, "node5": sets.Empty{}},
+				"lb2": utilsets.NewString("node3", "node5"),
 				"lb3": nil,
 				"lb4": nil,
 			},
@@ -8367,7 +8433,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 			svc := getTestService("test", v1.ProtocolTCP, nil, false)
 			_ = az.reconcileMultipleStandardLoadBalancerBackendNodes(tc.lbName, &tc.existingLBs, &svc, tc.existingNodes)
 
-			expectedLBToNodesMap := make(map[string]sets.Set[string])
+			expectedLBToNodesMap := make(map[string]*utilsets.IgnoreCaseSet)
 			for _, multiSLBConfig := range az.MultipleStandardLoadBalancerConfigurations {
 				expectedLBToNodesMap[multiSLBConfig.Name] = multiSLBConfig.ActiveNodes
 			}

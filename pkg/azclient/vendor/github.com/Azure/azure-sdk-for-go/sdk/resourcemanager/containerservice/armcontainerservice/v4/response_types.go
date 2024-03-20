@@ -110,6 +110,18 @@ type ManagedClustersClientGetCommandResultResponse struct {
 	Location *string
 }
 
+// ManagedClustersClientGetMeshRevisionProfileResponse contains the response from method ManagedClustersClient.GetMeshRevisionProfile.
+type ManagedClustersClientGetMeshRevisionProfileResponse struct {
+	// Mesh revision profile for a mesh.
+	MeshRevisionProfile
+}
+
+// ManagedClustersClientGetMeshUpgradeProfileResponse contains the response from method ManagedClustersClient.GetMeshUpgradeProfile.
+type ManagedClustersClientGetMeshUpgradeProfileResponse struct {
+	// Upgrade profile for given mesh.
+	MeshUpgradeProfile
+}
+
 // ManagedClustersClientGetOSOptionsResponse contains the response from method ManagedClustersClient.GetOSOptions.
 type ManagedClustersClientGetOSOptionsResponse struct {
 	// The OS option profile.
@@ -156,6 +168,18 @@ type ManagedClustersClientListClusterUserCredentialsResponse struct {
 type ManagedClustersClientListKubernetesVersionsResponse struct {
 	// Hold values properties, which is array of KubernetesVersion
 	KubernetesVersionListResult
+}
+
+// ManagedClustersClientListMeshRevisionProfilesResponse contains the response from method ManagedClustersClient.NewListMeshRevisionProfilesPager.
+type ManagedClustersClientListMeshRevisionProfilesResponse struct {
+	// Holds an array of MeshRevisionsProfiles
+	MeshRevisionProfileList
+}
+
+// ManagedClustersClientListMeshUpgradeProfilesResponse contains the response from method ManagedClustersClient.NewListMeshUpgradeProfilesPager.
+type ManagedClustersClientListMeshUpgradeProfilesResponse struct {
+	// Holds an array of MeshUpgradeProfiles
+	MeshUpgradeProfileList
 }
 
 // ManagedClustersClientListOutboundNetworkDependenciesEndpointsResponse contains the response from method ManagedClustersClient.NewListOutboundNetworkDependenciesEndpointsPager.
@@ -286,4 +310,33 @@ type SnapshotsClientListResponse struct {
 type SnapshotsClientUpdateTagsResponse struct {
 	// A node pool snapshot resource.
 	Snapshot
+}
+
+// TrustedAccessRoleBindingsClientCreateOrUpdateResponse contains the response from method TrustedAccessRoleBindingsClient.BeginCreateOrUpdate.
+type TrustedAccessRoleBindingsClientCreateOrUpdateResponse struct {
+	// Defines binding between a resource and role
+	TrustedAccessRoleBinding
+}
+
+// TrustedAccessRoleBindingsClientDeleteResponse contains the response from method TrustedAccessRoleBindingsClient.BeginDelete.
+type TrustedAccessRoleBindingsClientDeleteResponse struct {
+	// placeholder for future response values
+}
+
+// TrustedAccessRoleBindingsClientGetResponse contains the response from method TrustedAccessRoleBindingsClient.Get.
+type TrustedAccessRoleBindingsClientGetResponse struct {
+	// Defines binding between a resource and role
+	TrustedAccessRoleBinding
+}
+
+// TrustedAccessRoleBindingsClientListResponse contains the response from method TrustedAccessRoleBindingsClient.NewListPager.
+type TrustedAccessRoleBindingsClientListResponse struct {
+	// List of trusted access role bindings
+	TrustedAccessRoleBindingListResult
+}
+
+// TrustedAccessRolesClientListResponse contains the response from method TrustedAccessRolesClient.NewListPager.
+type TrustedAccessRolesClientListResponse struct {
+	// List of trusted access roles
+	TrustedAccessRoleListResult
 }

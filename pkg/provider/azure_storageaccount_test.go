@@ -178,6 +178,7 @@ func TestGetStorageAccounts(t *testing.T) {
 	accountOptions := &AccountOptions{
 		ResourceGroup:             "rg",
 		VirtualNetworkResourceIDs: []string{networkID},
+		EnableHTTPSTrafficOnly:    true,
 	}
 
 	mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
@@ -521,7 +522,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 
 			computeClientFactory := mock_azclient.NewMockClientFactory(ctrl)
 			mockPrivateDNSClient := mock_privatezoneclient.NewMockInterface(ctrl)
-			mockPrivateDNSClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any()).Return(&privatedns.PrivateZone{}, errors.New("error")).Times(1)
+			mockPrivateDNSClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any()).Return(&privatedns.PrivateZone{}, errors.New("ResourceNotFound")).Times(1)
 			mockPrivateDNSClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
 			computeClientFactory.EXPECT().GetPrivateZoneClient().Return(mockPrivateDNSClient).AnyTimes()
 
@@ -532,7 +533,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 			mockPrivateEndpointClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), "", true).Return(nil).Times(1)
 			cloud.privateendpointclient = mockPrivateEndpointClient
 			mockVirtualNetworkLinksClient := mock_virtualnetworklinkclient.NewMockInterface(ctrl)
-			mockVirtualNetworkLinksClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(&privatedns.VirtualNetworkLink{}, errors.New("error")).Times(1)
+			mockVirtualNetworkLinksClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(&privatedns.VirtualNetworkLink{}, errors.New("ResourceNotFound")).Times(1)
 			mockVirtualNetworkLinksClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
 			computeClientFactory.EXPECT().GetVirtualNetworkLinkClient().Return(mockVirtualNetworkLinksClient).AnyTimes()
 			cloud.ComputeClientFactory = computeClientFactory
@@ -917,6 +918,34 @@ func TestIsTagsEqual(t *testing.T) {
 			},
 			expectedResult: false,
 		},
+		{
+			desc: "non-identitical tags with different keys",
+			account: storage.Account{
+				Tags: map[string]*string{
+					"key1": pointer.String("value2"),
+				},
+			},
+			accountOptions: &AccountOptions{
+				MatchTags: true,
+				Tags: map[string]string{
+					"key2": "value",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			desc: "account tags is empty",
+			account: storage.Account{
+				Tags: map[string]*string{},
+			},
+			accountOptions: &AccountOptions{
+				MatchTags: true,
+				Tags: map[string]string{
+					"key": "value",
+				},
+			},
+			expectedResult: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -1047,6 +1076,69 @@ func TestIsEnableNfsV3PropertyEqual(t *testing.T) {
 
 	for _, test := range tests {
 		result := isEnableNfsV3PropertyEqual(test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result)
+	}
+}
+
+func TestIsEnableHTTPSTrafficOnly(t *testing.T) {
+	tests := []struct {
+		account        storage.Account
+		accountOptions *AccountOptions
+		expectedResult bool
+	}{
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableHTTPSTrafficOnly: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly: false,
+			},
+			expectedResult: false,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableHTTPSTrafficOnly: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly: true,
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly: true,
+			},
+			expectedResult: true,
+		},
+		{
+			account: storage.Account{
+				AccountProperties: &storage.AccountProperties{
+					EnableHTTPSTrafficOnly: pointer.Bool(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly: false,
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, test := range tests {
+		result := isEnableHTTPSTrafficOnlyEqual(test.account, test.accountOptions)
 		assert.Equal(t, test.expectedResult, result)
 	}
 }

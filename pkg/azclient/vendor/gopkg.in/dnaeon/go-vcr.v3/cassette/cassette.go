@@ -28,7 +28,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -140,6 +139,12 @@ type Interaction struct {
 	// replayed is true when this interaction has been played
 	// already.
 	replayed bool `yaml:"-"`
+}
+
+// WasReplayed returns a boolean indicating whether the given interaction was
+// already replayed.
+func (i *Interaction) WasReplayed() bool {
+	return i.replayed
 }
 
 // GetHTTPRequest converts the recorded interaction request to
@@ -260,13 +265,13 @@ func New(name string) *Cassette {
 // Load reads a cassette file from disk
 func Load(name string) (*Cassette, error) {
 	c := New(name)
-	data, err := ioutil.ReadFile(c.File)
+	data, err := os.ReadFile(c.File)
 	if err != nil {
 		return nil, err
 	}
 
 	c.IsNew = false
-	if err := yaml.Unmarshal(data, &c); err != nil {
+	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, err
 	}
 
