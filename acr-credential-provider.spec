@@ -44,7 +44,7 @@
 # Customize from here.
 #
 
-%global golang_version 1.21.0
+%global golang_version 1.20.0
 %{!?version: %global version 0.0.1}
 %{!?release: %global release 1}
 %global package_name acr-credential-provider
