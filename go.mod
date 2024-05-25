@@ -1,6 +1,6 @@
 module sigs.k8s.io/cloud-provider-azure
 
-go 1.24
+go 1.22
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.18.0
