@@ -317,7 +317,7 @@ ifdef JUNIT
 endif
 
 .PHONY: test-check
-test-check: test-boilerplate test-helm verify-vendor-licenses ## Run all static checks.
+test-check: test-boilerplate test-helm ## Run all static checks.
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint against code.
@@ -413,9 +413,3 @@ LINTER_VERSION = v1.55.2
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
 	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
-
-## --------------------------------------
-## Openshift specific include
-## --------------------------------------
-
-include openshift.mk

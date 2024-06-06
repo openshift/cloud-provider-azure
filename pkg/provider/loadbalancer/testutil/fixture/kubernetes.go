@@ -71,6 +71,16 @@ type KubernetesServiceFixture struct {
 	svc v1.Service
 }
 
+func (f *KubernetesServiceFixture) WithNamespace(ns string) *KubernetesServiceFixture {
+	f.svc.Namespace = ns
+	return f
+}
+
+func (f *KubernetesServiceFixture) WithName(name string) *KubernetesServiceFixture {
+	f.svc.Name = name
+	return f
+}
+
 func (f *KubernetesServiceFixture) WithInternalEnabled() *KubernetesServiceFixture {
 	f.svc.Annotations[consts.ServiceAnnotationLoadBalancerInternal] = "true"
 	return f
@@ -134,6 +144,14 @@ func (f *KubernetesServiceFixture) UDPNodePorts() []int32 {
 		}
 	}
 	return rv
+}
+
+func (f *KubernetesServiceFixture) WithIngressIPs(ips []string) *KubernetesServiceFixture {
+	f.svc.Status.LoadBalancer.Ingress = make([]v1.LoadBalancerIngress, len(ips))
+	for i, ip := range ips {
+		f.svc.Status.LoadBalancer.Ingress[i].IP = ip
+	}
+	return f
 }
 
 func (f *KubernetesServiceFixture) Build() v1.Service {
