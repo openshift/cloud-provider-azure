@@ -707,6 +707,296 @@ var _ = Describe("Network security group", Label(utils.TestSuiteLabelNSG), func(
 			})
 		})
 	})
+
+	When("creating 2 LoadBalancer services with shared public IP", func() {
+		It("should add rules independently", func() {
+
+			const (
+				Deployment1Name = "app-01"
+				Deployment2Name = "app-02"
+
+				Service1Name = "svc-01"
+				Service2Name = "svc-02"
+			)
+
+			var (
+				app1Port  int32 = 80
+				app2Port  int32 = 81
+				replicas  int32 = 2
+				svc1IPv4s []netip.Addr
+				svc1IPv6s []netip.Addr
+				svc2IPs   []netip.Addr
+			)
+
+			deployment1 := createDeploymentManifest(Deployment1Name, map[string]string{
+				"app": Deployment1Name,
+			}, &app1Port, nil)
+			deployment1.Spec.Replicas = &replicas
+			_, err := k8sClient.AppsV1().Deployments(namespace.Name).Create(context.Background(), deployment1, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment2 := createDeploymentManifest(Deployment2Name, map[string]string{
+				"app": Deployment2Name,
+			}, &app2Port, nil)
+			deployment2.Spec.Replicas = &replicas
+			_, err = k8sClient.AppsV1().Deployments(namespace.Name).Create(context.Background(), deployment2, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating service 1", func() {
+				var (
+					labels = map[string]string{
+						"app": Deployment1Name,
+					}
+					annotations = map[string]string{}
+					ports       = []v1.ServicePort{{
+						Port:       app1Port,
+						TargetPort: intstr.FromInt32(app1Port),
+					}}
+				)
+				rv := createAndExposeDefaultServiceWithAnnotation(k8sClient, azureClient.IPFamily, Service1Name, namespace.Name, labels, annotations, ports)
+				svc1IPv4s, svc1IPv6s = groupIPsByFamily(mustParseIPs(derefSliceOfStringPtr(rv)))
+				logger.Info("Created the first LoadBalancer service", "svc-name", Service1Name, "v4-IPs", svc1IPv4s, "v6-IPs", svc1IPv6s)
+			})
+
+			By("Creating service 2", func() {
+
+				joinIPsAsString := func(ips []netip.Addr) string {
+					var s []string
+					for _, ip := range ips {
+						s = append(s, ip.String())
+					}
+					return strings.Join(s, ",")
+				}
+
+				var (
+					labels = map[string]string{
+						"app": Deployment2Name,
+					}
+					annotations = map[string]string{
+						"service.beta.kubernetes.io/azure-load-balancer-ipv4": joinIPsAsString(svc1IPv4s),
+						"service.beta.kubernetes.io/azure-load-balancer-ipv6": joinIPsAsString(svc1IPv6s),
+					}
+					ports = []v1.ServicePort{{
+						Port:       app2Port,
+						TargetPort: intstr.FromInt32(app2Port),
+					}}
+				)
+
+				rv := createAndExposeDefaultServiceWithAnnotation(k8sClient, azureClient.IPFamily, Service2Name, namespace.Name, labels, annotations, ports)
+				svc2IPv4s, svc2IPv6s := groupIPsByFamily(mustParseIPs(derefSliceOfStringPtr(rv)))
+				logger.Info("Created the second LoadBalancer service", "svc-name", Service2Name, "v4-IPs", svc2IPv4s, "v6-IPs", svc2IPv6s)
+				Expect(svc2IPv4s).To(Equal(svc1IPv4s))
+				Expect(svc2IPv6s).To(Equal(svc1IPv6s))
+			})
+
+			var validator *SecurityGroupValidator
+			By("Getting the cluster security groups", func() {
+				rv, err := azureClient.GetClusterSecurityGroups()
+				Expect(err).NotTo(HaveOccurred())
+
+				validator = NewSecurityGroupValidator(rv)
+			})
+
+			By("Checking if the rule for allowing traffic for app 01", func() {
+				var (
+					expectedProtocol = aznetwork.SecurityRuleProtocolTCP
+					expectedDstPorts = []string{strconv.FormatInt(int64(app1Port), 10)}
+				)
+
+				By("Checking if the rule for allowing traffic from Internet exists")
+
+				if len(svc1IPv4s) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, svc1IPv4s, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv4 traffic from Internet")
+				}
+
+				if len(svc1IPv6s) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, svc1IPv6s, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv6 traffic from Internet")
+				}
+			})
+
+			By("Checking if the rule for allowing traffic for app 02", func() {
+				var (
+					expectedProtocol = aznetwork.SecurityRuleProtocolTCP
+					expectedDstPorts = []string{strconv.FormatInt(int64(app2Port), 10)}
+				)
+				By("Checking if the rule for allowing traffic from Internet exists")
+				Expect(
+					validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, svc2IPs, expectedDstPorts),
+				).To(BeTrue(), "Should have a rule for allowing traffic from Internet")
+			})
+		})
+	})
+
+	When("creating 2 LoadBalancer services with shared BYO public IP", func() {
+		It("should add rules independently", func() {
+
+			const (
+				Deployment1Name = "app-01"
+				Deployment2Name = "app-02"
+
+				Service1Name = "svc-01"
+				Service2Name = "svc-02"
+			)
+
+			var (
+				app1Port                 int32 = 80
+				app2Port                 int32 = 81
+				replicas                 int32 = 2
+				ipv4PIPName, ipv6PIPName string
+				ipv4PIPs, ipv6PIPs       []netip.Addr
+
+				// TODO: move to utils
+				applyIPFamilyForService = func(svc *v1.Service, ipFamily utils.IPFamily, ipv4PIPName, ipv6PIPName string) error {
+					switch ipFamily {
+					case utils.IPv4:
+						svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv4Protocol}
+						svc.Spec.IPFamilyPolicy = ptr.To(v1.IPFamilyPolicySingleStack)
+						svc.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]] = ipv4PIPName
+					case utils.IPv6:
+						svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv6Protocol}
+						svc.Spec.IPFamilyPolicy = ptr.To(v1.IPFamilyPolicySingleStack)
+						svc.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]] = ipv6PIPName
+					case utils.DualStack:
+						svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol}
+						svc.Spec.IPFamilyPolicy = ptr.To(v1.IPFamilyPolicyPreferDualStack)
+						svc.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]] = ipv4PIPName
+						svc.Annotations[consts.ServiceAnnotationPIPNameDualStack[true]] = ipv6PIPName
+					default:
+						return fmt.Errorf("unsupported IPFamily: %v", ipFamily)
+					}
+					return nil
+				}
+			)
+
+			By("Creating shared BYO public IP")
+			{
+				v4Enabled, v6Enabled := utils.IfIPFamiliesEnabled(azureClient.IPFamily)
+				if v4Enabled {
+					// FIXME: avoid duplicated get name with suffix
+					base := fmt.Sprintf("%s-pip", namespace.Name)
+					ip, cleanup := createPIP(azureClient, base, false)
+					ipv4PIPName = utils.GetNameWithSuffix(base, utils.Suffixes[false])
+					ipv4PIPs = append(ipv4PIPs, netip.MustParseAddr(ip))
+					DeferCleanup(cleanup)
+				}
+				if v6Enabled {
+					base := fmt.Sprintf("%s-pip", namespace.Name)
+					ip, cleanup := createPIP(azureClient, base, true)
+					ipv6PIPName = utils.GetNameWithSuffix(base, utils.Suffixes[true])
+					ipv6PIPs = append(ipv6PIPs, netip.MustParseAddr(ip))
+					DeferCleanup(cleanup)
+				}
+				logger.Info("Created BYO public IP", "v4-PIP", ipv4PIPs, "v6-PIP", ipv6PIPs, "v4-PIP-Name", ipv4PIPName, "v6-PIP-Name", ipv6PIPName)
+			}
+
+			deployment1 := createDeploymentManifest(Deployment1Name, map[string]string{
+				"app": Deployment1Name,
+			}, &app1Port, nil)
+			deployment1.Spec.Replicas = &replicas
+			_, err := k8sClient.AppsV1().Deployments(namespace.Name).Create(context.Background(), deployment1, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			deployment2 := createDeploymentManifest(Deployment2Name, map[string]string{
+				"app": Deployment2Name,
+			}, &app2Port, nil)
+			deployment2.Spec.Replicas = &replicas
+			_, err = k8sClient.AppsV1().Deployments(namespace.Name).Create(context.Background(), deployment2, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating service 1", func() {
+				var (
+					labels = map[string]string{
+						"app": Deployment1Name,
+					}
+					annotations = map[string]string{}
+					ports       = []v1.ServicePort{{
+						Port:       app1Port,
+						TargetPort: intstr.FromInt32(app1Port),
+					}}
+				)
+				rv := createAndExposeDefaultServiceWithAnnotation(k8sClient, azureClient.IPFamily, Service1Name, namespace.Name, labels, annotations, ports, func(svc *v1.Service) error {
+					return applyIPFamilyForService(svc, azureClient.IPFamily, ipv4PIPName, ipv6PIPName)
+				})
+				ipv4s, ipv6s := groupIPsByFamily(mustParseIPs(derefSliceOfStringPtr(rv)))
+				logger.Info("Created the first LoadBalancer service", "svc-name", Service1Name, "v4-IPs", ipv4s, "v6-IPs", ipv6s)
+				Expect(ipv4s).To(Equal(ipv4PIPs))
+				Expect(ipv6s).To(Equal(ipv6PIPs))
+			})
+
+			By("Creating service 2", func() {
+				var (
+					labels = map[string]string{
+						"app": Deployment2Name,
+					}
+					annotations = map[string]string{}
+					ports       = []v1.ServicePort{{
+						Port:       app2Port,
+						TargetPort: intstr.FromInt32(app2Port),
+					}}
+				)
+
+				rv := createAndExposeDefaultServiceWithAnnotation(k8sClient, azureClient.IPFamily, Service2Name, namespace.Name, labels, annotations, ports, func(svc *v1.Service) error {
+					return applyIPFamilyForService(svc, azureClient.IPFamily, ipv4PIPName, ipv6PIPName)
+				})
+				ipv4s, ipv6s := groupIPsByFamily(mustParseIPs(derefSliceOfStringPtr(rv)))
+				logger.Info("Created the second LoadBalancer service", "svc-name", Service2Name, "v4-IPs", ipv4s, "v6-IPs", ipv6s)
+				Expect(ipv4s).To(Equal(ipv4PIPs))
+				Expect(ipv6s).To(Equal(ipv6PIPs))
+			})
+
+			var validator *SecurityGroupValidator
+			By("Getting the cluster security groups", func() {
+				rv, err := azureClient.GetClusterSecurityGroups()
+				Expect(err).NotTo(HaveOccurred())
+
+				validator = NewSecurityGroupValidator(rv)
+			})
+
+			By("Checking if the rule for allowing traffic for app 01", func() {
+				var (
+					expectedProtocol = aznetwork.SecurityRuleProtocolTCP
+					expectedDstPorts = []string{strconv.FormatInt(int64(app1Port), 10)}
+				)
+
+				By("Checking if the rule for allowing traffic from Internet exists")
+
+				if len(ipv4PIPs) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, ipv4PIPs, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv4 traffic from Internet")
+				}
+
+				if len(ipv6PIPs) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, ipv6PIPs, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv6 traffic from Internet")
+				}
+			})
+
+			By("Checking if the rule for allowing traffic for app 02", func() {
+				var (
+					expectedProtocol = aznetwork.SecurityRuleProtocolTCP
+					expectedDstPorts = []string{strconv.FormatInt(int64(app2Port), 10)}
+				)
+				By("Checking if the rule for allowing traffic from Internet exists")
+				if len(ipv4PIPs) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, ipv4PIPs, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv4 traffic from Internet")
+				}
+
+				if len(ipv6PIPs) > 0 {
+					Expect(
+						validator.HasExactAllowRule(expectedProtocol, []string{"Internet"}, ipv6PIPs, expectedDstPorts),
+					).To(BeTrue(), "Should have a rule for allowing IPv6 traffic from Internet")
+				}
+			})
+		})
+	})
 })
 
 type SecurityGroupValidator struct {
@@ -756,11 +1046,20 @@ func (v *SecurityGroupValidator) HasDenyAllRuleForDestination(dstAddresses []net
 }
 
 func SecurityGroupNotHasRuleForDestination(nsg *aznetwork.SecurityGroup, dstAddresses []netip.Addr) bool {
+	logger := GinkgoLogr.WithName("SecurityGroupNotHasRuleForDestination").
+		WithValues("nsg-name", nsg.Name).
+		WithValues("dst-addresses", dstAddresses)
+	if len(dstAddresses) == 0 {
+		logger.Info("skip")
+		return true
+	}
+	logger.Info("checking")
 	dsts := sets.NewString()
 	for _, ip := range dstAddresses {
 		dsts.Insert(ip.String())
 	}
 	for _, rule := range nsg.Properties.SecurityRules {
+		logger.Info("checking rule", "rule-name", rule.Name, "rule", rule)
 		if rule.Properties.DestinationAddressPrefix != nil && dsts.Has(*rule.Properties.DestinationAddressPrefix) {
 			return false
 		}
@@ -808,7 +1107,6 @@ func SecurityGroupHasAllowRuleForDestination(
 			*rule.Properties.Direction != aznetwork.SecurityRuleDirectionInbound ||
 			*rule.Properties.Protocol != protocol ||
 			ptr.Deref(rule.Properties.SourcePortRange, "") != "*" ||
-			len(rule.Properties.DestinationAddressPrefixes) < len(expectedDstAddresses) ||
 			len(rule.Properties.DestinationPortRanges) != len(dstPorts) {
 			logger.Info("skip rule", "rule-name", rule.Name, "rule", rule)
 			continue
@@ -840,11 +1138,16 @@ func SecurityGroupHasAllowRuleForDestination(
 			}
 		}
 
-		// check destination addresses
-		for _, d := range rule.Properties.DestinationAddressPrefixes {
-			expectedDstAddresses.Delete(*d)
-			if expectedDstAddresses.Len() == 0 {
-				break
+		{
+			// check destination addresses
+			if rule.Properties.DestinationAddressPrefix != nil {
+				expectedDstAddresses.Delete(*rule.Properties.DestinationAddressPrefix)
+			}
+			for _, d := range rule.Properties.DestinationAddressPrefixes {
+				expectedDstAddresses.Delete(*d)
+				if expectedDstAddresses.Len() == 0 {
+					break
+				}
 			}
 		}
 
@@ -885,6 +1188,9 @@ func SecurityGroupHasDenyAllRuleForDestination(nsg *aznetwork.SecurityGroup, dst
 		}
 		logger.Info("checking rule", "rule-name", rule.Name, "rule", rule)
 
+		if rule.Properties.DestinationAddressPrefix != nil {
+			expectedDstAddresses.Delete(*rule.Properties.DestinationAddressPrefix)
+		}
 		for _, d := range rule.Properties.DestinationAddressPrefixes {
 			expectedDstAddresses.Delete(*d)
 			if expectedDstAddresses.Len() == 0 {

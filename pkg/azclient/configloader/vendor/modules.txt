@@ -1,4 +1,4 @@
-# github.com/Azure/azure-sdk-for-go/sdk/azcore v1.10.0
+# github.com/Azure/azure-sdk-for-go/sdk/azcore v1.11.1
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/azcore/to
 # github.com/davecgh/go-spew v1.1.1
@@ -15,7 +15,6 @@ github.com/evanphx/json-patch
 ## explicit; go 1.18
 github.com/go-logr/logr
 github.com/go-logr/logr/funcr
-github.com/go-logr/logr/slogr
 # github.com/go-openapi/jsonpointer v0.19.6
 ## explicit; go 1.13
 github.com/go-openapi/jsonpointer
@@ -26,9 +25,9 @@ github.com/go-openapi/jsonreference/internal
 # github.com/go-openapi/swag v0.22.4
 ## explicit; go 1.18
 github.com/go-openapi/swag
-# github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572
-## explicit; go 1.13
-github.com/go-task/slim-sprig
+# github.com/go-task/slim-sprig/v3 v3.0.0
+## explicit; go 1.20
+github.com/go-task/slim-sprig/v3
 # github.com/gogo/protobuf v1.3.2
 ## explicit; go 1.15
 github.com/gogo/protobuf/proto
@@ -58,7 +57,7 @@ github.com/google/go-cmp/cmp/internal/value
 ## explicit; go 1.12
 github.com/google/gofuzz
 github.com/google/gofuzz/bytesource
-# github.com/google/pprof v0.0.0-20230602010524-ada837c32108
+# github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6
 ## explicit; go 1.19
 github.com/google/pprof/profile
 # github.com/google/uuid v1.3.0
@@ -84,7 +83,7 @@ github.com/modern-go/reflect2
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
-# github.com/onsi/ginkgo/v2 v2.16.0
+# github.com/onsi/ginkgo/v2 v2.19.0
 ## explicit; go 1.20
 github.com/onsi/ginkgo/v2
 github.com/onsi/ginkgo/v2/config
@@ -106,7 +105,7 @@ github.com/onsi/ginkgo/v2/internal/parallel_support
 github.com/onsi/ginkgo/v2/internal/testingtproxy
 github.com/onsi/ginkgo/v2/reporters
 github.com/onsi/ginkgo/v2/types
-# github.com/onsi/gomega v1.31.1
+# github.com/onsi/gomega v1.33.1
 ## explicit; go 1.20
 github.com/onsi/gomega
 github.com/onsi/gomega/format
@@ -121,7 +120,7 @@ github.com/onsi/gomega/types
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
-# golang.org/x/net v0.21.0
+# golang.org/x/net v0.25.0
 ## explicit; go 1.18
 golang.org/x/net/context
 golang.org/x/net/html
@@ -135,15 +134,15 @@ golang.org/x/net/idna
 ## explicit; go 1.17
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.17.0
+# golang.org/x/sys v0.20.0
 ## explicit; go 1.18
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.17.0
+# golang.org/x/term v0.20.0
 ## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.14.0
+# golang.org/x/text v0.15.0
 ## explicit; go 1.18
 golang.org/x/text/encoding
 golang.org/x/text/encoding/charmap
@@ -168,8 +167,8 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.3.0
 ## explicit
 golang.org/x/time/rate
-# golang.org/x/tools v0.17.0
-## explicit; go 1.18
+# golang.org/x/tools v0.21.0
+## explicit; go 1.19
 golang.org/x/tools/cover
 golang.org/x/tools/go/ast/inspector
 # google.golang.org/appengine v1.6.7
@@ -224,11 +223,12 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# k8s.io/api v0.29.3
-## explicit; go 1.21
+# k8s.io/api v0.30.1
+## explicit; go 1.22.0
 k8s.io/api/admissionregistration/v1
 k8s.io/api/admissionregistration/v1alpha1
 k8s.io/api/admissionregistration/v1beta1
+k8s.io/api/apidiscovery/v2
 k8s.io/api/apidiscovery/v2beta1
 k8s.io/api/apiserverinternal/v1alpha1
 k8s.io/api/apps/v1
@@ -278,8 +278,9 @@ k8s.io/api/scheduling/v1beta1
 k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
-# k8s.io/apimachinery v0.29.3
-## explicit; go 1.21
+k8s.io/api/storagemigration/v1alpha1
+# k8s.io/apimachinery v0.30.1
+## explicit; go 1.22.0
 k8s.io/apimachinery/pkg/api/equality
 k8s.io/apimachinery/pkg/api/errors
 k8s.io/apimachinery/pkg/api/meta
@@ -323,8 +324,8 @@ k8s.io/apimachinery/pkg/version
 k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.29.3
-## explicit; go 1.21
+# k8s.io/client-go v0.30.1
+## explicit; go 1.22.0
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
 k8s.io/client-go/applyconfigurations/admissionregistration/v1alpha1
 k8s.io/client-go/applyconfigurations/admissionregistration/v1beta1
@@ -373,6 +374,7 @@ k8s.io/client-go/applyconfigurations/scheduling/v1beta1
 k8s.io/client-go/applyconfigurations/storage/v1
 k8s.io/client-go/applyconfigurations/storage/v1alpha1
 k8s.io/client-go/applyconfigurations/storage/v1beta1
+k8s.io/client-go/applyconfigurations/storagemigration/v1alpha1
 k8s.io/client-go/discovery
 k8s.io/client-go/discovery/fake
 k8s.io/client-go/kubernetes
@@ -480,6 +482,8 @@ k8s.io/client-go/kubernetes/typed/storage/v1alpha1
 k8s.io/client-go/kubernetes/typed/storage/v1alpha1/fake
 k8s.io/client-go/kubernetes/typed/storage/v1beta1
 k8s.io/client-go/kubernetes/typed/storage/v1beta1/fake
+k8s.io/client-go/kubernetes/typed/storagemigration/v1alpha1
+k8s.io/client-go/kubernetes/typed/storagemigration/v1alpha1/fake
 k8s.io/client-go/openapi
 k8s.io/client-go/pkg/apis/clientauthentication
 k8s.io/client-go/pkg/apis/clientauthentication/install
@@ -500,8 +504,8 @@ k8s.io/client-go/util/connrotation
 k8s.io/client-go/util/flowcontrol
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/workqueue
-# k8s.io/klog/v2 v2.110.1
-## explicit; go 1.13
+# k8s.io/klog/v2 v2.120.1
+## explicit; go 1.18
 k8s.io/klog/v2
 k8s.io/klog/v2/internal/buffer
 k8s.io/klog/v2/internal/clock
@@ -509,8 +513,8 @@ k8s.io/klog/v2/internal/dbg
 k8s.io/klog/v2/internal/serialize
 k8s.io/klog/v2/internal/severity
 k8s.io/klog/v2/internal/sloghandler
-# k8s.io/kube-openapi v0.0.0-20231010175941-2dd684a91f00
-## explicit; go 1.19
+# k8s.io/kube-openapi v0.0.0-20240228011516-70dd3763d340
+## explicit; go 1.20
 k8s.io/kube-openapi/pkg/cached
 k8s.io/kube-openapi/pkg/common
 k8s.io/kube-openapi/pkg/handler3
@@ -524,7 +528,6 @@ k8s.io/kube-openapi/pkg/validation/spec
 ## explicit; go 1.18
 k8s.io/utils/clock
 k8s.io/utils/clock/testing
-k8s.io/utils/integer
 k8s.io/utils/internal/third_party/forked/golang/net
 k8s.io/utils/net
 k8s.io/utils/strings/slices

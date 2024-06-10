@@ -952,6 +952,95 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 		}
 	})
 
+	t.Run("when rule exists and outdated, it should update the one - dst prefix corner case", func(t *testing.T) {
+		cases := []struct {
+			TestName     string
+			IPFamily     iputil.Family
+			DstAddresses []netip.Addr
+		}{
+			{
+				TestName:     "TCP / IPv4",
+				IPFamily:     iputil.IPv4,
+				DstAddresses: fx.RandomIPv4Addresses(2),
+			},
+			{
+				TestName:     "TCP / IPv6",
+				IPFamily:     iputil.IPv6,
+				DstAddresses: fx.RandomIPv6Addresses(2),
+			},
+			{
+				TestName:     "UDP / IPv4",
+				IPFamily:     iputil.IPv4,
+				DstAddresses: fx.RandomIPv4Addresses(2),
+			},
+			{
+				TestName:     "UDP / IPv6",
+				IPFamily:     iputil.IPv6,
+				DstAddresses: fx.RandomIPv6Addresses(2),
+			},
+			{
+				TestName:     "ANY / IPv4",
+				IPFamily:     iputil.IPv4,
+				DstAddresses: fx.RandomIPv4Addresses(2),
+			},
+			{
+				TestName:     "ANY / IPv6",
+				IPFamily:     iputil.IPv6,
+				DstAddresses: fx.RandomIPv6Addresses(2),
+			},
+		}
+
+		for _, c := range cases {
+			var (
+				ipFamily     = c.IPFamily
+				dstAddresses = c.DstAddresses
+
+				targetRule = network.SecurityRule{
+					Name: ptr.To(GenerateDenyAllSecurityRuleName(ipFamily)),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                 network.SecurityRuleProtocolAsterisk,
+						Access:                   network.SecurityRuleAccessDeny,
+						Direction:                network.SecurityRuleDirectionInbound,
+						SourceAddressPrefix:      ptr.To("*"),
+						SourcePortRange:          ptr.To("*"),
+						DestinationAddressPrefix: ptr.To("foo"), // Should append the dstAddresses.
+						DestinationPortRange:     ptr.To("*"),
+						Priority:                 ptr.To(int32(950)), // A random priority, should remain unchanged.
+					},
+				}
+				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
+				helper          = ExpectNewSecurityGroupHelper(t, &sg)
+			)
+
+			err := helper.AddRuleForDenyAll(dstAddresses)
+			assert.NoError(t, err)
+
+			outputSG, updated, err := helper.SecurityGroup()
+
+			assert.NoError(t, err)
+			assert.True(t, updated, "[`%s`] should update 1 rule", c.TestName)
+			assert.Equal(t, len(*outputSG.SecurityRules), len(irrelevantRules)+1, "[`%s`] should only update 1 rule", c.TestName)
+			testutil.ExpectHasSecurityRules(t, outputSG, irrelevantRules, "[`%s`] the original irrelevant rules should remain unchanged", c.TestName)
+
+			expectedTargetRule := testutil.CloneInJSON(targetRule)
+			{
+				// It should append the new destination addresses.
+				ps := append(
+					fnutil.Map(func(v netip.Addr) string { return v.String() }, dstAddresses),
+					*expectedTargetRule.DestinationAddressPrefix,
+				)
+				expectedTargetRule.DestinationAddressPrefixes = &ps
+				sort.Strings(*expectedTargetRule.DestinationAddressPrefixes)
+
+				expectedTargetRule.DestinationAddressPrefix = nil
+			}
+			testutil.ExpectHasSecurityRules(t, outputSG, []network.SecurityRule{
+				expectedTargetRule,
+			}, "[`%s`] 1 allow rule should be updated", c.TestName)
+		}
+	})
+
 	t.Run("when rules exists and rules up-to-update, it should remain the same", func(t *testing.T) {
 		cases := []struct {
 			TestName     string
@@ -1031,8 +1120,9 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 	})
 }
 
-func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
+func TestRuleHelper_RemoveDestinationFromRules(t *testing.T) {
 	fx := fixture.NewFixture()
+
 	t.Run("it should not patch rules if no rules exist", func(t *testing.T) {
 		var (
 			sg           = fx.Azure().SecurityGroup().Build()
@@ -1041,7 +1131,9 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				return p.String()
 			}, fx.RandomIPv4Addresses(2))
 		)
-		helper.RemoveDestinationPrefixesFromRules(dstAddresses)
+		err := helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{})
+		assert.NoError(t, err)
+
 		_, updated, err := helper.SecurityGroup()
 		assert.NoError(t, err)
 		assert.False(t, updated)
@@ -1085,7 +1177,9 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				"192.168.0.2",
 			}
 		)
-		helper.RemoveDestinationPrefixesFromRules(dstAddresses)
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{}))
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolUDP, dstAddresses, []int32{}))
+
 		_, updated, err := helper.SecurityGroup()
 		assert.NoError(t, err)
 		assert.False(t, updated)
@@ -1142,7 +1236,10 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				"192.168.0.2",
 			}
 		)
-		helper.RemoveDestinationPrefixesFromRules(dstAddresses)
+
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{}))
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolUDP, dstAddresses, []int32{}))
+
 		outputSG, updated, err := helper.SecurityGroup()
 		assert.NoError(t, err)
 		assert.True(t, updated)
@@ -1221,7 +1318,7 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				{
 					Name: ptr.To("test-rule-2"),
 					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-						Protocol:                   network.SecurityRuleProtocolAsterisk,
+						Protocol:                   network.SecurityRuleProtocolTCP,
 						Access:                     network.SecurityRuleAccessAllow,
 						Direction:                  network.SecurityRuleDirectionInbound,
 						SourceAddressPrefix:        ptr.To("*"),
@@ -1234,7 +1331,7 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				{
 					Name: ptr.To("test-rule-3"),
 					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-						Protocol:                 network.SecurityRuleProtocolAsterisk,
+						Protocol:                 network.SecurityRuleProtocolUDP,
 						Access:                   network.SecurityRuleAccessAllow,
 						Direction:                network.SecurityRuleDirectionInbound,
 						SourceAddressPrefix:      ptr.To("*"),
@@ -1242,6 +1339,34 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 						DestinationAddressPrefix: ptr.To("192.168.0.1"),
 						DestinationPortRanges:    ptr.To([]string{"8000"}),
 						Priority:                 ptr.To(int32(2000)),
+					},
+				},
+				{
+					Name: ptr.To("test-rule-4"),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                   network.SecurityRuleProtocolTCP,
+						Access:                     network.SecurityRuleAccessAllow,
+						Direction:                  network.SecurityRuleDirectionInbound,
+						SourceAddressPrefix:        ptr.To("*"),
+						SourcePortRange:            ptr.To("*"),
+						DestinationAddressPrefixes: ptr.To([]string{}),
+						DestinationAddressPrefix:   ptr.To("192.168.0.1"),
+						DestinationPortRanges:      ptr.To([]string{"8000"}),
+						Priority:                   ptr.To(int32(2001)),
+					},
+				},
+				{
+					Name: ptr.To("test-rule-5"),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                   network.SecurityRuleProtocolAsterisk,
+						Access:                     network.SecurityRuleAccessDeny,
+						Direction:                  network.SecurityRuleDirectionInbound,
+						SourceAddressPrefix:        ptr.To("*"),
+						SourcePortRange:            ptr.To("*"),
+						DestinationAddressPrefixes: ptr.To([]string{}),
+						DestinationAddressPrefix:   ptr.To("*"), // Should not overwrite the DestinationAddressPrefixes.
+						DestinationPortRanges:      ptr.To([]string{"8000"}),
+						Priority:                   ptr.To(int32(2002)),
 					},
 				},
 			}
@@ -1253,7 +1378,9 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 				"192.168.0.2",
 			}
 		)
-		helper.RemoveDestinationPrefixesFromRules(dstAddresses)
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{}))
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolUDP, dstAddresses, []int32{}))
+
 		outputSG, updated, err := helper.SecurityGroup()
 		assert.NoError(t, err)
 		assert.True(t, updated)
@@ -1274,13 +1401,147 @@ func TestSecurityGroupHelper_RemoveDstAddressesFromRules(t *testing.T) {
 			{
 				Name: ptr.To("test-rule-2"),
 				SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-					Protocol:                   network.SecurityRuleProtocolAsterisk,
+					Protocol:                   network.SecurityRuleProtocolTCP,
 					Access:                     network.SecurityRuleAccessAllow,
 					Direction:                  network.SecurityRuleDirectionInbound,
 					SourceAddressPrefix:        ptr.To("*"),
 					SourcePortRange:            ptr.To("*"),
 					DestinationAddressPrefixes: ptr.To([]string{"8.8.8.8"}),
 					DestinationPortRanges:      ptr.To([]string{"5000"}),
+					Priority:                   ptr.To(int32(502)),
+				},
+			},
+			{
+				Name: ptr.To("test-rule-5"),
+				SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+					Protocol:                   network.SecurityRuleProtocolAsterisk,
+					Access:                     network.SecurityRuleAccessDeny,
+					Direction:                  network.SecurityRuleDirectionInbound,
+					SourceAddressPrefix:        ptr.To("*"),
+					SourcePortRange:            ptr.To("*"),
+					DestinationAddressPrefixes: ptr.To([]string{}),
+					DestinationAddressPrefix:   ptr.To("*"),
+					DestinationPortRanges:      ptr.To([]string{"8000"}),
+					Priority:                   ptr.To(int32(2002)),
+				},
+			},
+		}, outputSG.SecurityRules)
+	})
+
+	t.Run("it should retain the port ranges if specified - all ports retained - nothing changed", func(t *testing.T) {
+		var (
+			rules = []network.SecurityRule{
+				{
+					Name: ptr.To("test-rule-0"),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                   network.SecurityRuleProtocolTCP,
+						Access:                     network.SecurityRuleAccessAllow,
+						Direction:                  network.SecurityRuleDirectionInbound,
+						SourceAddressPrefixes:      ptr.To([]string{"src_foo", "src_bar"}),
+						SourcePortRange:            ptr.To("*"),
+						DestinationAddressPrefixes: ptr.To([]string{"10.0.0.1", "10.0.0.2", "192.168.0.1"}),
+						DestinationPortRanges:      ptr.To([]string{"443", "80"}),
+						Priority:                   ptr.To(int32(500)),
+					},
+				},
+			}
+
+			sg           = fx.Azure().SecurityGroup().WithRules(rules).Build()
+			helper       = ExpectNewSecurityGroupHelper(t, &sg)
+			dstAddresses = []string{
+				"10.0.0.1",
+				"10.0.0.2",
+			}
+		)
+
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{443, 80}))
+
+		_, updated, err := helper.SecurityGroup()
+		assert.NoError(t, err)
+		assert.False(t, updated)
+	})
+
+	t.Run("it should retain the port ranges if specified - part of ports retained - split the rule", func(t *testing.T) {
+		var (
+			rules = []network.SecurityRule{
+				{
+					Name: ptr.To("test-rule-0"),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                   network.SecurityRuleProtocolTCP,
+						Access:                     network.SecurityRuleAccessAllow,
+						Direction:                  network.SecurityRuleDirectionInbound,
+						SourceAddressPrefixes:      ptr.To([]string{"bar", "foo"}),
+						SourcePortRange:            ptr.To("*"),
+						DestinationAddressPrefixes: ptr.To([]string{"10.0.0.1", "10.0.0.2", "192.168.0.1"}),
+						DestinationPortRanges:      ptr.To([]string{"443", "80"}),
+						Priority:                   ptr.To(int32(500)),
+					},
+				},
+				{
+					Name: ptr.To("test-rule-1"),
+					SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+						Protocol:                   network.SecurityRuleProtocolUDP, // Different protocol, should not be touched.
+						Access:                     network.SecurityRuleAccessAllow,
+						Direction:                  network.SecurityRuleDirectionInbound,
+						SourceAddressPrefixes:      ptr.To([]string{"baz"}),
+						SourcePortRange:            ptr.To("*"),
+						DestinationAddressPrefixes: ptr.To([]string{"10.0.0.1", "10.0.0.2", "192.168.0.1"}),
+						DestinationPortRanges:      ptr.To([]string{"443", "80"}),
+						Priority:                   ptr.To(int32(501)),
+					},
+				},
+			}
+
+			sg           = fx.Azure().SecurityGroup().WithRules(rules).Build()
+			helper       = ExpectNewSecurityGroupHelper(t, &sg)
+			dstAddresses = []string{
+				"10.0.0.1",
+				"10.0.0.2",
+			}
+		)
+
+		assert.NoError(t, helper.RemoveDestinationFromRules(network.SecurityRuleProtocolTCP, dstAddresses, []int32{443}))
+
+		outputSG, updated, err := helper.SecurityGroup()
+		assert.NoError(t, err)
+		assert.True(t, updated)
+		testutil.ExpectEqualInJSON(t, []network.SecurityRule{
+			{
+				Name: ptr.To("test-rule-0"),
+				SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+					Protocol:                 network.SecurityRuleProtocolTCP,
+					Access:                   network.SecurityRuleAccessAllow,
+					Direction:                network.SecurityRuleDirectionInbound,
+					SourceAddressPrefixes:    ptr.To([]string{"bar", "foo"}),
+					SourcePortRange:          ptr.To("*"),
+					DestinationAddressPrefix: ptr.To("192.168.0.1"),
+					DestinationPortRanges:    ptr.To([]string{"443", "80"}),
+					Priority:                 ptr.To(int32(500)),
+				},
+			},
+			{
+				Name: ptr.To("test-rule-1"),
+				SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+					Protocol:                   network.SecurityRuleProtocolUDP, // Different protocol, should not be touched.
+					Access:                     network.SecurityRuleAccessAllow,
+					Direction:                  network.SecurityRuleDirectionInbound,
+					SourceAddressPrefixes:      ptr.To([]string{"baz"}),
+					SourcePortRange:            ptr.To("*"),
+					DestinationAddressPrefixes: ptr.To([]string{"10.0.0.1", "10.0.0.2", "192.168.0.1"}),
+					DestinationPortRanges:      ptr.To([]string{"443", "80"}),
+					Priority:                   ptr.To(int32(501)),
+				},
+			},
+			{
+				Name: ptr.To("k8s-azure-lb_allow_IPv4_b5ae07e8a4177ea2d37162cdf2badf8b"),
+				SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+					Protocol:                   network.SecurityRuleProtocolTCP,
+					Access:                     network.SecurityRuleAccessAllow,
+					Direction:                  network.SecurityRuleDirectionInbound,
+					SourceAddressPrefixes:      ptr.To([]string{"bar", "foo"}),
+					SourcePortRange:            ptr.To("*"),
+					DestinationAddressPrefixes: ptr.To([]string{"10.0.0.1", "10.0.0.2"}),
+					DestinationPortRanges:      ptr.To([]string{"443"}),
 					Priority:                   ptr.To(int32(502)),
 				},
 			},
