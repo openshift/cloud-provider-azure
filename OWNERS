@@ -3,16 +3,17 @@
 # to be added to the owners-gen input data.
 approvers:
 - JoelSpeed
-- elmiko
-- nrb
-reviewers:
-- JoelSpeed
-- RadekManak
 - damdo
 - elmiko
 - nrb
-- odvarkadaniel
+- theobarberbany
+reviewers:
+- RadekManak
+- chrischdi
+- damdo
+- mdbooth
+- nrb
 - racheljpg
-- vincepri
+- theobarberbany
 component: Cloud Compute
 subcomponent: Cloud Controller Manager
