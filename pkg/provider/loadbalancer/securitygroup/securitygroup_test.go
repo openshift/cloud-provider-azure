@@ -23,18 +23,20 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/stretchr/testify/assert"
+
 	"k8s.io/utils/ptr"
 
+	"sigs.k8s.io/cloud-provider-azure/internal/testutil"
+	"sigs.k8s.io/cloud-provider-azure/internal/testutil/fixture"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
 	"sigs.k8s.io/cloud-provider-azure/pkg/provider/loadbalancer/fnutil"
 	"sigs.k8s.io/cloud-provider-azure/pkg/provider/loadbalancer/iputil"
 	. "sigs.k8s.io/cloud-provider-azure/pkg/provider/loadbalancer/securitygroup" //nolint:revive
-	"sigs.k8s.io/cloud-provider-azure/pkg/provider/loadbalancer/testutil"
-	"sigs.k8s.io/cloud-provider-azure/pkg/provider/loadbalancer/testutil/fixture"
 )
 
 func ExpectNewSecurityGroupHelper(t *testing.T, sg *network.SecurityGroup) *RuleHelper {
 	t.Helper()
-	helper, err := NewSecurityGroupHelper(sg)
+	helper, err := NewSecurityGroupHelper(log.Noop(), sg)
 	if err != nil {
 		assert.NoError(t, err)
 	}
@@ -43,28 +45,28 @@ func ExpectNewSecurityGroupHelper(t *testing.T, sg *network.SecurityGroup) *Rule
 
 func TestNewSecurityGroupHelper(t *testing.T) {
 	{
-		_, err := NewSecurityGroupHelper(nil)
+		_, err := NewSecurityGroupHelper(log.Noop(), nil)
 		assert.ErrorIs(t, err, ErrInvalidSecurityGroup)
 	}
 	{
-		_, err := NewSecurityGroupHelper(&network.SecurityGroup{})
+		_, err := NewSecurityGroupHelper(log.Noop(), &network.SecurityGroup{})
 		assert.ErrorIs(t, err, ErrInvalidSecurityGroup)
 	}
 	{
-		_, err := NewSecurityGroupHelper(&network.SecurityGroup{
+		_, err := NewSecurityGroupHelper(log.Noop(), &network.SecurityGroup{
 			Name: ptr.To("nsg"),
 		})
 		assert.ErrorIs(t, err, ErrInvalidSecurityGroup)
 	}
 	{
-		_, err := NewSecurityGroupHelper(&network.SecurityGroup{
+		_, err := NewSecurityGroupHelper(log.Noop(), &network.SecurityGroup{
 			Name:                          ptr.To("nsg"),
 			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{},
 		})
 		assert.ErrorIs(t, err, ErrInvalidSecurityGroup)
 	}
 	{
-		helper, err := NewSecurityGroupHelper(&network.SecurityGroup{
+		helper, err := NewSecurityGroupHelper(log.Noop(), &network.SecurityGroup{
 			Name: ptr.To("nsg"),
 			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
 				SecurityRules: &[]network.SecurityRule{},
@@ -198,7 +200,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedIPRanges(t *testing.T) {
 				dstAddresses = c.DstAddresses
 				dstPorts     = c.DstPorts
 
-				rules  = fx.Azure().NoiseSecurityRules(10)
+				rules  = fx.Azure().NoiseSecurityRules()
 				sg     = fx.Azure().SecurityGroup().WithRules(rules).Build()
 				helper = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -310,7 +312,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedIPRanges(t *testing.T) {
 						Priority:                   ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -424,7 +426,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedIPRanges(t *testing.T) {
 						Priority:              ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -529,7 +531,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedServiceTag(t *testing.T) {
 				dstAddresses  = c.DstAddresses
 				dstPorts      = c.DstPorts
 
-				rules  = fx.Azure().NoiseSecurityRules(10)
+				rules  = fx.Azure().NoiseSecurityRules()
 				sg     = fx.Azure().SecurityGroup().WithRules(rules).Build()
 				helper = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -641,7 +643,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedServiceTag(t *testing.T) {
 						Priority:                   ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -755,7 +757,7 @@ func TestSecurityGroupHelper_AddRuleForAllowedServiceTag(t *testing.T) {
 						Priority:              ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -834,7 +836,7 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 				ipFamily     = c.IPFamily
 				dstAddresses = c.DstAddresses
 
-				rules  = fx.Azure().NoiseSecurityRules(10)
+				rules  = fx.Azure().NoiseSecurityRules()
 				sg     = fx.Azure().SecurityGroup().WithRules(rules).Build()
 				helper = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -922,7 +924,7 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 						Priority:                   ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -1008,7 +1010,7 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 						Priority:                 ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -1101,7 +1103,7 @@ func TestSecurityGroupHelper_AddRuleForDenyAll(t *testing.T) {
 						Priority:             ptr.To(int32(950)), // A random priority, should remain unchanged.
 					},
 				}
-				irrelevantRules = fx.Azure().NoiseSecurityRules(10)
+				irrelevantRules = fx.Azure().NoiseSecurityRules()
 				sg              = fx.Azure().SecurityGroup().WithRules(append(irrelevantRules, targetRule)).Build()
 				helper          = ExpectNewSecurityGroupHelper(t, &sg)
 			)
@@ -1553,7 +1555,7 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 	fx := fixture.NewFixture()
 	t.Run("when no rule applied, it should return the original security group", func(t *testing.T) {
 		var (
-			rules  = fx.Azure().NoiseSecurityRules(10)
+			rules  = fx.Azure().NoiseSecurityRules()
 			sg     = fx.Azure().SecurityGroup().WithRules(rules).Build()
 			helper = ExpectNewSecurityGroupHelper(t, &sg)
 		)
@@ -1562,12 +1564,12 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, updated)
 
-		testutil.ExpectEqualInJSON(t, fx.Azure().SecurityGroup().WithRules(fx.Azure().NoiseSecurityRules(10)).Build(), outputSG)
+		testutil.ExpectEqualInJSON(t, fx.Azure().SecurityGroup().WithRules(fx.Azure().NoiseSecurityRules()).Build(), outputSG)
 	})
 
 	t.Run("when the number of rules exceeds the limit, it should return error", func(t *testing.T) {
 		var (
-			rules  = fx.Azure().NoiseSecurityRules(MaxSecurityRulesPerGroup + 1)
+			rules  = fx.Azure().NNoiseSecurityRules(MaxSecurityRulesPerGroup + 1)
 			sg     = fx.Azure().SecurityGroup().WithRules(rules).Build()
 			helper = ExpectNewSecurityGroupHelper(t, &sg)
 		)
@@ -1582,7 +1584,7 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 
 		t.Run("1 rule with max source prefixes", func(t *testing.T) {
 			var (
-				rules = fx.Azure().NoiseSecurityRules(1)
+				rules = fx.Azure().NNoiseSecurityRules(1)
 			)
 
 			rules[0].SourceAddressPrefixes = ptr.To(fx.RandomIPv4PrefixStrings(MaxSecurityRuleSourceIPsPerGroup + 1))
@@ -1601,7 +1603,7 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 		t.Run("2 rules with max source prefixes", func(t *testing.T) {
 			// The limit is per security group, not per rule.
 			var (
-				rules = fx.Azure().NoiseSecurityRules(2)
+				rules = fx.Azure().NNoiseSecurityRules(2)
 			)
 
 			rules[0].SourceAddressPrefixes = ptr.To(fx.RandomIPv4PrefixStrings(MaxSecurityRuleSourceIPsPerGroup / 2))
@@ -1623,7 +1625,7 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 
 		t.Run("1 rule with max destination prefixes", func(t *testing.T) {
 			var (
-				rules = fx.Azure().NoiseSecurityRules(1)
+				rules = fx.Azure().NNoiseSecurityRules(1)
 			)
 
 			rules[0].DestinationAddressPrefixes = ptr.To(fx.RandomIPv4PrefixStrings(MaxSecurityRuleSourceIPsPerGroup + 1))
@@ -1642,7 +1644,7 @@ func TestSecurityGroupHelper_SecurityGroup(t *testing.T) {
 		t.Run("2 rules with max destination prefixes", func(t *testing.T) {
 			// The limit is per security group, not per rule.
 			var (
-				rules = fx.Azure().NoiseSecurityRules(2)
+				rules = fx.Azure().NNoiseSecurityRules(2)
 			)
 
 			rules[0].DestinationAddressPrefixes = ptr.To(fx.RandomIPv4PrefixStrings(MaxSecurityRuleSourceIPsPerGroup / 2))

@@ -24,15 +24,16 @@ import (
 	"strings"
 	"time"
 
-	network "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	network "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	"sigs.k8s.io/cloud-provider-azure/tests/e2e/utils"
@@ -119,7 +120,7 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 		Expect(pls.Properties.IPConfigurations).NotTo(BeNil())
 		Expect(len(pls.Properties.IPConfigurations)).To(Equal(1))
 		Expect(*(pls.Properties.IPConfigurations)[0].Properties.PrivateIPAllocationMethod).To(Equal(network.IPAllocationMethodDynamic))
-		Expect(pls.Properties.Fqdns == nil || len(pls.Properties.Fqdns) == 0).To(BeTrue())
+		Expect(len(pls.Properties.Fqdns) == 0).To(BeTrue())
 		Expect(pls.Properties.EnableProxyProtocol == nil || !*pls.Properties.EnableProxyProtocol).To(BeTrue())
 		Expect(pls.Properties.Visibility == nil || len(pls.Properties.Visibility.Subscriptions) == 0).To(BeTrue())
 		Expect(pls.Properties.AutoApproval == nil || len(pls.Properties.AutoApproval.Subscriptions) == 0).To(BeTrue())
@@ -152,7 +153,7 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 	It("should support service annotation 'service.beta.kubernetes.io/azure-pls-resource-group'", func() {
 		By("creating a test resource group")
 		rg, cleanup := utils.CreateTestResourceGroup(tc)
-		defer cleanup(pointer.StringDeref(rg.Name, ""))
+		defer cleanup(ptr.Deref(rg.Name, ""))
 
 		By("creating a test pls specifying the test resource group")
 		plsName := "testpls"
@@ -160,7 +161,7 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 			consts.ServiceAnnotationLoadBalancerInternal: "true",
 			consts.ServiceAnnotationPLSCreation:          "true",
 			consts.ServiceAnnotationPLSName:              plsName,
-			consts.ServiceAnnotationPLSResourceGroup:     pointer.StringDeref(rg.Name, ""),
+			consts.ServiceAnnotationPLSResourceGroup:     ptr.Deref(rg.Name, ""),
 		}
 
 		ips := createAndExposeDefaultServiceWithAnnotation(cs, tc.IPFamily, serviceName, ns.Name, labels, annotation, ports)
@@ -174,20 +175,20 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 		utils.Logf("Get Internal IP: %s", ip)
 
 		// get pls from azure client
-		pls := getPrivateLinkServiceFromIP(tc, ip, pointer.StringDeref(rg.Name, ""), "", plsName)
+		pls := getPrivateLinkServiceFromIP(tc, ip, ptr.Deref(rg.Name, ""), "", plsName)
 		Expect(*pls.Name).To(Equal(plsName))
 	})
 
 	It("should support service annotation 'service.beta.kubernetes.io/azure-pls-ip-configuration-subnet'", func() {
 		subnetName := "pls-subnet"
 		subnet, isNew := createNewSubnet(tc, subnetName)
-		Expect(pointer.StringDeref(subnet.Name, "")).To(Equal(subnetName))
+		Expect(ptr.Deref(subnet.Name, "")).To(Equal(subnetName))
 		if isNew {
 			defer func() {
 				utils.Logf("cleaning up test subnet %s", subnetName)
 				vNet, err := tc.GetClusterVirtualNetwork()
 				Expect(err).NotTo(HaveOccurred())
-				err = tc.DeleteSubnet(pointer.StringDeref(vNet.Name, ""), subnetName)
+				err = tc.DeleteSubnet(ptr.Deref(vNet.Name, ""), subnetName)
 				Expect(err).NotTo(HaveOccurred())
 			}()
 		}
@@ -281,8 +282,7 @@ var _ = Describe("Private link service", Label(utils.TestSuiteLabelPrivateLinkSe
 		// wait and check pls is updated also
 		err = wait.PollImmediate(10*time.Second, 5*time.Minute, func() (bool, error) {
 			pls := getPrivateLinkServiceFromIP(tc, ip, "", "", "")
-			return pls.Properties.IPConfigurations != nil &&
-				len(pls.Properties.IPConfigurations) == 1 &&
+			return len(pls.Properties.IPConfigurations) == 1 &&
 				*(pls.Properties.IPConfigurations)[0].Properties.PrivateIPAllocationMethod == network.IPAllocationMethodStatic &&
 				*(pls.Properties.IPConfigurations)[0].Properties.PrivateIPAddress == *selectedIP, nil
 		})

@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -56,7 +55,11 @@ import (
 	cloudcontrollerconfig "sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/config"
 	"sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/dynamic"
 	"sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/options"
+	armmetrics "sigs.k8s.io/cloud-provider-azure/pkg/azclient/metrics"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
 	"sigs.k8s.io/cloud-provider-azure/pkg/provider"
+	"sigs.k8s.io/cloud-provider-azure/pkg/trace"
+	"sigs.k8s.io/cloud-provider-azure/pkg/trace/metrics"
 	"sigs.k8s.io/cloud-provider-azure/pkg/version"
 	"sigs.k8s.io/cloud-provider-azure/pkg/version/verflag"
 )
@@ -79,7 +82,9 @@ func NewCloudControllerManagerCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:  "cloud-controller-manager",
 		Long: `The Cloud controller manager is a daemon that embeds the cloud specific control loops shipped with Kubernetes.`,
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(cmd *cobra.Command, _ []string) {
+			log.Setup(log.OptionsFromCLIFlags(cmd.Flags()))
+			defer log.Flush()
 			verflag.PrintAndExitIfRequested("Cloud Provider Azure")
 			cliflag.PrintFlags(cmd.Flags())
 
@@ -89,7 +94,38 @@ func NewCloudControllerManagerCommand() *cobra.Command {
 				os.Exit(1)
 			}
 
-			healthHandler, err := StartHTTPServer(c.Complete(), wait.NeverStop)
+			var traceProvider *trace.Provider
+			{
+				var err error
+				traceProvider, err = trace.New()
+				if err != nil {
+					log.Background().Error(err, "Failed to create trace provider")
+					os.Exit(1)
+				}
+
+				// Flush before exit
+				defer func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := traceProvider.Stop(ctx); err != nil {
+						log.Background().Error(err, "Failed to stop trace provider")
+					}
+				}()
+
+				trace.SetGlobalProvider(traceProvider)
+
+				if err := metrics.Setup(traceProvider.DefaultMeter()); err != nil {
+					log.Background().Error(err, "Failed to setup cloud-provider metrics")
+					os.Exit(1)
+				}
+
+				if err := armmetrics.Setup(traceProvider.DefaultMeter()); err != nil {
+					log.Background().Error(err, "Failed to setup ARM SDK metrics")
+					os.Exit(1)
+				}
+			}
+
+			healthHandler, err := StartHTTPServer(c.Complete(), traceProvider, wait.NeverStop)
 			if err != nil {
 				klog.Errorf("Run: railed to start HTTP server: %v", err)
 				os.Exit(1)
@@ -164,17 +200,19 @@ func NewCloudControllerManagerCommand() *cobra.Command {
 		cliflag.PrintSections(cmd.OutOrStderr(), namedFlagSets, cols)
 		return nil
 	})
-	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+	cmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n"+usageFmt, cmd.Long, cmd.UseLine())
 		cliflag.PrintSections(cmd.OutOrStdout(), namedFlagSets, cols)
 	})
+
+	log.BindCLIFlags(fs)
 
 	return cmd
 }
 
 // RunWrapper adapts the ccm boot logic to the leader elector call back function
 func RunWrapper(s *options.CloudControllerManagerOptions, c *cloudcontrollerconfig.Config, h *controllerhealthz.MutableHealthzHandler) func(ctx context.Context) {
-	return func(ctx context.Context) {
+	return func(_ context.Context) {
 		if !c.DynamicReloadingConfig.EnableDynamicReloading {
 			klog.V(1).Infof("using static initialization from config file %s", c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile)
 			if err := Run(context.TODO(), c.Complete(), h); err != nil {
@@ -273,7 +311,7 @@ func runAsync(s *options.CloudControllerManagerOptions, errCh chan error, h *con
 }
 
 // StartHTTPServer starts the controller manager HTTP server
-func StartHTTPServer(c *cloudcontrollerconfig.CompletedConfig, stopCh <-chan struct{}) (*controllerhealthz.MutableHealthzHandler, error) {
+func StartHTTPServer(c *cloudcontrollerconfig.CompletedConfig, traceProvider *trace.Provider, stopCh <-chan struct{}) (*controllerhealthz.MutableHealthzHandler, error) {
 	// Setup any healthz checks we will want to use.
 	var checks []healthz.HealthChecker
 	var electionChecker *leaderelection.HealthzAdaptor
@@ -286,6 +324,9 @@ func StartHTTPServer(c *cloudcontrollerconfig.CompletedConfig, stopCh <-chan str
 	// Start the controller manager HTTP server
 	if c.SecureServing != nil {
 		unsecuredMux := genericcontrollermanager.NewBaseHandler(&c.ComponentConfig.Generic.Debugging, healthzHandler)
+
+		unsecuredMux.Handle("/metrics/v2", traceProvider.MetricsHTTPHandler()) // Add metricsv2 endpoint
+
 		handler := genericcontrollermanager.BuildHandlerChain(unsecuredMux, &c.Authorization, &c.Authentication)
 		// TODO: handle stoppedCh returned by c.SecureServing.Serve
 		if _, _, err := c.SecureServing.Serve(handler, 0, stopCh); err != nil {

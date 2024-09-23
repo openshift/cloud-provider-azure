@@ -17,15 +17,17 @@ limitations under the License.
 package credentialprovider
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/stretchr/testify/assert"
+
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 const (
@@ -36,11 +38,6 @@ const (
 )
 
 func TestGetCredentials(t *testing.T) {
-	configStr := `
-    {
-        "aadClientId": "foo",
-        "aadClientSecret": "bar"
-    }`
 	result := []string{
 		"*.azurecr.io",
 		"*.azurecr.cn",
@@ -48,10 +45,12 @@ func TestGetCredentials(t *testing.T) {
 		"*.azurecr.us",
 	}
 
-	provider, err := newAcrProviderFromConfigReader(bytes.NewBufferString(configStr))
-	if err != nil {
-		t.Fatalf("Unexpected error when creating new acr provider: %v", err)
-	}
+	provider := NewAcrProvider(&config.AzureAuthConfig{
+		AzureAuthConfig: azclient.AzureAuthConfig{
+			AADClientID:     "foo",
+			AADClientSecret: "bar",
+		},
+	}, nil, nil)
 
 	credResponse, err := provider.GetCredentials(context.TODO(), "foo.azurecr.io/nginx:v1", nil)
 	if err != nil {
@@ -75,7 +74,6 @@ func TestGetCredentials(t *testing.T) {
 		}
 	}
 }
-
 func TestGetCredentialsConfig(t *testing.T) {
 	// msiEndpointEnv and msiSecretEnv are required because autorest/adal requires IMDS endpoint to be available.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,15 +126,35 @@ func TestGetCredentialsConfig(t *testing.T) {
 	}
 
 	for i, test := range testCases {
-		provider, err := newAcrProviderFromConfigReader(bytes.NewBufferString(test.configStr))
+		configFile, err := os.CreateTemp(".", "config.json")
+		if err != nil {
+			t.Fatalf("Unexpected error when creating temp file: %v", err)
+		}
+		_, err = configFile.WriteString(test.configStr)
+		if err != nil {
+			t.Fatalf("Unexpected error when writing to temp file: %v", err)
+		}
+		err = configFile.Close()
+		if err != nil {
+			t.Fatalf("Unexpected error when closing temp file: %v", err)
+		}
+		provider, err := NewAcrProviderFromConfig(configFile.Name(), "")
 		if err != nil && !test.expectError {
 			t.Fatalf("Unexpected error when creating new acr provider: %v", err)
 		}
 		if err != nil && test.expectError {
+			err = os.Remove(configFile.Name())
+			if err != nil {
+				t.Fatalf("Unexpected error when writing to temp file: %v", err)
+			}
 			continue
 		}
+		err = os.Remove(configFile.Name())
+		if err != nil {
+			t.Fatalf("Unexpected error when writing to temp file: %v", err)
+		}
 
-		credResponse, err := provider.GetCredentials(context.TODO(), test.image, nil)
+		credResponse, err := provider.GetCredentials(context.Background(), test.image, nil)
 		if err != nil {
 			t.Fatalf("Unexpected error when fetching acr credentials: %v", err)
 		}
@@ -146,19 +164,65 @@ func TestGetCredentialsConfig(t *testing.T) {
 	}
 }
 
-func TestParseACRLoginServerFromImage(t *testing.T) {
+func TestProcessImageWithMirrorMapping(t *testing.T) {
 	configStr := `
-    {
-        "aadClientId": "foo",
-        "aadClientSecret": "bar"
-    }`
+	{
+	    "aadClientId": "foo",
+	    "aadClientSecret": "bar"
+	}`
 
-	provider, err := newAcrProviderFromConfigReader(bytes.NewBufferString(configStr))
-	if err != nil {
-		t.Fatalf("Unexpected error when creating new acr provider: %v", err)
+	configFile, err := os.CreateTemp(".", "config.json")
+	assert.Nilf(t, err, "Unexpected error when creating temp file")
+	defer os.Remove(configFile.Name())
+	_, err = configFile.WriteString(configStr)
+	assert.Nilf(t, err, "Unexpected error when writing to temp file")
+	assert.Nilf(t, configFile.Close(), "Unexpected error when closing temp file")
+
+	provider, err := NewAcrProviderFromConfig(configFile.Name(), "mcr.microsoft.com:abc.azurecr.io")
+	assert.Nilf(t, err, "Unexpected error when creating new acr provider")
+	acrProvider := provider.(*acrProvider)
+
+	testcases := []struct {
+		description               string
+		image                     string
+		expectedLoginServer       string
+		expectedLoginServerMirror string
+	}{
+		{
+			description:               "image in registry mirror map",
+			image:                     "mcr.microsoft.com/bar/image:version",
+			expectedLoginServer:       "abc.azurecr.io",
+			expectedLoginServerMirror: "mcr.microsoft.com",
+		},
+		{
+			description:               "image not in registry mirror map",
+			image:                     "foo.azurecr.io/bar/image:version",
+			expectedLoginServer:       "foo.azurecr.io",
+			expectedLoginServerMirror: "",
+		},
 	}
 
-	provider.environment = &azure.Environment{
+	for _, test := range testcases {
+		t.Run(test.description, func(t *testing.T) {
+			targetloginServer, sourceloginServer := acrProvider.parseACRLoginServerFromImage(test.image)
+			assert.Equal(t, targetloginServer, test.expectedLoginServer)
+			assert.Equal(t, sourceloginServer, test.expectedLoginServerMirror)
+		})
+	}
+}
+
+func TestParseACRLoginServerFromImage(t *testing.T) {
+
+	providerInterface := NewAcrProvider(&config.AzureAuthConfig{
+		AzureAuthConfig: azclient.AzureAuthConfig{
+			AADClientID:     "foo",
+			AADClientSecret: "bar",
+		},
+	}, nil, nil)
+
+	provider := providerInterface.(*acrProvider)
+
+	provider.environment = &azclient.Environment{
 		ContainerRegistryDNSSuffix: ".azurecr.my.cloud",
 	}
 	tests := []struct {
@@ -199,8 +263,48 @@ func TestParseACRLoginServerFromImage(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		if loginServer := provider.parseACRLoginServerFromImage(test.image); loginServer != test.expected {
-			t.Errorf("function parseACRLoginServerFromImage returns \"%s\" for image %s, expected \"%s\"", loginServer, test.image, test.expected)
-		}
+		t.Run(test.image, func(t *testing.T) {
+			targetloginServer, _ := provider.parseACRLoginServerFromImage(test.image)
+			assert.Equal(t, targetloginServer, test.expected)
+		})
+	}
+}
+
+func TestProcessMirrorMapping(t *testing.T) {
+	testcases := []struct {
+		description      string
+		mirrorMappingStr string
+		expected         map[string]string
+	}{
+		{
+			"multiple",
+			"aaa:bbb,ccc:ddd",
+			map[string]string{
+				"aaa": "bbb",
+				"ccc": "ddd",
+			},
+		},
+		{
+			"multiple with some spaces",
+			"aaa: bbb, ccc:ddd",
+			map[string]string{
+				"aaa": "bbb",
+				"ccc": "ddd",
+			},
+		},
+		{
+			"single",
+			"aaa:bbb",
+			map[string]string{
+				"aaa": "bbb",
+			},
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.description, func(t *testing.T) {
+			result := parseRegistryMirror(tc.mirrorMappingStr)
+			assert.True(t, reflect.DeepEqual(result, tc.expected))
+		})
 	}
 }

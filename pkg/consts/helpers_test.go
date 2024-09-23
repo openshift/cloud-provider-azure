@@ -25,7 +25,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 func TestIsK8sServiceHasHAModeEnabled(t *testing.T) {
@@ -184,15 +184,15 @@ func Test_extractInt32FromString(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "value is not a number", args: args{val: "cookies"}, wantErr: true},
-		{name: "value is zero", args: args{val: "0"}, wantErr: false, want: pointer.Int32(0)},
+		{name: "value is zero", args: args{val: "0"}, wantErr: false, want: ptr.To(int32(0))},
 		{name: "value is a float number", args: args{val: "0.1"}, wantErr: true},
-		{name: "value is a positive integer", args: args{val: "24"}, want: pointer.Int32(24), wantErr: false},
-		{name: "value negative integer", args: args{val: "-6"}, want: pointer.Int32(-6), wantErr: false},
+		{name: "value is a positive integer", args: args{val: "24"}, want: ptr.To(int32(24)), wantErr: false},
+		{name: "value negative integer", args: args{val: "-6"}, want: ptr.To(int32(-6)), wantErr: false},
 		{name: "validator is nil", args: args{val: "-6", businessValidator: []Int32BusinessValidator{
 			nil,
-		}}, want: pointer.Int32(-6), wantErr: false},
+		}}, want: ptr.To(int32(-6)), wantErr: false},
 		{name: "validation failed", args: args{val: "-6", businessValidator: []Int32BusinessValidator{
-			func(i *int32) error {
+			func(_ *int32) error {
 				return fmt.Errorf("validator failed")
 			},
 		}}, wantErr: true},
@@ -226,7 +226,7 @@ func Test_getAttributeValueInSvcAnnotation(t *testing.T) {
 		{name: "annotation set is empty", args: args{key: "key"}, want: nil, wantErr: false},
 		{name: "key is not specified even though annotation set is not empty", args: args{annotations: map[string]string{"key": ""}}, want: nil, wantErr: false},
 		{name: "validation failed", args: args{annotations: map[string]string{"key": ""}, key: "key", validators: []BusinessValidator{
-			func(s *string) error {
+			func(_ *string) error {
 				return fmt.Errorf("validator failed")
 			},
 		}}, wantErr: true},
@@ -349,7 +349,7 @@ func TestGetInt32HealthProbeConfigOfPortFromK8sSvcAnnotation(t *testing.T) {
 				port:        80,
 				key:         HealthProbeParamsNumOfProbe,
 			},
-			want:    pointer.Int32(2),
+			want:    ptr.To(int32(2)),
 			wantErr: false,
 		},
 		{

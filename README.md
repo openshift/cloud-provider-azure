@@ -17,42 +17,32 @@ This is the "external" or "out-of-tree" cloud provider for Azure. The "in-tree" 
 
 The latest release of azure-cloud-controller-manager and azure-cloud-node-manager can be found at
 
-* `mcr.microsoft.com/oss/kubernetes/azure-cloud-controller-manager:v1.30.1`
-* `mcr.microsoft.com/oss/kubernetes/azure-cloud-node-manager:v1.30.1`
+* `mcr.microsoft.com/oss/kubernetes/azure-cloud-controller-manager:v1.31.0`
+* `mcr.microsoft.com/oss/kubernetes/azure-cloud-node-manager:v1.31.0`
 
 ### Version matrix
 
-(Minor release versions match Kubernetes minor release versions since v1.23.0.)
+(Minor release versions match Kubernetes minor release versions.)
 
 | Kubernetes version | cloud-provider version | cloud-provider branch |
 |--------------------|------------------------|-----------------------|
 | master             | N/A                    | master                |
 | v1.y.x             | v1.y.z                 | release-1.y           |
+| v1.31.x            | v1.31.z                | release-1.31          |
 | v1.30.x            | v1.30.z                | release-1.30          |
 | v1.29.x            | v1.29.z                | release-1.29          |
 | v1.28.x            | v1.28.z                | release-1.28          |
-| v1.27.x            | v1.27.z                | release-1.27          |
-| v1.26.x            | v1.26.z                | release-1.26          |
-| v1.25.x            | v1.25.z                | release-1.25          |
-| v1.24.x            | v1.24.z                | release-1.24          |
-| v1.23.x            | v1.23.z                | release-1.23          |
-| v1.22.x            | v1.1.z                 | release-1.1           |
 
 ### AKS version matrix
 
-Below table shows the cloud-controller-manager and cloud-node-manager versions supported in Azure Kubernetes Service(AKS).
+The table below shows the cloud-controller-manager and cloud-node-manager versions supported in Azure Kubernetes Service (AKS).
 
 | AKS version                 | cloud-controller-manager version | cloud-node-manager version |
 |-----------------------------|----------------------------------|----------------------------|
-| v1.29.x                     | v1.29.0                          | v1.29.0                    |
-| v1.28.x                     | v1.28.5                          | v1.28.5                    |
-| v1.27.x                     | v1.27.13                         | v1.27.13                   |
-| v1.26.x                     | v1.26.19                         | v1.26.19                   |
-| v1.25.x                     | v1.25.24                         | v1.25.24                   |
-| v1.24.x                     | v1.24.21                         | v1.24.20                   |
-| v1.23.x                     | v1.23.30                         | v1.23.24                   |
-| v1.22.x                     | v1.1.26                          | v1.1.14                    |
-| v1.21.x                     | v1.0.23                          | v1.0.18                    |
+| v1.30.x                     | v1.30.4                          | v1.30.5                    |
+| v1.29.x                     | v1.29.8                          | v1.29.9                    |
+| v1.28.x                     | v1.28.10                         | v1.28.11                    |
+| v1.27.x                     | v1.27.18                         | v1.27.19                   |
 
 ## Build
 
