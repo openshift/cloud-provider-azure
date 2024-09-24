@@ -1,6 +1,6 @@
 module sigs.k8s.io/cloud-provider-azure
 
-go 1.23.1
+go 1.22.0
 
 require (
 	github.com/Azure/azure-kusto-go v0.16.1
@@ -52,6 +52,11 @@ require (
 	sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.0.57
 	sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader v0.0.29
 	sigs.k8s.io/yaml v1.4.0
+)
+
+replace (
+	sigs.k8s.io/cloud-provider-azure/pkg/azclient => ./pkg/azclient
+	sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader => ./pkg/azclient/configloader
 )
 
 require (
