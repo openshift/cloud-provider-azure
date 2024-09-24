@@ -26,11 +26,12 @@ import (
 	"strings"
 	"time"
 
-	aznetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	aznetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworkclient"
 )
@@ -46,6 +47,8 @@ var (
 		false: "",
 		true:  "-IPv6",
 	}
+
+	UnwantedTagKeys = []string{"DateCreated"}
 )
 
 // getVirtualNetworkList returns the list of virtual networks in the cluster resource group.
@@ -136,7 +139,7 @@ func (azureTestClient *AzureTestClient) DeleteSubnet(vnetName string, subnetName
 			ipConfigIDs := []string{}
 			if subnet.Properties.IPConfigurations != nil {
 				for _, ipConfig := range subnet.Properties.IPConfigurations {
-					ipConfigIDs = append(ipConfigIDs, pointer.StringDeref(ipConfig.ID, ""))
+					ipConfigIDs = append(ipConfigIDs, ptr.Deref(ipConfig.ID, ""))
 				}
 			}
 
@@ -287,7 +290,17 @@ func WaitCreatePIP(azureTestClient *AzureTestClient, ipName, rgName string, ipPa
 		}
 		return pip.Properties.IPAddress != nil, nil
 	})
+	if err == nil {
+		pip.Tags = cleanupTags(pip.Tags, UnwantedTagKeys)
+	}
 	return pip, err
+}
+
+func cleanupTags(tags map[string]*string, unwantedKeys []string) map[string]*string {
+	for _, key := range unwantedKeys {
+		delete(tags, key)
+	}
+	return tags
 }
 
 func WaitCreatePIPPrefix(
@@ -353,7 +366,7 @@ func WaitGetPIPByPrefix(
 			return false, nil
 		}
 
-		pipID := pointer.StringDeref((prefix.Properties.PublicIPAddresses)[0].ID, "")
+		pipID := ptr.Deref((prefix.Properties.PublicIPAddresses)[0].ID, "")
 		parts := strings.Split(pipID, "/")
 		pipName := parts[len(parts)-1]
 		pip, err = WaitGetPIP(cli, pipName)
@@ -414,6 +427,9 @@ func WaitGetPIP(azureTestClient *AzureTestClient, ipName string) (pip *aznetwork
 		}
 		return true, nil
 	})
+	if err == nil {
+		pip.Tags = cleanupTags(pip.Tags, UnwantedTagKeys)
+	}
 	return
 }
 
@@ -483,8 +499,8 @@ func SelectAvailablePrivateIPs(tc *AzureTestClient) ([]*string, error) {
 	if err != nil {
 		return []*string{}, err
 	}
-	if vNet.Properties.Subnets == nil || len(vNet.Properties.Subnets) == 0 {
-		return []*string{}, fmt.Errorf("failed to find a subnet in vNet %s", pointer.StringDeref(vNet.Name, ""))
+	if len(vNet.Properties.Subnets) == 0 {
+		return []*string{}, fmt.Errorf("failed to find a subnet in vNet %s", ptr.Deref(vNet.Name, ""))
 	}
 	subnets, err := selectSubnets(tc.IPFamily, vNet.Properties.Subnets)
 	if err != nil {
@@ -497,7 +513,7 @@ func SelectAvailablePrivateIPs(tc *AzureTestClient) ([]*string, error) {
 	}
 	privateIPs := []*string{}
 	for _, subnet := range subnets {
-		ip, err := findIPInSubnet(vNetClient, tc.resourceGroup, *subnet, pointer.StringDeref(vNet.Name, ""))
+		ip, err := findIPInSubnet(vNetClient, tc.resourceGroup, *subnet, ptr.Deref(vNet.Name, ""))
 		if err != nil {
 			return privateIPs, err
 		}
@@ -521,7 +537,7 @@ func (azureTestClient *AzureTestClient) GetPublicIPFromAddress(resourceGroupName
 		return pip, err
 	}
 	for _, pip := range pipList {
-		if strings.EqualFold(pointer.StringDeref(pip.Properties.IPAddress, ""), *ipAddr) {
+		if strings.EqualFold(ptr.Deref(pip.Properties.IPAddress, ""), *ipAddr) {
 			return pip, err
 		}
 	}

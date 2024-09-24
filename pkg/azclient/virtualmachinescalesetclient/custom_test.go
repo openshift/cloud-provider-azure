@@ -25,8 +25,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	armcompute "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
-	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	armcompute "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
+	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -83,7 +83,7 @@ func init() {
 		newResource = &armcompute.VirtualMachineScaleSet{
 			Location: to.Ptr(location),
 			SKU: &armcompute.SKU{
-				Name:     to.Ptr("Basic_A0"), //armcompute.VirtualMachineSizeTypesBasicA0
+				Name:     to.Ptr(string(armcompute.VirtualMachineSizeTypesStandardD2SV3)),
 				Capacity: to.Ptr[int64](1),
 			},
 			Properties: &armcompute.VirtualMachineScaleSetProperties{

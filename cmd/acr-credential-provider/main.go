@@ -33,18 +33,21 @@ import (
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
+
+	var RegistryMirrorStr string
+
 	command := &cobra.Command{
 		Use:   "acr-credential-provider configFile",
 		Short: "Acr credential provider for Kubelet",
 		Long:  `The acr credential provider is responsible for providing ACR credentials for kubelet`,
 		Args:  cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, args []string) {
 			if len(args) != 1 {
 				klog.Errorf("Config file is not specified")
 				os.Exit(1)
 			}
 
-			acrProvider, err := credentialprovider.NewAcrProvider(args[0])
+			acrProvider, err := credentialprovider.NewAcrProviderFromConfig(args[0], RegistryMirrorStr)
 			if err != nil {
 				klog.Errorf("Failed to initialize ACR provider: %v", err)
 				os.Exit(1)
@@ -59,6 +62,10 @@ func main() {
 
 	logs.InitLogs()
 	defer logs.FlushLogs()
+
+	// Flags
+	command.Flags().StringVarP(&RegistryMirrorStr, "registry-mirror", "r", "",
+		"Mirror a source registry host to a target registry host, and image pull credential will be requested to the target registry host when the image is from source registry host")
 
 	if err := command.Execute(); err != nil {
 		os.Exit(1)

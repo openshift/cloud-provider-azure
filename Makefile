@@ -104,19 +104,19 @@ help: ## Display this help.
 all: $(BIN_DIR)/azure-cloud-controller-manager $(BIN_DIR)/azure-cloud-node-manager $(BIN_DIR)/azure-cloud-node-manager.exe ## Build binaries for the project.
 
 $(BIN_DIR)/azure-cloud-node-manager: $(PKG_CONFIG) $(wildcard cmd/cloud-node-manager/*) $(wildcard cmd/cloud-node-manager/**/*) $(wildcard pkg/**/*) ## Build node-manager binary for Linux.
-	CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-node-manager $(shell cat $(PKG_CONFIG)) ./cmd/cloud-node-manager
+	CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-node-manager $(shell cat $(PKG_CONFIG)) ./cmd/cloud-node-manager
 
 $(BIN_DIR)/azure-cloud-node-manager.exe: $(PKG_CONFIG) $(wildcard cmd/cloud-node-manager/*) $(wildcard cmd/cloud-node-manager/**/*) $(wildcard pkg/**/*) ## Build node-manager binary for Windows.
-	CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-node-manager-${ARCH}.exe $(shell cat $(PKG_CONFIG)) ./cmd/cloud-node-manager
+	CGO_ENABLED=1 GOOS=windows GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-node-manager-${ARCH}.exe $(shell cat $(PKG_CONFIG)) ./cmd/cloud-node-manager
 
 $(BIN_DIR)/azure-cloud-controller-manager: $(PKG_CONFIG) $(wildcard cmd/cloud-controller-manager/*) $(wildcard cmd/cloud-controller-manager/**/*) $(wildcard pkg/**/*) ## Build binary for controller-manager.
-	CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-controller-manager $(shell cat $(PKG_CONFIG)) ./cmd/cloud-controller-manager
+	CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-cloud-controller-manager $(shell cat $(PKG_CONFIG)) ./cmd/cloud-controller-manager
 
 $(BIN_DIR)/azure-acr-credential-provider: $(PKG_CONFIG) $(wildcard cmd/acr-credential-provider/*) $(wildcard cmd/acr-credential-provider/**/*) $(wildcard pkg/**/*) ## Build binary for acr-credential-provider.
-	CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-acr-credential-provider $(shell cat $(PKG_CONFIG)) ./cmd/acr-credential-provider
+	CGO_ENABLED=1 GOOS=linux GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-acr-credential-provider $(shell cat $(PKG_CONFIG)) ./cmd/acr-credential-provider
 
 $(BIN_DIR)/azure-acr-credential-provider.exe: $(PKG_CONFIG) $(wildcard cmd/acr-credential-provider/*) $(wildcard cmd/acr-credential-provider/**/*) $(wildcard pkg/**/*) ## Build binary for acr-credential-provider.
-	CGO_ENABLED=0 GOOS=windows GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-acr-credential-provider.exe $(shell cat $(PKG_CONFIG)) ./cmd/acr-credential-provider
+	CGO_ENABLED=1 GOOS=windows GOARCH=${ARCH} go build -a -o $(BIN_DIR)/azure-acr-credential-provider.exe $(shell cat $(PKG_CONFIG)) ./cmd/acr-credential-provider
 
 ## --------------------------------------
 ##@ Images
@@ -166,6 +166,17 @@ build-node-image-windows: buildx-setup $(BIN_DIR)/azure-cloud-node-manager.exe #
 		--build-arg OSVERSION=$(WINDOWS_OSVERSION) \
 		--build-arg ARCH=$(ARCH) \
 		-f cloud-node-manager-windows.Dockerfile . \
+		--provenance=false \
+		--sbom=false
+
+.PHONY: build-node-image-windows-hpc
+build-node-image-windows-hpc: buildx-setup $(BIN_DIR)/azure-cloud-node-manager.exe ## Build node-manager image for Windows.
+	$(DOCKER_BUILDX) build --pull \
+		--output=type=$(OUTPUT_TYPE) \
+		--platform windows/$(ARCH) \
+		-t $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-hpc-$(ARCH) \
+		--build-arg ARCH=$(ARCH) \
+		-f cloud-node-manager-windows-hpc.Dockerfile . \
 		--provenance=false \
 		--sbom=false
 
@@ -256,6 +267,9 @@ push-all-node-images-linux: $(addprefix push-node-image-linux-,$(ALL_ARCH.linux)
 .PHONY: push-all-node-images-windows ## Push node-manager image for Windows.
 push-all-node-images-windows: $(addprefix push-node-image-windows-,$(ALL_OS_ARCH.windows))
 
+.PHONY: push-all-node-images-windows-hpc ## Push node-manager image for Windows.
+push-all-node-images-windows-hpc: $(addprefix push-node-images-windows-hpc-,$(ALL_OS_ARCH.windows))
+
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
 
@@ -264,6 +278,9 @@ push-node-image-linux-%:
 
 push-node-image-windows-%:
 	$(MAKE) WINDOWS_OSVERSION=$(call word-hyphen,$*,1) ARCH=$(call word-hyphen,$*,2) OUTPUT_TYPE=registry build-node-image-windows
+
+push-node-image-windows-hpc-%:
+	$(MAKE) ARCH=$(call word-hyphen,$*,1) OUTPUT_TYPE=registry build-node-image-windows-hpc
 
 .PHONY: build-all-node-images ## Build node-manager image for all OS and archs.
 build-all-node-images: build-all-node-images-linux build-all-node-images-windows
@@ -295,6 +312,9 @@ push-ccm-image-%:
 manifest-node-manager-image-windows-%:
 	$(MAKE) WINDOWS_OSVERSION=$(call word-hyphen,$*,1) ARCH=$(call word-hyphen,$*,2) manifest-node-manager-image-windows
 
+manifest-node-manager-image-windows-hpc-%:
+	$(MAKE) ARCH=$(call word-hyphen,$*,1) manifest-node-manager-image-windows-hpc
+
 .PHONY: manifest-node-manager-image-windows
 manifest-node-manager-image-windows:
 	set -x
@@ -302,6 +322,14 @@ manifest-node-manager-image-windows:
 	docker manifest annotate --os linux --arch $(ARCH) $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH)
 	full_version=`docker manifest inspect ${BASE.windows}:$(WINDOWS_OSVERSION) | jq -r '.manifests[0].platform["os.version"]'`; \
 	docker manifest annotate --os windows --arch $(ARCH) --os-version $${full_version} $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-$(WINDOWS_OSVERSION)-$(ARCH)
+	docker manifest push --purge $(NODE_MANAGER_IMAGE)
+
+.PHONY: manifest-node-manager-images-windows-hpc
+manifest-node-manager-image-windows-hpc:
+	set -x
+	docker manifest create --amend $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-hpc-$(ARCH)
+	docker manifest annotate --os linux --arch $(ARCH) $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH)
+	docker manifest annotate --os windows --arch $(ARCH) $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-hpc-$(ARCH)
 	docker manifest push --purge $(NODE_MANAGER_IMAGE)
 
 ## --------------------------------------
@@ -397,18 +425,23 @@ ifeq ($(CLOUD_BUILD_IMAGE),ccm)
 else
 	ENABLE_GIT_COMMAND=$(ENABLE_GIT_COMMAND) $(MAKE) cloud-build-prerequisites build-all-node-images push-multi-arch-node-manager-image
 endif
+
 ## --------------------------------------
-##@ Deploy clusters
+##@ Deploy clusters with capz
 ## --------------------------------------
 
-.PHONY: deploy-cluster
-deploy-cluster:
-	hack/deploy-cluster-capz.sh
+.PHONY: deploy-workload-cluster
+deploy-workload-cluster:
+	hack/deploy-workload-cluster.sh
+
+.PHONY: delete-workload-cluster
+delete-workload-cluster:
+	hack/delete-workload-cluster.sh
 
 ##@ Tools
 
 LINTER = $(shell pwd)/bin/golangci-lint
-LINTER_VERSION = v1.55.2
+LINTER_VERSION = v1.60.1
 .PHONY: golangci-lint
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"

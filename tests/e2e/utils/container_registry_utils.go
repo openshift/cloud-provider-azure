@@ -19,6 +19,8 @@ package utils
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -28,7 +30,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // CreateContainerRegistry creates a test acr
@@ -41,8 +43,8 @@ func (tc *AzureTestClient) CreateContainerRegistry() (acr.Registry, error) {
 			Name: to.Ptr(acr.SKUNameStandard),
 			Tier: to.Ptr(acr.SKUTierStandard),
 		},
-		Name:     pointer.String(acrName),
-		Location: pointer.String(location),
+		Name:     ptr.To(acrName),
+		Location: ptr.To(location),
 	}
 
 	Logf("Creating ACR %s in resource group %s.", acrName, rgName)
@@ -88,11 +90,30 @@ func AZACRLogin() (err error) {
 	}
 
 	Logf("Attempting az login with azure cred.")
-	//nolint:gosec // G204 ignore this!
-	cmd := exec.Command("az", "login", "--service-principal",
+	authFlags := []string{
 		"--username", authConfig.AADClientID,
 		"--password", authConfig.AADClientSecret,
-		"--tenant", armConfig.TenantID)
+	}
+	if authConfig.UseFederatedWorkloadIdentityExtension {
+		tokenFile, err := os.Open(authConfig.AADFederatedTokenFile)
+		if err != nil {
+			return err
+		}
+		token, err := io.ReadAll(tokenFile)
+		if err != nil {
+			return err
+		}
+		authFlags = []string{
+			"--username", authConfig.AADClientID,
+			"--federated-token", string(token),
+		}
+	}
+	args := []string{
+		"login", "--service-principal",
+		"--tenant", armConfig.TenantID,
+	}
+	//nolint:gosec // G204 ignore this!
+	cmd := exec.Command("az", append(args, authFlags...)...)
 	if err = cmd.Run(); err != nil {
 		return fmt.Errorf("az failed to login with error: %w", err)
 	}
@@ -107,26 +128,27 @@ func AZACRLogin() (err error) {
 	return nil
 }
 
-// PushImageToACR pull an image from Docker Hub and push
+// PushImageToACR pull an image from MCR and push
 // it to the given azure container registry
 func (tc *AzureTestClient) PushImageToACR(registryName, image string) (string, error) {
 	acrClient := tc.createACRClient()
 	rgName := tc.GetResourceGroup()
 
+	tag := "1.25"
 	err := acrClient.ImportImage(context.Background(), rgName, registryName, acr.ImportImageParameters{
 		Source: &acr.ImportSource{
-			RegistryURI: pointer.String("docker.io"),
-			SourceImage: pointer.String("library/" + image + ":latest"),
+			RegistryURI: ptr.To("mcr.microsoft.com"),
+			SourceImage: ptr.To("mirror/docker/library/" + image + ":" + tag),
 		},
 		TargetTags: []*string{
-			to.Ptr(image + ":latest"),
+			to.Ptr(image + ":" + tag),
 		},
 		Mode: to.Ptr(acr.ImportModeNoForce),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to import image %s from docker hub to acr %s with error: %w", image, registryName, err)
+		return "", fmt.Errorf("failed to import image %s from MCR to acr %s with error: %w", image, registryName, err)
 	}
-	return "latest", nil
+	return tag, nil
 }
 
 // AZACRCacheCreate enables acr cache for a image.

@@ -1,3 +1,4 @@
+---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
@@ -142,6 +143,9 @@ metadata:
 spec:
   template:
     spec:
+      identity: UserAssigned
+      userAssignedIdentities:
+      - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY}
       dataDisks:
       - diskSizeGB: 256
         lun: 0
@@ -160,8 +164,8 @@ metadata:
 spec:
   clusterName: ${CLUSTER_NAME}
   failureDomains:
-    - "1"
-    - "2"
+  - "1"
+  - "2"
   replicas: ${WORKER_MACHINE_COUNT}
   template:
     spec:
@@ -183,6 +187,9 @@ metadata:
   name: ${CLUSTER_NAME}-mp-0
   namespace: default
 spec:
+  identity: UserAssigned
+  userAssignedIdentities:
+  - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY}
   location: ${AZURE_LOCATION}
   strategy:
     rollingUpdate:
@@ -229,8 +236,8 @@ metadata:
 spec:
   clusterName: ${CLUSTER_NAME}
   failureDomains:
-    - "1"
-    - "2"
+  - "1"
+  - "2"
   replicas: ${WORKER_MACHINE_COUNT}
   template:
     spec:
@@ -252,6 +259,9 @@ metadata:
   name: ${CLUSTER_NAME}-mp-1
   namespace: default
 spec:
+  identity: UserAssigned
+  userAssignedIdentities:
+  - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY}
   location: ${AZURE_LOCATION}
   strategy:
     rollingUpdate:
@@ -299,12 +309,9 @@ metadata:
   namespace: default
 spec:
   allowedNamespaces: {}
-  clientID: ${AZURE_CLIENT_ID}
-  clientSecret:
-    name: ${AZURE_CLUSTER_IDENTITY_SECRET_NAME}
-    namespace: ${AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE}
+  clientID: ${AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY}
   tenantID: ${AZURE_TENANT_ID}
-  type: ServicePrincipal
+  type: WorkloadIdentity
 ---
 apiVersion: addons.cluster.x-k8s.io/v1alpha1
 kind: HelmChartProxy
