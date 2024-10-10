@@ -28,6 +28,9 @@ import (
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/mock_azclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/privatezoneclient/mock_privatezoneclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/securitygroupclient/mock_securitygroupclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient/mock_virtualnetworklinkclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/diskclient/mockdiskclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/interfaceclient/mockinterfaceclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/loadbalancerclient/mockloadbalancerclient"
@@ -35,7 +38,6 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/routeclient/mockrouteclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/routetableclient/mockroutetableclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/securitygroupclient/mocksecuritygroupclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/snapshotclient/mocksnapshotclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient/mocksubnetclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/mockvmclient"
@@ -54,7 +56,7 @@ func NewTestScaleSet(ctrl *gomock.Controller) (*ScaleSet, error) {
 
 func newTestScaleSetWithState(ctrl *gomock.Controller) (*ScaleSet, error) {
 	cloud := GetTestCloud(ctrl)
-	ss, err := newScaleSet(context.Background(), cloud)
+	ss, err := newScaleSet(cloud)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +66,7 @@ func newTestScaleSetWithState(ctrl *gomock.Controller) (*ScaleSet, error) {
 
 func NewTestFlexScaleSet(ctrl *gomock.Controller) (*FlexScaleSet, error) {
 	cloud := GetTestCloud(ctrl)
-	fs, err := newFlexScaleSet(context.Background(), cloud)
+	fs, err := newFlexScaleSet(cloud)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +118,20 @@ func GetTestCloud(ctrl *gomock.Controller) (az *Cloud) {
 	az.PublicIPAddressesClient = mockpublicipclient.NewMockInterface(ctrl)
 	az.RoutesClient = mockrouteclient.NewMockInterface(ctrl)
 	az.RouteTablesClient = mockroutetableclient.NewMockInterface(ctrl)
-	az.SecurityGroupsClient = mocksecuritygroupclient.NewMockInterface(ctrl)
 	az.SubnetsClient = mocksubnetclient.NewMockInterface(ctrl)
 	az.VirtualMachineScaleSetsClient = mockvmssclient.NewMockInterface(ctrl)
 	az.VirtualMachineScaleSetVMsClient = mockvmssvmclient.NewMockInterface(ctrl)
 	az.VirtualMachinesClient = mockvmclient.NewMockInterface(ctrl)
 	az.PrivateLinkServiceClient = mockprivatelinkserviceclient.NewMockInterface(ctrl)
-	az.ComputeClientFactory = mock_azclient.NewMockClientFactory(ctrl)
+	clientFactory := mock_azclient.NewMockClientFactory(ctrl)
+	az.ComputeClientFactory = clientFactory
+	az.NetworkClientFactory = clientFactory
+	securtyGrouptrack2Client := mock_securitygroupclient.NewMockInterface(ctrl)
+	clientFactory.EXPECT().GetSecurityGroupClient().Return(securtyGrouptrack2Client).AnyTimes()
+	mockPrivateDNSClient := mock_privatezoneclient.NewMockInterface(ctrl)
+	clientFactory.EXPECT().GetPrivateZoneClient().Return(mockPrivateDNSClient).AnyTimes()
+	virtualNetworkLinkClient := mock_virtualnetworklinkclient.NewMockInterface(ctrl)
+	clientFactory.EXPECT().GetVirtualNetworkLinkClient().Return(virtualNetworkLinkClient).AnyTimes()
 	az.AuthProvider = &azclient.AuthProvider{
 		ComputeCredential: mock_azclient.NewMockTokenCredential(ctrl),
 	}
@@ -135,7 +144,7 @@ func GetTestCloud(ctrl *gomock.Controller) (az *Cloud) {
 	az.plsCache, _ = az.newPLSCache()
 	az.LoadBalancerBackendPool = NewMockBackendPool(ctrl)
 
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 	az.storageAccountCache, _ = azcache.NewTimedCache(time.Minute, getter, az.Config.DisableAPICallCache)
 	az.fileServicePropertiesCache, _ = azcache.NewTimedCache(5*time.Minute, getter, az.Config.DisableAPICallCache)
 
