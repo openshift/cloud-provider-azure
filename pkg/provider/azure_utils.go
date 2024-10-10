@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 
@@ -97,6 +98,20 @@ func convertMapToMapPointer(origin map[string]string) map[string]*string {
 	return newly
 }
 
+// parseTags processes and combines tags from a string and a map into a single map of string pointers.
+// It handles tag parsing, trimming, and case-insensitive key conflicts.
+//
+// Parameters:
+//   - tags: A string containing tags in the format "key1=value1,key2=value2"
+//   - tagsMap: A map of string key-value pairs representing additional tags
+//
+// Returns:
+//   - A map[string]*string where keys are tag names and values are pointers to tag values
+//
+// The function prioritizes tags from tagsMap over those from the tags string in case of conflicts.
+// It logs warnings for parsing errors and empty keys, and info messages for case-insensitive key replacements.
+//
+// XXX: return error instead of logging; decouple tag parsing and tag application
 func parseTags(tags string, tagsMap map[string]string) map[string]*string {
 	formatted := make(map[string]*string)
 
@@ -246,7 +261,7 @@ func sameContentInSlices(s1 []string, s2 []string) bool {
 	return true
 }
 
-func removeDuplicatedSecurityRules(rules []network.SecurityRule) []network.SecurityRule {
+func removeDuplicatedSecurityRules(rules []*armnetwork.SecurityRule) []*armnetwork.SecurityRule {
 	ruleNames := make(map[string]bool)
 	for i := len(rules) - 1; i >= 0; i-- {
 		if _, ok := ruleNames[ptr.Deref(rules[i].Name, "")]; ok {
@@ -483,15 +498,6 @@ func StringInSlice(s string, list []string) bool {
 		}
 	}
 	return false
-}
-
-// stringSlice returns a string slice value for the passed string slice pointer. It returns a nil
-// slice if the pointer is nil.
-func stringSlice(s *[]string) []string {
-	if s != nil {
-		return *s
-	}
-	return nil
 }
 
 // IntInSlice checks if an int is in a list

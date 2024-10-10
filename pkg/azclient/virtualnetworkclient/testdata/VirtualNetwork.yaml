@@ -21,6 +21,8 @@ interactions:
                 - "21"
             Content-Type:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-VirtualNetwork?api-version=2021-04-01
         method: PUT
       response:
@@ -72,7 +74,9 @@ interactions:
                 - "90"
             Content-Type:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: PUT
       response:
         proto: HTTP/2.0
@@ -80,18 +84,18 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 547
+        content_length: 588
         uncompressed: false
-        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Updating","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Updating","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
         headers:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "547"
+                - "588"
             Content-Type:
                 - application/json; charset=utf-8
             Expires:
@@ -120,8 +124,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+        headers:
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -165,8 +171,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+        headers:
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -174,14 +182,14 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 548
+        content_length: 589
         uncompressed: false
-        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
         headers:
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "548"
+                - "589"
             Content-Type:
                 - application/json; charset=utf-8
             Etag:
@@ -215,7 +223,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -223,14 +233,14 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 548
+        content_length: 589
         uncompressed: false
-        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
         headers:
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "548"
+                - "589"
             Content-Type:
                 - application/json; charset=utf-8
             Etag:
@@ -264,7 +274,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResourcenotfound?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResourcenotfound?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -317,7 +329,9 @@ interactions:
                 - "90"
             Content-Type:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: PUT
       response:
         proto: HTTP/2.0
@@ -325,18 +339,18 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 548
+        content_length: 589
         uncompressed: false
-        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
         headers:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "548"
+                - "589"
             Content-Type:
                 - application/json; charset=utf-8
             Expires:
@@ -365,8 +379,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+        headers:
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -374,14 +390,14 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 548
+        content_length: 589
         uncompressed: false
-        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        body: '{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
         headers:
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "548"
+                - "589"
             Content-Type:
                 - application/json; charset=utf-8
             Etag:
@@ -415,7 +431,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -423,14 +441,14 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 560
+        content_length: 601
         uncompressed: false
-        body: '{"value":[{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}]}'
+        body: '{"value":[{"name":"testResource","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"westus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["192.168.0.0/16"],"ipamPoolPrefixAllocations":[]},"privateEndpointVNetPolicies":"Disabled","subnets":[],"virtualNetworkPeerings":[],"enableDdosProtection":false}}]}'
         headers:
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "560"
+                - "601"
             Content-Type:
                 - application/json; charset=utf-8
             Expires:
@@ -462,7 +480,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetworknotfound/providers/Microsoft.Network/virtualNetworks?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetworknotfound/providers/Microsoft.Network/virtualNetworks?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -511,7 +531,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualNetwork/providers/Microsoft.Network/virtualNetworks/testResource?api-version=2024-03-01
         method: DELETE
       response:
         proto: HTTP/2.0
@@ -526,7 +548,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -534,7 +556,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Pragma:
                 - no-cache
             Strict-Transport-Security:
@@ -559,8 +581,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+        headers:
+            User-Agent:
+                - ccm-VirtualNetwork-clien azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/westus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -607,6 +631,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-VirtualNetwork?api-version=2021-04-01
         method: DELETE
       response:
@@ -651,7 +677,9 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
+        headers:
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/operationresults/eyJqb2JJZCI6IlJFU09VUkNFR1JPVVBERUxFVElPTkpPQi1BS1M6MkRDSVQ6MkRWSVJUVUFMTkVUV09SSy1FQVNUVVMiLCJqb2JMb2NhdGlvbiI6ImVhc3R1cyJ9?api-version=2021-04-01&c=c&h=h&s=s&t=t
         method: GET
       response:

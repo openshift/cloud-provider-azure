@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,7 +35,6 @@ import (
 
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/mock_azclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/privatezoneclient/mock_privatezoneclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient/mock_virtualnetworklinkclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/blobclient/mockblobclient"
@@ -522,11 +522,9 @@ func TestEnsureStorageAccount(t *testing.T) {
 			mockSubnetsClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, vnetName, subnetName, gomock.Any()).Return(nil).Times(1)
 			cloud.SubnetsClient = mockSubnetsClient
 
-			computeClientFactory := mock_azclient.NewMockClientFactory(ctrl)
-			mockPrivateDNSClient := mock_privatezoneclient.NewMockInterface(ctrl)
+			mockPrivateDNSClient := cloud.ComputeClientFactory.GetPrivateZoneClient().(*mock_privatezoneclient.MockInterface)
 			mockPrivateDNSClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any()).Return(&privatedns.PrivateZone{}, errors.New("ResourceNotFound")).Times(1)
 			mockPrivateDNSClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
-			computeClientFactory.EXPECT().GetPrivateZoneClient().Return(mockPrivateDNSClient).AnyTimes()
 
 			mockPrivateDNSZoneGroup := mockprivatednszonegroupclient.NewMockInterface(ctrl)
 			mockPrivateDNSZoneGroup.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any(), "", false).Return(nil).Times(1)
@@ -534,11 +532,9 @@ func TestEnsureStorageAccount(t *testing.T) {
 			mockPrivateEndpointClient := mockprivateendpointclient.NewMockInterface(ctrl)
 			mockPrivateEndpointClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), "", true).Return(nil).Times(1)
 			cloud.privateendpointclient = mockPrivateEndpointClient
-			mockVirtualNetworkLinksClient := mock_virtualnetworklinkclient.NewMockInterface(ctrl)
+			mockVirtualNetworkLinksClient := cloud.ComputeClientFactory.GetVirtualNetworkLinkClient().(*mock_virtualnetworklinkclient.MockInterface)
 			mockVirtualNetworkLinksClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(&privatedns.VirtualNetworkLink{}, errors.New("ResourceNotFound")).Times(1)
 			mockVirtualNetworkLinksClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
-			computeClientFactory.EXPECT().GetVirtualNetworkLinkClient().Return(mockVirtualNetworkLinksClient).AnyTimes()
-			cloud.ComputeClientFactory = computeClientFactory
 		}
 
 		var testAccountOptions *AccountOptions
@@ -609,7 +605,7 @@ func TestGetStorageAccountWithCache(t *testing.T) {
 		}
 
 		if test.setStorageAccountCache {
-			getter := func(_ string) (interface{}, error) { return nil, nil }
+			getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 			cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 		}
 
@@ -664,7 +660,7 @@ func TestGetFileServicePropertiesCache(t *testing.T) {
 			mockFileClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.FileServiceProperties{}, nil).AnyTimes()
 		}
 		if test.setFileServicePropertiesCache {
-			getter := func(_ string) (interface{}, error) { return nil, nil }
+			getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 			cloud.fileServicePropertiesCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 		}
 
@@ -714,7 +710,7 @@ func TestAddStorageAccountTags(t *testing.T) {
 		},
 	}
 
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 	cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 
 	for _, test := range tests {
@@ -786,7 +782,7 @@ func TestRemoveStorageAccountTags(t *testing.T) {
 		},
 	}
 
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 	cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 	cloud.lockMap = newLockMap()
 	for _, test := range tests {
@@ -1559,7 +1555,7 @@ func TestIsMultichannelEnabledEqual(t *testing.T) {
 	accountName := "account2"
 
 	cloud := GetTestCloud(ctrl)
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 
 	multichannelEnabled := storage.FileServiceProperties{
 		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{

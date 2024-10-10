@@ -89,15 +89,15 @@ func newDelayedRouteUpdater(az *Cloud, interval time.Duration) batchProcessor {
 // run starts the updater reconciling loop.
 func (d *delayedRouteUpdater) run(ctx context.Context) {
 	klog.Info("delayedRouteUpdater: started")
-	err := wait.PollUntilContextCancel(ctx, d.interval, true, func(_ context.Context) (bool, error) {
-		d.updateRoutes()
+	err := wait.PollUntilContextCancel(ctx, d.interval, true, func(ctx context.Context) (bool, error) {
+		d.updateRoutes(ctx)
 		return false, nil
 	})
 	klog.Infof("delayedRouteUpdater: stopped due to %s", err.Error())
 }
 
 // updateRoutes invokes route table client to update all routes.
-func (d *delayedRouteUpdater) updateRoutes() {
+func (d *delayedRouteUpdater) updateRoutes(ctx context.Context) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
@@ -122,7 +122,7 @@ func (d *delayedRouteUpdater) updateRoutes() {
 		routeTable       network.RouteTable
 		existsRouteTable bool
 	)
-	routeTable, existsRouteTable, err = d.az.getRouteTable(azcache.CacheReadTypeDefault)
+	routeTable, existsRouteTable, err = d.az.getRouteTable(ctx, azcache.CacheReadTypeDefault)
 	if err != nil {
 		klog.Errorf("getRouteTable() failed with error: %v", err)
 		return
@@ -136,7 +136,7 @@ func (d *delayedRouteUpdater) updateRoutes() {
 			return
 		}
 
-		routeTable, _, err = d.az.getRouteTable(azcache.CacheReadTypeDefault)
+		routeTable, _, err = d.az.getRouteTable(ctx, azcache.CacheReadTypeDefault)
 		if err != nil {
 			klog.Errorf("getRouteTable() failed with error: %v", err)
 			return
@@ -278,9 +278,9 @@ func (d *delayedRouteUpdater) removeOperation(_ string) {}
 
 // ListRoutes lists all managed routes that belong to the specified clusterName
 // implements cloudprovider.Routes.ListRoutes
-func (az *Cloud) ListRoutes(_ context.Context, clusterName string) ([]*cloudprovider.Route, error) {
+func (az *Cloud) ListRoutes(ctx context.Context, clusterName string) ([]*cloudprovider.Route, error) {
 	klog.V(10).Infof("ListRoutes: START clusterName=%q", clusterName)
-	routeTable, existsRouteTable, err := az.getRouteTable(azcache.CacheReadTypeDefault)
+	routeTable, existsRouteTable, err := az.getRouteTable(ctx, azcache.CacheReadTypeDefault)
 	routes, err := processRoutes(az.ipv6DualStackEnabled, routeTable, existsRouteTable, err)
 	if err != nil {
 		return nil, err
@@ -371,7 +371,7 @@ func (az *Cloud) createRouteTable() error {
 // route.Name will be ignored, although the cloud-provider may use nameHint
 // to create a more user-meaningful name.
 // implements cloudprovider.Routes.CreateRoute
-func (az *Cloud) CreateRoute(_ context.Context, clusterName string, _ string, kubeRoute *cloudprovider.Route) error {
+func (az *Cloud) CreateRoute(ctx context.Context, clusterName string, _ string, kubeRoute *cloudprovider.Route) error {
 	mc := metrics.NewMetricContext("routes", "create_route", az.ResourceGroup, az.getNetworkResourceSubscriptionID(), string(kubeRoute.TargetNode))
 	isOperationSucceeded := false
 	defer func() {
@@ -398,7 +398,7 @@ func (az *Cloud) CreateRoute(_ context.Context, clusterName string, _ string, ku
 	// single stack IPv6 is supported on dual stack host. So the IPv6 IP is secondary IP for both single stack IPv6 and dual stack
 	// Get all private IPs for the machine and find the first one that matches the IPv6 family
 	if !az.ipv6DualStackEnabled && !CIDRv6 {
-		targetIP, _, err = az.getIPForMachine(kubeRoute.TargetNode)
+		targetIP, _, err = az.getIPForMachine(ctx, kubeRoute.TargetNode)
 		if err != nil {
 			return err
 		}
@@ -406,7 +406,7 @@ func (az *Cloud) CreateRoute(_ context.Context, clusterName string, _ string, ku
 		// for dual stack and single stack IPv6 we need to select
 		// a private ip that matches family of the cidr
 		klog.V(4).Infof("CreateRoute: create route instance=%q cidr=%q is in dual stack mode", kubeRoute.TargetNode, kubeRoute.DestinationCIDR)
-		nodePrivateIPs, err := az.getPrivateIPsForMachine(kubeRoute.TargetNode)
+		nodePrivateIPs, err := az.getPrivateIPsForMachine(ctx, kubeRoute.TargetNode)
 		if nil != err {
 			klog.V(3).Infof("CreateRoute: create route: failed(GetPrivateIPsByNodeName) instance=%q cidr=%q with error=%v", kubeRoute.TargetNode, kubeRoute.DestinationCIDR, err)
 			return err

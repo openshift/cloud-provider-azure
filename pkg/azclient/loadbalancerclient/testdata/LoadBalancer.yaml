@@ -21,6 +21,8 @@ interactions:
                 - "21"
             Content-Type:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-LoadBalancer?api-version=2021-04-01
         method: PUT
       response:
@@ -72,7 +74,9 @@ interactions:
                 - "116"
             Content-Type:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-01-01
+            User-Agent:
+                - azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-03-01
         method: PUT
       response:
         proto: HTTP/2.0
@@ -87,7 +91,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -120,8 +124,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -165,8 +171,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-01-01
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -174,14 +182,14 @@ interactions:
         proto_minor: 0
         transfer_encoding: []
         trailer: {}
-        content_length: 615
+        content_length: 617
         uncompressed: false
-        body: '{"name":"pip1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","location":"eastus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","ipAddress":"52.170.46.64","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","idleTimeoutInMinutes":4,"ipTags":[],"ddosSettings":{"protectionMode":"VirtualNetworkInherited"}},"type":"Microsoft.Network/publicIPAddresses","sku":{"name":"Standard","tier":"Regional"}}'
+        body: '{"name":"pip1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","location":"eastus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","ipAddress":"20.185.231.175","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","idleTimeoutInMinutes":4,"ipTags":[],"ddosSettings":{"protectionMode":"VirtualNetworkInherited"}},"type":"Microsoft.Network/publicIPAddresses","sku":{"name":"Standard","tier":"Regional"}}'
         headers:
             Cache-Control:
                 - no-cache
             Content-Length:
-                - "615"
+                - "617"
             Content-Type:
                 - application/json; charset=utf-8
             Etag:
@@ -204,22 +212,24 @@ interactions:
         proto: HTTP/1.1
         proto_major: 1
         proto_minor: 1
-        content_length: 767
+        content_length: 769
         transfer_encoding: []
         trailer: {}
         host: management.azure.com
         remote_addr: ""
         request_uri: ""
-        body: '{"location":"eastus","properties":{"frontendIPConfigurations":[{"name":"frontendConfig1","properties":{"publicIPAddress":{"etag":"W/\"00000000-0000-0000-0000-000000000000\"","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","location":"eastus","name":"pip1","properties":{"ddosSettings":{"protectionMode":"VirtualNetworkInherited"},"idleTimeoutInMinutes":4,"ipAddress":"52.170.46.64","ipTags":[],"provisioningState":"Succeeded","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","resourceGuid":"00000000-0000-0000-0000-000000000000"},"sku":{"name":"Standard","tier":"Regional"},"type":"Microsoft.Network/publicIPAddresses"}}}]},"sku":{"name":"Standard"}}'
+        body: '{"location":"eastus","properties":{"frontendIPConfigurations":[{"name":"frontendConfig1","properties":{"publicIPAddress":{"etag":"W/\"00000000-0000-0000-0000-000000000000\"","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","location":"eastus","name":"pip1","properties":{"ddosSettings":{"protectionMode":"VirtualNetworkInherited"},"idleTimeoutInMinutes":4,"ipAddress":"20.185.231.175","ipTags":[],"provisioningState":"Succeeded","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","resourceGuid":"00000000-0000-0000-0000-000000000000"},"sku":{"name":"Standard","tier":"Regional"},"type":"Microsoft.Network/publicIPAddresses"}}}]},"sku":{"name":"Standard"}}'
         form: {}
         headers:
             Accept:
                 - application/json
             Content-Length:
-                - "767"
+                - "769"
             Content-Type:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: PUT
       response:
         proto: HTTP/2.0
@@ -234,7 +244,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -267,8 +277,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+        headers:
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -317,7 +329,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -366,7 +380,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResourcenotfound?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResourcenotfound?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -404,22 +420,24 @@ interactions:
         proto: HTTP/1.1
         proto_major: 1
         proto_minor: 1
-        content_length: 767
+        content_length: 769
         transfer_encoding: []
         trailer: {}
         host: management.azure.com
         remote_addr: ""
         request_uri: ""
-        body: '{"location":"eastus","properties":{"frontendIPConfigurations":[{"name":"frontendConfig1","properties":{"publicIPAddress":{"etag":"W/\"00000000-0000-0000-0000-000000000000\"","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","location":"eastus","name":"pip1","properties":{"ddosSettings":{"protectionMode":"VirtualNetworkInherited"},"idleTimeoutInMinutes":4,"ipAddress":"52.170.46.64","ipTags":[],"provisioningState":"Succeeded","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","resourceGuid":"00000000-0000-0000-0000-000000000000"},"sku":{"name":"Standard","tier":"Regional"},"type":"Microsoft.Network/publicIPAddresses"}}}]},"sku":{"name":"Standard"}}'
+        body: '{"location":"eastus","properties":{"frontendIPConfigurations":[{"name":"frontendConfig1","properties":{"publicIPAddress":{"etag":"W/\"00000000-0000-0000-0000-000000000000\"","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1","location":"eastus","name":"pip1","properties":{"ddosSettings":{"protectionMode":"VirtualNetworkInherited"},"idleTimeoutInMinutes":4,"ipAddress":"20.185.231.175","ipTags":[],"provisioningState":"Succeeded","publicIPAddressVersion":"IPv4","publicIPAllocationMethod":"Static","resourceGuid":"00000000-0000-0000-0000-000000000000"},"sku":{"name":"Standard","tier":"Regional"},"type":"Microsoft.Network/publicIPAddresses"}}}]},"sku":{"name":"Standard"}}'
         form: {}
         headers:
             Accept:
                 - application/json
             Content-Length:
-                - "767"
+                - "769"
             Content-Type:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: PUT
       response:
         proto: HTTP/2.0
@@ -434,7 +452,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -467,8 +485,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+        headers:
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -517,7 +537,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -564,7 +586,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancernotfound/providers/Microsoft.Network/loadBalancers?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancernotfound/providers/Microsoft.Network/loadBalancers?api-version=2024-03-01
         method: GET
       response:
         proto: HTTP/2.0
@@ -613,7 +637,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-01-01
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/loadBalancers/testResource?api-version=2024-03-01
         method: DELETE
       response:
         proto: HTTP/2.0
@@ -628,7 +654,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -636,7 +662,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Pragma:
                 - no-cache
             Strict-Transport-Security:
@@ -661,8 +687,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+        headers:
+            User-Agent:
+                - ccm-LoadBalancer-client azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -709,7 +737,9 @@ interactions:
         headers:
             Accept:
                 - application/json
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-01-01
+            User-Agent:
+                - azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-LoadBalancer/providers/Microsoft.Network/publicIPAddresses/pip1?api-version=2024-03-01
         method: DELETE
       response:
         proto: HTTP/2.0
@@ -724,7 +754,7 @@ interactions:
             Azure-Asyncnotification:
                 - Enabled
             Azure-Asyncoperation:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -732,7 +762,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
             Pragma:
                 - no-cache
             Strict-Transport-Security:
@@ -757,8 +787,10 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
-        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-01-01&c=c&h=h&s=s&t=t
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.1.0 (go1.23.1; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-03-01&c=c&h=h&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -805,6 +837,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-LoadBalancer?api-version=2021-04-01
         method: DELETE
       response:
@@ -849,7 +883,9 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
+        headers:
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.1; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/operationresults/eyJqb2JJZCI6IlJFU09VUkNFR1JPVVBERUxFVElPTkpPQi1BS1M6MkRDSVQ6MkRMT0FEQkFMQU5DRVItRUFTVFVTIiwiam9iTG9jYXRpb24iOiJlYXN0dXMifQ?api-version=2021-04-01&c=c&h=h&s=s&t=t
         method: GET
       response:

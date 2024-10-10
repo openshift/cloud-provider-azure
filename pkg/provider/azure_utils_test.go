@@ -17,12 +17,14 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/stretchr/testify/assert"
@@ -295,12 +297,12 @@ func TestGetNodePrivateIPAddresses(t *testing.T) {
 func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 	for _, testCase := range []struct {
 		description string
-		rules       []network.SecurityRule
-		expected    []network.SecurityRule
+		rules       []*armnetwork.SecurityRule
+		expected    []*armnetwork.SecurityRule
 	}{
 		{
 			description: "no duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -308,7 +310,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule2"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -319,7 +321,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 		},
 		{
 			description: "duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -330,7 +332,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule1"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule2"),
 				},
@@ -388,7 +390,7 @@ func TestGetVMSSVMCacheKey(t *testing.T) {
 }
 
 func TestIsNodeInVMSSVMCache(t *testing.T) {
-	getter := func(_ string) (interface{}, error) {
+	getter := func(_ context.Context, _ string) (interface{}, error) {
 		return nil, nil
 	}
 	emptyCacheEntryTimedCache, _ := azcache.NewTimedCache(fakeCacheTTL, getter, false)

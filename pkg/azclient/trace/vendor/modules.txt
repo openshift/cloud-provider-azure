@@ -57,19 +57,19 @@ go.opentelemetry.io/otel/metric/embedded
 ## explicit; go 1.22
 go.opentelemetry.io/otel/trace
 go.opentelemetry.io/otel/trace/embedded
-# golang.org/x/net v0.28.0
+# golang.org/x/net v0.29.0
 ## explicit; go 1.18
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
-# golang.org/x/text v0.18.0
+# golang.org/x/text v0.19.0
 ## explicit; go 1.18
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.0.57
+# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.0.65
 ## explicit; go 1.23.1
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/retryrepectthrottled
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils
