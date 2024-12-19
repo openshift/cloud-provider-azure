@@ -7,15 +7,15 @@ An example:
 
 ```golang
 type HTTPConfig struct {
-	Host    string `desc:"HTTP host"`
-	Port    int `flag:"port p" desc:"some port"`
-	SSL     bool `env:"HTTP_SSL_VALUE"`
+	Host    string        `desc:"HTTP host"`
+	Port    int           `flag:"port p" desc:"some port"`
+	SSL     bool          `env:"HTTP_SSL_VALUE"`
 	Timeout time.Duration `flag:",deprecated,hidden"`
 }
 
 type Config struct {
-	HTTP   HTTPConfig
-	Stats  StatsConfig
+	HTTP  HTTPConfig
+	Stats StatsConfig
 }
 ```
 
@@ -59,8 +59,7 @@ And you can use your favorite flag or cli library!
  - [x] net.IP
  - [x] time.Duration
  - [x] regexp.Regexp
- - [ ] map[string]string
- - [ ] map[string]int
+ - [x] map for all previous types (e.g. `map[int64]bool`, `map[string]float64`)
 
 ## Custom types:
  - [x] HexBytes
@@ -95,11 +94,10 @@ Simple example for flag library:
 ```golang
 package main
 
-
 import (
+	"flag"
 	"log"
 	"time"
-	"flag"
 
 	"github.com/octago/sflags/gen/gflag"
 )
@@ -112,7 +110,7 @@ type httpConfig struct {
 }
 
 type config struct {
-	HTTP   httpConfig
+	HTTP httpConfig
 }
 
 func main() {
@@ -178,7 +176,7 @@ Field int `flag:",deprecated"`
 If you specify description in description tag (`desc` by default) it will be used in USAGE section.
 
 ```
-Addr string `desc:"HTTP address"`
+Addr string `desc:"HTTP host"`
 ```
 this description produces something like:
 ```
@@ -223,3 +221,8 @@ func Flatten(val bool)
 ## Known issues
 
  - kingpin doesn't pass value for boolean arguments. Counter can't get initial value from arguments.
+ 
+## Similar projects
+
+ * https://github.com/jaffee/commandeer
+ * https://github.com/anacrolix/tagflag

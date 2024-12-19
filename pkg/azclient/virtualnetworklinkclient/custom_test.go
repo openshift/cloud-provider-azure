@@ -50,9 +50,9 @@ func init() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		parentResourceName = "aks-cit-privatednszone-uttest.privatelink.global.azmk8s.io"
+		privatezoneName = "aks-cit-privatednszone-cit.privatelink.global.azmk8s.io"
 		privatednsClient = privatednsClientFactory.NewPrivateZonesClient()
-		dnsPoller, err := privatednsClient.BeginCreateOrUpdate(ctx, resourceGroupName, parentResourceName, armprivatedns.PrivateZone{
+		dnsPoller, err := privatednsClient.BeginCreateOrUpdate(ctx, resourceGroupName, privatezoneName, armprivatedns.PrivateZone{
 			Location: to.Ptr("global"),
 		}, nil)
 		networkClientFactory, err := armnetwork.NewClientFactory(recorder.SubscriptionID(), recorder.TokenCredential(), &arm.ClientOptions{
@@ -61,9 +61,7 @@ func init() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = dnsPoller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{
-			Frequency: 1 * time.Second,
-		})
+		_, err = dnsPoller.PollUntilDone(ctx, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualNetworksClient = networkClientFactory.NewVirtualNetworksClient()
@@ -104,18 +102,8 @@ func init() {
 
 	}
 	afterAllFunc = func(ctx context.Context) {
-		virtualNetworkLinksClient := privatednsClientFactory.NewVirtualNetworkLinksClient()
-		linkPoller, err := virtualNetworkLinksClient.BeginDelete(ctx, resourceGroupName, parentResourceName, resourceName, nil)
-		Expect(err).NotTo(HaveOccurred())
-		_, err = linkPoller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{
-			Frequency: 1 * time.Second,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		if recorder.IsNewCassette() {
-			time.Sleep(10 * time.Second)
-		}
 		privatednsClient = privatednsClientFactory.NewPrivateZonesClient()
-		dnsPoller, err := privatednsClient.BeginDelete(ctx, resourceGroupName, parentResourceName, nil)
+		dnsPoller, err := privatednsClient.BeginDelete(ctx, resourceGroupName, privatezoneName, nil)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = dnsPoller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{
 			Frequency: 1 * time.Second,
