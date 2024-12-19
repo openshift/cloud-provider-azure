@@ -17,12 +17,13 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/stretchr/testify/assert"
@@ -36,67 +37,6 @@ import (
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
-
-func TestSimpleLockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-}
-
-func TestSimpleLockUnlockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-	testLockMap.UnlockEntry("entry1")
-}
-
-func TestConcurrentLockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	callbackChan2 := make(chan interface{})
-
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan2)
-	ensureNoCallback(t, callbackChan2)
-
-	testLockMap.UnlockEntry("entry1")
-	ensureCallbackHappens(t, callbackChan2)
-	testLockMap.UnlockEntry("entry1")
-}
-
-func (lm *LockMap) lockAndCallback(_ *testing.T, entry string, callbackChan chan<- interface{}) {
-	lm.LockEntry(entry)
-	callbackChan <- true
-}
-
-var callbackTimeout = 2 * time.Second
-
-func ensureCallbackHappens(t *testing.T, callbackChan <-chan interface{}) bool {
-	select {
-	case <-callbackChan:
-		return true
-	case <-time.After(callbackTimeout):
-		t.Fatalf("timed out waiting for callback")
-		return false
-	}
-}
-
-func ensureNoCallback(t *testing.T, callbackChan <-chan interface{}) bool {
-	select {
-	case <-callbackChan:
-		t.Fatalf("unexpected callback")
-		return false
-	case <-time.After(callbackTimeout):
-		return true
-	}
-}
 
 func TestReconcileTags(t *testing.T) {
 	for _, testCase := range []struct {
@@ -295,12 +235,12 @@ func TestGetNodePrivateIPAddresses(t *testing.T) {
 func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 	for _, testCase := range []struct {
 		description string
-		rules       []network.SecurityRule
-		expected    []network.SecurityRule
+		rules       []*armnetwork.SecurityRule
+		expected    []*armnetwork.SecurityRule
 	}{
 		{
 			description: "no duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -308,7 +248,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule2"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -319,7 +259,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 		},
 		{
 			description: "duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -330,7 +270,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule1"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule2"),
 				},
@@ -388,7 +328,7 @@ func TestGetVMSSVMCacheKey(t *testing.T) {
 }
 
 func TestIsNodeInVMSSVMCache(t *testing.T) {
-	getter := func(_ string) (interface{}, error) {
+	getter := func(_ context.Context, _ string) (interface{}, error) {
 		return nil, nil
 	}
 	emptyCacheEntryTimedCache, _ := azcache.NewTimedCache(fakeCacheTTL, getter, false)
@@ -871,12 +811,21 @@ func TestIsFIPIPv6(t *testing.T) {
 			},
 			expectedIsIPv6: true,
 		},
+		{
+			desc: "enpty ip families",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{},
+				},
+			},
+			expectedIsIPv6: false,
+		},
 	}
 	for _, tc := range testcases {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			az := GetTestCloud(ctrl)
-			isIPv6, err := az.isFIPIPv6(&tc.svc, "rg", tc.fip)
+			isIPv6, err := az.isFIPIPv6(&tc.svc, tc.fip)
 			assert.Nil(t, err)
 			assert.Equal(t, tc.expectedIsIPv6, isIPv6)
 		})
