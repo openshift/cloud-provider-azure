@@ -17,23 +17,24 @@ limitations under the License.
 package ipam
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/mockvmclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssclient/mockvmssclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualmachineclient/mock_virtualmachineclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualmachinescalesetclient/mock_virtualmachinescalesetclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	azureprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 	"sigs.k8s.io/cloud-provider-azure/pkg/util/controller/testutil"
@@ -50,7 +51,6 @@ func hasNodeInProcessing(ca *cloudCIDRAllocator, name string) bool {
 func TestBoundedRetries(_ *testing.T) {
 	clientSet := fake.NewSimpleClientset()
 	updateChan := make(chan nodeReservedCIDRs, 1) // need to buffer as we are using only on go routine
-	stopChan := make(chan struct{})
 	sharedInfomer := informers.NewSharedInformerFactory(clientSet, 1*time.Hour)
 	ca := &cloudCIDRAllocator{
 		client:            clientSet,
@@ -59,7 +59,7 @@ func TestBoundedRetries(_ *testing.T) {
 		nodesSynced:       sharedInfomer.Core().V1().Nodes().Informer().HasSynced,
 		nodesInProcessing: map[string]struct{}{},
 	}
-	go ca.worker(stopChan)
+	go ca.worker(context.Background())
 	nodeName := "testNode"
 	_ = ca.AllocateOrOccupyCIDR(&v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -208,18 +208,18 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 			ss, err := azureprovider.NewTestScaleSet(ctrl)
 			assert.NoError(t, err)
 
-			expectedVMSS := compute.VirtualMachineScaleSet{
+			expectedVMSS := &armcompute.VirtualMachineScaleSet{
 				Name: ptr.To("vmss"),
 				Tags: tc.tags,
-				VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
-					OrchestrationMode: compute.Uniform,
+				Properties: &armcompute.VirtualMachineScaleSetProperties{
+					OrchestrationMode: to.Ptr(armcompute.OrchestrationModeUniform),
 				},
 			}
-			mockVMSSClient := ss.VirtualMachineScaleSetsClient.(*mockvmssclient.MockInterface)
-			mockVMSSClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]compute.VirtualMachineScaleSet{expectedVMSS}, nil).MaxTimes(1)
+			mockVMSSClient := ss.ComputeClientFactory.GetVirtualMachineScaleSetClient().(*mock_virtualmachinescalesetclient.MockInterface)
+			mockVMSSClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]*armcompute.VirtualMachineScaleSet{expectedVMSS}, nil).MaxTimes(1)
 			cloud.VMSet = ss
-			mockVMsClient := ss.VirtualMachinesClient.(*mockvmclient.MockInterface)
-			mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachine{}, nil).AnyTimes()
+			mockVMsClient := ss.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
+			mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]*armcompute.VirtualMachine{}, nil).AnyTimes()
 
 			clusterCIDRs := func() []*net.IPNet {
 				_, cidrIPV4, _ := net.ParseCIDR("10.240.0.0/16")
@@ -232,7 +232,7 @@ func TestUpdateNodeSubnetMaskSizes(t *testing.T) {
 				nodeNameSubnetMaskSizesMap: make(map[string][]int),
 			}
 
-			err = ca.updateNodeSubnetMaskSizes("vmss-0", tc.providerID)
+			err = ca.updateNodeSubnetMaskSizes(context.Background(), "vmss-0", tc.providerID)
 			assert.Equal(t, tc.expectedErr, err)
 			assert.Equal(t, tc.expectedNodeNameSubnetMaskSizesMap, ca.nodeNameSubnetMaskSizesMap)
 		})

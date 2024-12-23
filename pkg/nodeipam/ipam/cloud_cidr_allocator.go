@@ -17,6 +17,7 @@ limitations under the License.
 package ipam
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -124,7 +125,7 @@ func NewCloudCIDRAllocator(
 				klog.Warningf("NewCloudCIDRAllocator: failed when trying to read the node mask size on node %s: no provider ID", node.Name)
 				continue
 			}
-			err := ca.updateNodeSubnetMaskSizes(node.Name, node.Spec.ProviderID)
+			err := ca.updateNodeSubnetMaskSizes(context.Background(), node.Name, node.Spec.ProviderID)
 			if err != nil {
 				return nil, err
 			}
@@ -222,7 +223,7 @@ func (ca *cloudCIDRAllocator) updateMaxSubnetMaskSizes() {
 }
 
 // updateNodeSubnetMaskSizes gets the node's VMSS/VMAS, reads the mask size tag on it and updates them into the map
-func (ca *cloudCIDRAllocator) updateNodeSubnetMaskSizes(nodeName, providerID string) error {
+func (ca *cloudCIDRAllocator) updateNodeSubnetMaskSizes(ctx context.Context, nodeName, providerID string) error {
 	ca.lock.Lock()
 	defer ca.lock.Unlock()
 
@@ -230,7 +231,7 @@ func (ca *cloudCIDRAllocator) updateNodeSubnetMaskSizes(nodeName, providerID str
 		klog.Warningf("updateNodeSubnetMaskSizes(%s): empty providerID", providerID)
 	}
 
-	ipv4Mask, ipv6Mask, err := ca.cloud.VMSet.GetNodeCIDRMasksByProviderID(providerID)
+	ipv4Mask, ipv6Mask, err := ca.cloud.VMSet.GetNodeCIDRMasksByProviderID(ctx, providerID)
 	if err != nil {
 		klog.Warningf("updateNodeSubnetMaskSizes(%s): cannot get node subnet mask size by providerID: %v", providerID, err)
 	}
@@ -262,24 +263,24 @@ func (ca *cloudCIDRAllocator) updateNodeSubnetMaskSizes(nodeName, providerID str
 	return nil
 }
 
-func (ca *cloudCIDRAllocator) Run(stopCh <-chan struct{}) {
+func (ca *cloudCIDRAllocator) Run(ctx context.Context) {
 	defer utilruntime.HandleCrash()
 
 	klog.Infof("Starting cloud CIDR allocator")
 	defer klog.Infof("Shutting down cloud CIDR allocator")
 
-	if !cache.WaitForNamedCacheSync("cidrallocator", stopCh, ca.nodesSynced) {
+	if !cache.WaitForNamedCacheSync("cidrallocator", ctx.Done(), ca.nodesSynced) {
 		return
 	}
 
 	for i := 0; i < cidrUpdateWorkers; i++ {
-		go ca.worker(stopCh)
+		go ca.worker(ctx)
 	}
 
-	<-stopCh
+	<-ctx.Done()
 }
 
-func (ca *cloudCIDRAllocator) worker(stopChan <-chan struct{}) {
+func (ca *cloudCIDRAllocator) worker(ctx context.Context) {
 	for {
 		select {
 		case workItem, ok := <-ca.nodeUpdateChannel:
@@ -291,7 +292,7 @@ func (ca *cloudCIDRAllocator) worker(stopChan <-chan struct{}) {
 				// Requeue the failed node for update again.
 				ca.nodeUpdateChannel <- workItem
 			}
-		case <-stopChan:
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -357,7 +358,7 @@ func (ca *cloudCIDRAllocator) AllocateOrOccupyCIDR(node *v1.Node) error {
 		return nil
 	}
 
-	err := ca.updateNodeSubnetMaskSizes(node.Name, node.Spec.ProviderID)
+	err := ca.updateNodeSubnetMaskSizes(context.Background(), node.Name, node.Spec.ProviderID)
 	if err != nil {
 		klog.Errorf("AllocateOrOccupyCIDR(%s): failed to update node subnet mask sizes: %v", node.Name, err)
 		return err
