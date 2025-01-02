@@ -25,6 +25,7 @@ import (
 	"k8s.io/klog/v2"
 
 	azureprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 // IMDSNodeProvider implements nodemanager.NodeProvider.
@@ -34,7 +35,7 @@ type IMDSNodeProvider struct {
 
 // NewIMDSNodeProvider creates a new IMDSNodeProvider.
 func NewIMDSNodeProvider(ctx context.Context) *IMDSNodeProvider {
-	az, err := azureprovider.NewCloud(ctx, &azureprovider.Config{
+	az, err := azureprovider.NewCloud(ctx, nil, &config.Config{
 		UseInstanceMetadata: true,
 		VMType:              "vmss",
 	}, false)
@@ -79,6 +80,6 @@ func (np *IMDSNodeProvider) GetZone(ctx context.Context, _ types.NodeName) (clou
 }
 
 // GetPlatformSubFaultDomain returns the PlatformSubFaultDomain from IMDS if set.
-func (np *IMDSNodeProvider) GetPlatformSubFaultDomain() (string, error) {
-	return np.azure.GetPlatformSubFaultDomain()
+func (np *IMDSNodeProvider) GetPlatformSubFaultDomain(ctx context.Context) (string, error) {
+	return np.azure.GetPlatformSubFaultDomain(ctx)
 }

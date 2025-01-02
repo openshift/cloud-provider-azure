@@ -23,6 +23,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/onsi/ginkgo/v2"
@@ -39,7 +40,7 @@ func TestClient(t *testing.T) {
 
 var resourceGroupName = "aks-cit-FileShare"
 var resourceName = "testResource"
-var parentResourceName = "testParentResource"
+var accountName = "testParentResource"
 var subscriptionID string
 var location = "eastus"
 var resourceGroupClient *armresources.ResourceGroupsClient
@@ -57,6 +58,9 @@ var _ = ginkgo.BeforeSuite(func(ctx context.Context) {
 		ClientOptions: azcore.ClientOptions{
 			Transport:       recorder.HTTPClient(),
 			TracingProvider: utils.TracingProvider,
+			Telemetry: policy.TelemetryOptions{
+				ApplicationID: "ccm-resource-group-client",
+			},
 		},
 	})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -64,6 +68,9 @@ var _ = ginkgo.BeforeSuite(func(ctx context.Context) {
 		ClientOptions: azcore.ClientOptions{
 			Transport:       recorder.HTTPClient(),
 			TracingProvider: utils.TracingProvider,
+			Telemetry: policy.TelemetryOptions{
+				ApplicationID: "ccm-FileShare-client",
+			},
 		},
 	})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
