@@ -24,8 +24,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	armstorage "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
@@ -39,18 +39,50 @@ var (
 
 func init() {
 	additionalTestCases = func() {
-		When("creation requests are raised", func() {
-			It("should not return error", func(ctx context.Context) {
+		ginkgo.When("creation requests are raised", func() {
+			ginkgo.It("should not return error", func(ctx context.Context) {
 				resourceName = "akscitaccountfilesharetest"
-				newResource, err := realClient.Create(ctx, resourceGroupName, parentResourceName, resourceName, armstorage.FileShare{
+				newResource, err := realClient.Create(ctx, resourceGroupName, accountName, resourceName, armstorage.FileShare{
 					FileShareProperties: &armstorage.FileShareProperties{
 						AccessTier:       to.Ptr(armstorage.ShareAccessTierCool),
 						EnabledProtocols: to.Ptr(armstorage.EnabledProtocolsSMB),
 					},
+				}, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(newResource).NotTo(gomega.BeNil())
+				gomega.Expect(*newResource.Name).To(gomega.Equal(resourceName))
+			})
+		})
+		ginkgo.When("list requests are raised", func() {
+			ginkgo.It("should not return error", func(ctx context.Context) {
+				resourceList, err := realClient.List(ctx, resourceGroupName, accountName, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(resourceList).NotTo(gomega.BeNil())
+				gomega.Expect(len(resourceList)).To(gomega.Equal(1))
+				gomega.Expect(*resourceList[0].Name).To(gomega.Equal(resourceName))
+			})
+		})
+		ginkgo.When("invalid list requests are raised", func() {
+			ginkgo.It("should return error", func(ctx context.Context) {
+				resourceList, err := realClient.List(ctx, resourceGroupName+"notfound", accountName, &armstorage.FileSharesClientListOptions{
+					Expand: to.Ptr("snapshots"),
 				})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(newResource).NotTo(BeNil())
-				Expect(*newResource.Name).To(Equal(resourceName))
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(resourceList).To(gomega.BeNil())
+			})
+		})
+		ginkgo.When("get requests are raised", func() {
+			ginkgo.It("should not return error", func(ctx context.Context) {
+				newResource, err := realClient.Get(ctx, resourceGroupName, accountName, resourceName, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(newResource).NotTo(gomega.BeNil())
+			})
+		})
+		ginkgo.When("invalid get requests are raised", func() {
+			ginkgo.It("should return 404 error", func(ctx context.Context) {
+				newResource, err := realClient.Get(ctx, resourceGroupName, accountName, resourceName+"notfound", nil)
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(newResource).To(gomega.BeNil())
 			})
 		})
 	}
@@ -61,11 +93,11 @@ func init() {
 				Transport: recorder.HTTPClient(),
 			},
 		})
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		storageaccountClient = storageClientFactory.NewAccountsClient()
 		newResource = &armstorage.FileShare{}
-		parentResourceName = "akscitacctsdktest"
-		storageAccount, err := utils.NewPollerWrapper(storageaccountClient.BeginCreate(ctx, resourceGroupName, parentResourceName, armstorage.AccountCreateParameters{
+		accountName = "akscitacctsdktest"
+		storageAccount, err := utils.NewPollerWrapper(storageaccountClient.BeginCreate(ctx, resourceGroupName, accountName, armstorage.AccountCreateParameters{
 			Location: to.Ptr(location),
 			Kind:     to.Ptr(armstorage.KindStorageV2),
 			Properties: &armstorage.AccountPropertiesCreateParameters{
@@ -108,15 +140,15 @@ func init() {
 				Tier: to.Ptr(armstorage.SKUTierStandard),
 			},
 		}, nil)).WaitforPollerResp(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageAccount).NotTo(BeNil())
-		Expect(*storageAccount.Name).To(Equal(parentResourceName))
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(storageAccount).NotTo(gomega.BeNil())
+		gomega.Expect(*storageAccount.Name).To(gomega.Equal(accountName))
 
 	}
 	afterAllFunc = func(ctx context.Context) {
-		err := realClient.Delete(ctx, resourceGroupName, parentResourceName, resourceName)
-		Expect(err).NotTo(HaveOccurred())
-		_, err = storageaccountClient.Delete(ctx, resourceGroupName, parentResourceName, nil)
-		Expect(err).NotTo(HaveOccurred())
+		err := realClient.Delete(ctx, resourceGroupName, accountName, resourceName, nil)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		_, err = storageaccountClient.Delete(ctx, resourceGroupName, accountName, nil)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
 }
