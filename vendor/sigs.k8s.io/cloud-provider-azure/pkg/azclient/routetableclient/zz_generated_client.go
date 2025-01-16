@@ -27,8 +27,11 @@ import (
 	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/metrics"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/etag"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
+
+const AzureStackCloudAPIVersion = "2018-11-01"
 
 type Client struct {
 	*armnetwork.RouteTablesClient
@@ -42,6 +45,7 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 	}
 	tr := options.TracingProvider.NewTracer(utils.ModuleName, utils.ModuleVersion)
 
+	options.ClientOptions.PerCallPolicies = append(options.ClientOptions.PerCallPolicies, utils.FuncPolicyWrapper(etag.AppendEtag))
 	client, err := armnetwork.NewRouteTablesClient(subscriptionID, credential, options)
 	if err != nil {
 		return nil, err
@@ -56,13 +60,13 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "RouteTablesClient.Get"
 
 // Get gets the RouteTable
-func (client *Client) Get(ctx context.Context, resourceGroupName string, resourceName string) (result *armnetwork.RouteTable, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, routetableName string) (result *armnetwork.RouteTable, err error) {
 
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "RouteTable", "get")
 	defer func() { metricsCtx.Observe(ctx, err) }()
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.RouteTablesClient.Get(ctx, resourceGroupName, resourceName, nil)
+	resp, err := client.RouteTablesClient.Get(ctx, resourceGroupName, routetableName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +77,12 @@ func (client *Client) Get(ctx context.Context, resourceGroupName string, resourc
 const CreateOrUpdateOperationName = "RouteTablesClient.Create"
 
 // CreateOrUpdate creates or updates a RouteTable.
-func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, resourceName string, resource armnetwork.RouteTable) (result *armnetwork.RouteTable, err error) {
+func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, routetableName string, resource armnetwork.RouteTable) (result *armnetwork.RouteTable, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "RouteTable", "create_or_update")
 	defer func() { metricsCtx.Observe(ctx, err) }()
 	ctx, endSpan := runtime.StartSpan(ctx, CreateOrUpdateOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := utils.NewPollerWrapper(client.RouteTablesClient.BeginCreateOrUpdate(ctx, resourceGroupName, resourceName, resource, nil)).WaitforPollerResp(ctx)
+	resp, err := utils.NewPollerWrapper(client.RouteTablesClient.BeginCreateOrUpdate(ctx, resourceGroupName, routetableName, resource, nil)).WaitforPollerResp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,12 +95,12 @@ func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName stri
 const DeleteOperationName = "RouteTablesClient.Delete"
 
 // Delete deletes a RouteTable by name.
-func (client *Client) Delete(ctx context.Context, resourceGroupName string, resourceName string) (err error) {
+func (client *Client) Delete(ctx context.Context, resourceGroupName string, routetableName string) (err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "RouteTable", "delete")
 	defer func() { metricsCtx.Observe(ctx, err) }()
 	ctx, endSpan := runtime.StartSpan(ctx, DeleteOperationName, client.tracer, nil)
 	defer endSpan(err)
-	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, resourceName, nil)).WaitforPollerResp(ctx)
+	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, routetableName, nil)).WaitforPollerResp(ctx)
 	return err
 }
 

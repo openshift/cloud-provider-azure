@@ -26,8 +26,11 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/mock/gomock"
@@ -38,30 +41,29 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/interfaceclient/mockinterfaceclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmclient/mockvmclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssclient/mockvmssclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssvmclient/mockvmssvmclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/interfaceclient/mock_interfaceclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/publicipaddressclient/mock_publicipaddressclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualmachineclient/mock_virtualmachineclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualmachinescalesetclient/mock_virtualmachinescalesetclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualmachinescalesetvmclient/mock_virtualmachinescalesetvmclient"
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
-	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 	utilsets "sigs.k8s.io/cloud-provider-azure/pkg/util/sets"
 )
 
 // setTestVirtualMachines sets test virtual machine with powerstate.
-func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull bool) []compute.VirtualMachine {
-	expectedVMs := make([]compute.VirtualMachine, 0)
+func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull bool) []*armcompute.VirtualMachine {
+	expectedVMs := make([]*armcompute.VirtualMachine, 0)
 
 	for nodeName, powerState := range vmList {
 		nodeName := nodeName
 		instanceID := fmt.Sprintf("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/%s", nodeName)
-		vm := compute.VirtualMachine{
+		vm := &armcompute.VirtualMachine{
 			Name:     &nodeName,
 			ID:       &instanceID,
 			Location: &c.Location,
 		}
-		status := []compute.InstanceViewStatus{
+		status := []*armcompute.InstanceViewStatus{
 			{
 				Code: ptr.To(powerState),
 			},
@@ -69,20 +71,20 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 				Code: ptr.To("ProvisioningState/succeeded"),
 			},
 		}
-		vm.VirtualMachineProperties = &compute.VirtualMachineProperties{
+		vm.Properties = &armcompute.VirtualMachineProperties{
 			ProvisioningState: ptr.To(string(consts.ProvisioningStateSucceeded)),
-			HardwareProfile: &compute.HardwareProfile{
-				VMSize: compute.StandardA0,
+			HardwareProfile: &armcompute.HardwareProfile{
+				VMSize: to.Ptr(armcompute.VirtualMachineSizeTypesStandardA0),
 			},
-			InstanceView: &compute.VirtualMachineInstanceView{
-				Statuses: &status,
+			InstanceView: &armcompute.VirtualMachineInstanceView{
+				Statuses: status,
 			},
-			StorageProfile: &compute.StorageProfile{
-				DataDisks: &[]compute.DataDisk{},
+			StorageProfile: &armcompute.StorageProfile{
+				DataDisks: []*armcompute.DataDisk{},
 			},
 		}
 		if !isDataDisksFull {
-			vm.StorageProfile.DataDisks = &[]compute.DataDisk{
+			vm.Properties.StorageProfile.DataDisks = []*armcompute.DataDisk{
 				{
 					Lun:  ptr.To(int32(0)),
 					Name: ptr.To("disk1"),
@@ -97,11 +99,11 @@ func setTestVirtualMachines(c *Cloud, vmList map[string]string, isDataDisksFull 
 				},
 			}
 		} else {
-			dataDisks := make([]compute.DataDisk, maxLUN)
+			dataDisks := make([]*armcompute.DataDisk, maxLUN)
 			for i := 0; i < maxLUN; i++ {
-				dataDisks[i] = compute.DataDisk{Lun: ptr.To(int32(i))}
+				dataDisks[i] = &armcompute.DataDisk{Lun: ptr.To(int32(i))}
 			}
-			vm.StorageProfile.DataDisks = &dataDisks
+			vm.Properties.StorageProfile.DataDisks = dataDisks
 		}
 
 		expectedVMs = append(expectedVMs, vm)
@@ -247,7 +249,7 @@ func TestInstanceID(t *testing.T) {
 			t.Errorf("Test [%s] unexpected error: %v", test.name, err)
 		}
 		if test.useCustomImsCache {
-			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(_ string) (interface{}, error) {
+			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(_ context.Context, _ string) (interface{}, error) {
 				return nil, fmt.Errorf("getError")
 			}, false)
 			if err != nil {
@@ -259,12 +261,12 @@ func TestInstanceID(t *testing.T) {
 			vmListWithPowerState[vm] = ""
 		}
 		expectedVMs := setTestVirtualMachines(cloud, vmListWithPowerState, false)
-		mockVMsClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMsClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		for _, vm := range expectedVMs {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
-		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
-		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(&armcompute.VirtualMachine{}, &azcore.ResponseError{StatusCode: http.StatusNotFound, ErrorCode: cloudprovider.InstanceNotFound.Error()}).AnyTimes()
+		mockVMsClient.EXPECT().CreateOrUpdate(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 		instanceID, err := cloud.InstanceID(context.Background(), types.NodeName(test.nodeName))
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
@@ -366,13 +368,13 @@ func TestInstanceShutdownByProviderID(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVMs := setTestVirtualMachines(cloud, test.vmList, false)
 		if test.provisioningState != "" {
-			expectedVMs[0].ProvisioningState = ptr.To(test.provisioningState)
+			expectedVMs[0].Properties.ProvisioningState = ptr.To(test.provisioningState)
 		}
-		mockVMsClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMsClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		for _, vm := range expectedVMs {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
-		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nodeName, gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
+		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nodeName, gomock.Any()).Return(&armcompute.VirtualMachine{}, &azcore.ResponseError{StatusCode: http.StatusNotFound, ErrorCode: cloudprovider.InstanceNotFound.Error()}).AnyTimes()
 
 		hasShutdown, err := cloud.InstanceShutdownByProviderID(context.Background(), test.providerID)
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
@@ -394,12 +396,12 @@ func TestNodeAddresses(t *testing.T) {
 	defer ctrl.Finish()
 	cloud := GetTestCloud(ctrl)
 
-	expectedVM := compute.VirtualMachine{
-		VirtualMachineProperties: &compute.VirtualMachineProperties{
-			NetworkProfile: &compute.NetworkProfile{
-				NetworkInterfaces: &[]compute.NetworkInterfaceReference{
+	expectedVM := &armcompute.VirtualMachine{
+		Properties: &armcompute.VirtualMachineProperties{
+			NetworkProfile: &armcompute.NetworkProfile{
+				NetworkInterfaces: []*armcompute.NetworkInterfaceReference{
 					{
-						NetworkInterfaceReferenceProperties: &compute.NetworkInterfaceReferenceProperties{
+						Properties: &armcompute.NetworkInterfaceReferenceProperties{
 							Primary: ptr.To(true),
 						},
 						ID: ptr.To("/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic"),
@@ -409,21 +411,21 @@ func TestNodeAddresses(t *testing.T) {
 		},
 	}
 
-	expectedPIP := network.PublicIPAddress{
+	expectedPIP := &armnetwork.PublicIPAddress{
 		Name: ptr.To("pip1"),
 		ID:   ptr.To("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"),
-		PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
+		Properties: &armnetwork.PublicIPAddressPropertiesFormat{
 			IPAddress: ptr.To("192.168.1.12"),
 		},
 	}
 
-	expectedInterface := network.Interface{
-		InterfacePropertiesFormat: &network.InterfacePropertiesFormat{
-			IPConfigurations: &[]network.InterfaceIPConfiguration{
+	expectedInterface := &armnetwork.Interface{
+		Properties: &armnetwork.InterfacePropertiesFormat{
+			IPConfigurations: []*armnetwork.InterfaceIPConfiguration{
 				{
-					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
+					Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
 						PrivateIPAddress: ptr.To("172.1.0.3"),
-						PublicIPAddress:  &expectedPIP,
+						PublicIPAddress:  expectedPIP,
 					},
 				},
 			},
@@ -457,7 +459,7 @@ func TestNodeAddresses(t *testing.T) {
 		ipV6                string
 		ipV4Public          string
 		ipV6Public          string
-		loadBalancerSku     string
+		loadBalancerSKU     string
 		expectedAddress     []v1.NodeAddress
 		useInstanceMetadata bool
 		useCustomImsCache   bool
@@ -477,7 +479,7 @@ func TestNodeAddresses(t *testing.T) {
 			expectedErrMsg:      fmt.Errorf("failure of getting instance metadata"),
 		},
 		{
-			name:                "NodeAddresses should report error if metadata.Network.Interface is nil",
+			name:                "NodeAddresses should report error if metadata.armnetwork.Interface is nil",
 			nodeName:            "vm1",
 			metadataName:        "vm1",
 			vmType:              consts.VMTypeStandard,
@@ -540,7 +542,7 @@ func TestNodeAddresses(t *testing.T) {
 			ipV4Public:          "192.168.1.12",
 			ipV6:                "1111:11111:00:00:1111:1111:000:111",
 			ipV6Public:          "2222:22221:00:00:2222:2222:000:111",
-			loadBalancerSku:     "basic",
+			loadBalancerSKU:     "basic",
 			useInstanceMetadata: true,
 			expectedAddress: []v1.NodeAddress{
 				{
@@ -574,7 +576,7 @@ func TestNodeAddresses(t *testing.T) {
 			ipV4Public:          "192.168.1.12",
 			ipV6:                "1111:11111:00:00:1111:1111:000:111",
 			ipV6Public:          "2222:22221:00:00:2222:2222:000:111",
-			loadBalancerSku:     "standard",
+			loadBalancerSKU:     "standard",
 			useInstanceMetadata: true,
 			expectedAddress: []v1.NodeAddress{
 				{
@@ -624,7 +626,7 @@ func TestNodeAddresses(t *testing.T) {
 			if test.metadataTemplate != "" {
 				fmt.Fprint(w, test.metadataTemplate)
 			} else {
-				if test.loadBalancerSku == "standard" {
+				if test.loadBalancerSKU == "standard" {
 					fmt.Fprintf(w, metadataTemplate, test.metadataName, test.ipV4, "", test.ipV6, "")
 				} else {
 					fmt.Fprintf(w, metadataTemplate, test.metadataName, test.ipV4, test.ipV4Public, test.ipV6, test.ipV6Public)
@@ -642,21 +644,21 @@ func TestNodeAddresses(t *testing.T) {
 		}
 
 		if test.useCustomImsCache {
-			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(_ string) (interface{}, error) {
+			cloud.Metadata.imsCache, err = azcache.NewTimedCache(consts.MetadataCacheTTL, func(_ context.Context, _ string) (interface{}, error) {
 				return nil, fmt.Errorf("getError")
 			}, false)
 			if err != nil {
 				t.Errorf("Test [%s] unexpected error: %v", test.name, err)
 			}
 		}
-		mockVMClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm1", gomock.Any()).Return(expectedVM, nil).AnyTimes()
-		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm2", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
+		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm2", gomock.Any()).Return(&armcompute.VirtualMachine{}, &azcore.ResponseError{StatusCode: http.StatusNotFound, ErrorCode: cloudprovider.InstanceNotFound.Error()}).AnyTimes()
 
-		mockPublicIPAddressesClient := cloud.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
-		mockPublicIPAddressesClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]network.PublicIPAddress{expectedPIP}, nil).AnyTimes()
+		pipClient := cloud.NetworkClientFactory.GetPublicIPAddressClient().(*mock_publicipaddressclient.MockInterface)
+		pipClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]*armnetwork.PublicIPAddress{expectedPIP}, nil).AnyTimes()
 
-		mockInterfaceClient := cloud.InterfacesClient.(*mockinterfaceclient.MockInterface)
+		mockInterfaceClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 		mockInterfaceClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "nic", gomock.Any()).Return(expectedInterface, nil).AnyTimes()
 
 		ipAddresses, err := cloud.NodeAddresses(context.Background(), types.NodeName(test.nodeName))
@@ -716,12 +718,12 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 			vmListWithPowerState[vm] = ""
 		}
 		expectedVMs := setTestVirtualMachines(cloud, vmListWithPowerState, false)
-		mockVMsClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMsClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		for _, vm := range expectedVMs {
 			mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, *vm.Name, gomock.Any()).Return(vm, nil).AnyTimes()
 		}
-		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(compute.VirtualMachine{}, &retry.Error{HTTPStatusCode: http.StatusNotFound, RawError: cloudprovider.InstanceNotFound}).AnyTimes()
-		mockVMsClient.EXPECT().Update(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+		mockVMsClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm3", gomock.Any()).Return(&armcompute.VirtualMachine{}, &azcore.ResponseError{StatusCode: http.StatusNotFound, ErrorCode: cloudprovider.InstanceNotFound.Error()}).AnyTimes()
+		mockVMsClient.EXPECT().CreateOrUpdate(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 		exist, err := cloud.InstanceExistsByProviderID(context.Background(), test.providerID)
 		assert.Equal(t, test.expectedErrMsg, err, test.name)
@@ -734,7 +736,7 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 		scaleSet   string
 		vmList     []string
 		expected   bool
-		rerr       *retry.Error
+		rerr       error
 	}{
 		{
 			name:       "InstanceExistsByProviderID should return true if VMSS and VM exist",
@@ -752,7 +754,7 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 		{
 			name:       "InstanceExistsByProviderID should return false if VMSS doesn't exist",
 			providerID: "azure:///subscriptions/script/resourceGroups/rg/providers/Microsoft.Compute/virtualMachineScaleSets/missing-vmss/virtualMachines/0",
-			rerr:       &retry.Error{HTTPStatusCode: 404},
+			rerr:       &azcore.ResponseError{StatusCode: 404},
 			expected:   false,
 		},
 	}
@@ -762,19 +764,17 @@ func TestInstanceExistsByProviderID(t *testing.T) {
 		assert.NoError(t, err, test.name)
 		cloud.VMSet = ss
 
-		mockVMSSClient := mockvmssclient.NewMockInterface(ctrl)
-		mockVMSSVMClient := mockvmssvmclient.NewMockInterface(ctrl)
-		ss.VirtualMachineScaleSetsClient = mockVMSSClient
-		ss.VirtualMachineScaleSetVMsClient = mockVMSSVMClient
+		mockVMSSClient := ss.ComputeClientFactory.GetVirtualMachineScaleSetClient().(*mock_virtualmachinescalesetclient.MockInterface)
+		mockVMSSVMClient := ss.ComputeClientFactory.GetVirtualMachineScaleSetVMClient().(*mock_virtualmachinescalesetvmclient.MockInterface)
 
 		expectedScaleSet := buildTestVMSS(test.scaleSet, test.scaleSet)
-		mockVMSSClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachineScaleSet{expectedScaleSet}, test.rerr).AnyTimes()
+		mockVMSSClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]*armcompute.VirtualMachineScaleSet{expectedScaleSet}, test.rerr).AnyTimes()
 
 		expectedVMs, _, _ := buildTestVirtualMachineEnv(ss.Cloud, test.scaleSet, "", 0, test.vmList, "succeeded", false)
-		mockVMSSVMClient.EXPECT().List(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(expectedVMs, test.rerr).AnyTimes()
+		mockVMSSVMClient.EXPECT().ListVMInstanceView(gomock.Any(), gomock.Any(), gomock.Any()).Return(expectedVMs, test.rerr).AnyTimes()
 
-		mockVMsClient := ss.VirtualMachinesClient.(*mockvmclient.MockInterface)
-		mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]compute.VirtualMachine{}, nil).AnyTimes()
+		mockVMsClient := ss.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
+		mockVMsClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]*armcompute.VirtualMachine{}, nil).AnyTimes()
 
 		exist, _ := cloud.InstanceExistsByProviderID(context.Background(), test.providerID)
 		assert.Equal(t, test.expected, exist, test.name)
@@ -898,36 +898,36 @@ func TestInstanceMetadata(t *testing.T) {
 	t.Run("instance exists", func(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		expectedVM := buildDefaultTestVirtualMachine("as", []string{"/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/k8s-agentpool1-00000000-nic-1"})
-		expectedVM.HardwareProfile = &compute.HardwareProfile{
-			VMSize: compute.BasicA0,
+		expectedVM.Properties.HardwareProfile = &armcompute.HardwareProfile{
+			VMSize: to.Ptr(armcompute.VirtualMachineSizeTypesBasicA0),
 		}
 		expectedVM.Location = ptr.To("westus2")
-		expectedVM.Zones = &[]string{"1"}
+		expectedVM.Zones = to.SliceOfPtrs("1")
 		expectedVM.ID = ptr.To("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm")
-		mockVMClient := cloud.VirtualMachinesClient.(*mockvmclient.MockInterface)
+		mockVMClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "vm", gomock.Any()).Return(expectedVM, nil)
 		expectedNIC := buildDefaultTestInterface(true, []string{})
-		(*expectedNIC.IPConfigurations)[0].PrivateIPAddress = ptr.To("1.2.3.4")
-		(*expectedNIC.IPConfigurations)[0].PublicIPAddress = &network.PublicIPAddress{
+		(expectedNIC.Properties.IPConfigurations)[0].Properties.PrivateIPAddress = ptr.To("1.2.3.4")
+		(expectedNIC.Properties.IPConfigurations)[0].Properties.PublicIPAddress = &armnetwork.PublicIPAddress{
 			ID: ptr.To("pip"),
-			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
+			Properties: &armnetwork.PublicIPAddressPropertiesFormat{
 				IPAddress: ptr.To("5.6.7.8"),
 			},
 		}
-		mockNICClient := cloud.InterfacesClient.(*mockinterfaceclient.MockInterface)
+		mockNICClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 		mockNICClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "k8s-agentpool1-00000000-nic-1", gomock.Any()).Return(expectedNIC, nil)
-		expectedPIP := network.PublicIPAddress{
+		expectedPIP := &armnetwork.PublicIPAddress{
 			Name: ptr.To("pip"),
-			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
+			Properties: &armnetwork.PublicIPAddressPropertiesFormat{
 				IPAddress: ptr.To("5.6.7.8"),
 			},
 		}
-		mockPIPClient := cloud.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
-		mockPIPClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]network.PublicIPAddress{expectedPIP}, nil)
+		mockPIPClient := cloud.NetworkClientFactory.GetPublicIPAddressClient().(*mock_publicipaddressclient.MockInterface)
+		mockPIPClient.EXPECT().List(gomock.Any(), cloud.ResourceGroup).Return([]*armnetwork.PublicIPAddress{expectedPIP}, nil)
 
 		expectedMetadata := cloudprovider.InstanceMetadata{
 			ProviderID:   "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm",
-			InstanceType: string(compute.BasicA0),
+			InstanceType: string(armcompute.VirtualMachineSizeTypesBasicA0),
 			NodeAddresses: []v1.NodeAddress{
 				{
 					Type:    v1.NodeInternalIP,
@@ -968,7 +968,7 @@ func TestCloud_InstanceExists(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "foo"},
 		}
 
-		cloud.VMSet.(*MockVMSet).EXPECT().GetInstanceIDByNodeName("foo").Return("", cloudprovider.InstanceNotFound)
+		cloud.VMSet.(*MockVMSet).EXPECT().GetInstanceIDByNodeName(gomock.Any(), "foo").Return("", cloudprovider.InstanceNotFound)
 
 		exist, err := cloud.InstanceExists(ctx, node)
 		assert.False(t, exist)
@@ -984,7 +984,7 @@ func TestCloud_InstanceExists(t *testing.T) {
 			Spec: v1.NodeSpec{ProviderID: "azure:///subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/VirtualMachines/vm"},
 		}
 
-		cloud.VMSet.(*MockVMSet).EXPECT().GetNodeNameByProviderID(node.Spec.ProviderID).Return(types.NodeName(""), cloudprovider.InstanceNotFound)
+		cloud.VMSet.(*MockVMSet).EXPECT().GetNodeNameByProviderID(gomock.Any(), node.Spec.ProviderID).Return(types.NodeName(""), cloudprovider.InstanceNotFound)
 
 		exist, err := cloud.InstanceExists(ctx, node)
 		assert.NoError(t, err)
