@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-cloud-controller-manager:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm
+          - os: linux
+            arch: arm64
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@c95a14d0e5bab51a9f56296a4eb0e416910cd350 # v2.10.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Golang
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+      - name: Build binary
+        run: |
+          rm -rf ./bin
+          ARCH=${{ matrix.arch }} make bin/azure-cloud-controller-manager
+          mv bin/azure-cloud-controller-manager bin/azure-cloud-controller-manager-${{ matrix.os }}-${{ matrix.arch }}
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: cloud-controller-manager-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/azure-cloud-controller-manager-${{ matrix.os }}-${{ matrix.arch }}
+          if-no-files-found: error
+
+  build-cloud-node-manager:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@c95a14d0e5bab51a9f56296a4eb0e416910cd350 # v2.10.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Golang
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build binary for linux
+        if: matrix.os == 'linux'
+        run: |
+          rm -rf ./bin
+          ARCH=${{ matrix.arch }} make bin/azure-cloud-node-manager
+          mv bin/azure-cloud-node-manager bin/azure-cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}
+      - name: Build binary for windows
+        if: matrix.os == 'windows'
+        run: |
+          rm -rf ./bin
+          ARCH=${{ matrix.arch }} make bin/azure-cloud-node-manager.exe
+          mv bin/azure-cloud-node-manager-${{ matrix.arch }}.exe bin/azure-cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}.exe
+      - name: Upload artifact for linux
+        if: matrix.os == 'linux'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/azure-cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}
+      - name: Upload artifact for windows
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/azure-cloud-node-manager-${{ matrix.os }}-${{ matrix.arch }}.exe
+          if-no-files-found: error
+
+  build-acr-credential-provider:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@c95a14d0e5bab51a9f56296a4eb0e416910cd350 # v2.10.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Golang
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+      - name: Build binary for linux
+        if: matrix.os == 'linux'
+        run: |
+          rm -rf ./bin
+          ARCH=${{ matrix.arch }} make bin/azure-acr-credential-provider
+          mv bin/azure-acr-credential-provider bin/azure-acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}
+      - name: Build binary for windows
+        if: matrix.os == 'windows'
+        run: |
+          rm -rf ./bin
+          ARCH=${{ matrix.arch }} make bin/azure-acr-credential-provider.exe
+          mv bin/azure-acr-credential-provider.exe bin/azure-acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}.exe
+      - name: Upload artifact for linux
+        if: matrix.os == 'linux'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/azure-acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}
+      - name: Upload artifact for windows
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/azure-acr-credential-provider-${{ matrix.os }}-${{ matrix.arch }}.exe
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    needs:
+      - build-cloud-controller-manager
+      - build-cloud-node-manager
+      - build-acr-credential-provider
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@c95a14d0e5bab51a9f56296a4eb0e416910cd350 # v2.10.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: documentation
+          fetch-depth: 0
+      - name: Setup Golang
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version: '>=1.22'
+          check-latest: true
+      - name: Generate release note
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./hack/generate-release-note.sh ${GITHUB_REF_NAME} release-notes.md true
+      - name: Download artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: ./artifacts
+      - name: Publish release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          body_path: release-notes.md
+          draft: true
+          files: |
+            ./artifacts/cloud-node-manager-*-*/*
+            ./artifacts/cloud-controller-manager-*-*/*
+            ./artifacts/acr-credential-provider-*-*/*
