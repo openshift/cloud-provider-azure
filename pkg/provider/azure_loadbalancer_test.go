@@ -28,29 +28,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
 	"github.com/stretchr/testify/assert"
-
 	"go.uber.org/mock/gomock"
-
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/loadbalancerclient/mockloadbalancerclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatelinkserviceclient/mockprivatelinkserviceclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient/mocksubnetclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssclient/mockvmssclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/zoneclient/mockzoneclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/privatelinkservice"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/zone"
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 	utilsets "sigs.k8s.io/cloud-provider-azure/pkg/util/sets"
 )
@@ -182,7 +185,7 @@ func TestExistsPip(t *testing.T) {
 			service := tc.service
 			mockPIPsClient := az.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
 			tc.expectedClientList(mockPIPsClient)
-			exist := az.existsPip("testCluster", &service)
+			exist := az.existsPip(context.TODO(), "testCluster", &service)
 			assert.Equal(t, tc.expectedExist, exist)
 		})
 	}
@@ -735,11 +738,11 @@ func TestEnsureLoadBalancerDeleted(t *testing.T) {
 	defer ctrl.Finish()
 	az := GetTestCloud(ctrl)
 	mockLBBackendPool := az.LoadBalancerBackendPool.(*MockBackendPool)
-	mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ string, _ *v1.Service, lb *network.LoadBalancer) (bool, bool, *network.LoadBalancer, error) {
+	mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ string, _ *v1.Service, lb *network.LoadBalancer) (bool, bool, *network.LoadBalancer, error) {
 		return false, false, lb, nil
 	}).AnyTimes()
-	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	mockLBBackendPool.EXPECT().GetBackendPrivateIPs(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	mockLBBackendPool.EXPECT().GetBackendPrivateIPs(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 	clusterResources, expectedInterfaces, expectedVirtualMachines := getClusterResources(az, vmCount, availabilitySetCount)
 	setMockEnv(az, ctrl, expectedInterfaces, expectedVirtualMachines, 5)
@@ -753,9 +756,9 @@ func TestEnsureLoadBalancerDeleted(t *testing.T) {
 		expectedLBs := make([]network.LoadBalancer, 0)
 		setMockLBs(az, ctrl, &expectedLBs, "service", 1, i+1, c.isInternalSvc)
 
-		mockPLSClient := mockprivatelinkserviceclient.NewMockInterface(ctrl)
-		mockPLSClient.EXPECT().List(gomock.Any(), az.Config.ResourceGroup).Return([]network.PrivateLinkService{}, nil).MaxTimes(2)
-		az.PrivateLinkServiceClient = mockPLSClient
+		mockPLSRepo := privatelinkservice.NewMockRepository(ctrl)
+		mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil).AnyTimes()
+		az.plsRepo = mockPLSRepo
 
 		// create the service first.
 		lbStatus, err := az.EnsureLoadBalancer(context.TODO(), testClusterName, &service, clusterResources.nodes)
@@ -792,6 +795,118 @@ func TestEnsureLoadBalancerDeleted(t *testing.T) {
 		assert.Nil(t, rerr, "TestCase[%d]: %s", i, c.desc)
 		assert.Equal(t, 0, len(result), "TestCase[%d]: %s", i, c.desc)
 	}
+}
+
+func TestEnsureLoadBalancerLock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	az := GetTestCloud(ctrl)
+	kubeClient := fake.NewSimpleClientset()
+	kubeClient.PrependReactor(
+		"get", "leases",
+		func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			return true, nil, errors.New("get lease failed")
+		})
+	az.KubeClient = kubeClient
+	az.azureResourceLocker = NewAzureResourceLocker(
+		az, "holder", "aks-managed-resource-locker", "kube-system", 900,
+	)
+
+	svc := getTestService("service", v1.ProtocolTCP, nil, false, 80)
+	_, err := az.EnsureLoadBalancer(context.Background(), testClusterName, &svc, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get lease failed")
+	assert.Contains(t, err.Error(), "EnsureLoadBalancer failed due to fail to lock azure resources")
+
+	kubeClient = fake.NewSimpleClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "aks-managed-resource-locker",
+			Namespace: "kube-system",
+		},
+		Spec: coordinationv1.LeaseSpec{
+			LeaseDurationSeconds: ptr.To[int32](900),
+		},
+	})
+	// update lease failed for the second time
+	count := 0
+	kubeClient.PrependReactor(
+		"update", "leases",
+		func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			count++
+			if count == 2 {
+				return true, nil, errors.New("update lease failed")
+			}
+			return false, nil, nil
+		})
+	az.KubeClient = kubeClient
+	az.azureResourceLocker = NewAzureResourceLocker(
+		az, "holder", "aks-managed-resource-locker", "kube-system", 900,
+	)
+	mockLBClient := az.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
+	mockLBClient.EXPECT().List(gomock.Any(), gomock.Any()).
+		Return(nil, retry.NewError(false, errors.New("list lb failed")))
+
+	_, err = az.EnsureLoadBalancer(context.Background(), testClusterName, &svc, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "update lease failed")
+	assert.Contains(t, err.Error(), "list lb failed")
+}
+
+func TestEnsureLoadBalancerDeletedLock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	az := GetTestCloud(ctrl)
+	kubeClient := fake.NewSimpleClientset()
+	kubeClient.PrependReactor(
+		"get", "leases",
+		func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			return true, nil, errors.New("get lease failed")
+		})
+	az.KubeClient = kubeClient
+	az.azureResourceLocker = NewAzureResourceLocker(
+		az, "holder", "aks-managed-resource-locker", "kube-system", 900,
+	)
+
+	svc := getTestService("service", v1.ProtocolTCP, nil, false, 80)
+	err := az.EnsureLoadBalancerDeleted(context.Background(), testClusterName, &svc)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "get lease failed")
+	assert.Contains(t, err.Error(), "EnsureLoadBalancerDeleted failed due to fail to lock azure resources")
+
+	kubeClient = fake.NewSimpleClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "aks-managed-resource-locker",
+			Namespace: "kube-system",
+		},
+		Spec: coordinationv1.LeaseSpec{
+			LeaseDurationSeconds: ptr.To[int32](900),
+		},
+	})
+	// update lease failed for the second time
+	count := 0
+	kubeClient.PrependReactor(
+		"update", "leases",
+		func(_ k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			count++
+			if count == 2 {
+				return true, nil, errors.New("update lease failed")
+			}
+			return false, nil, nil
+		})
+	az.KubeClient = kubeClient
+	az.azureResourceLocker = NewAzureResourceLocker(
+		az, "holder", "aks-managed-resource-locker", "kube-system", 900,
+	)
+	mockLBClient := az.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
+	mockLBClient.EXPECT().List(gomock.Any(), gomock.Any()).
+		Return(nil, retry.NewError(false, errors.New("list lb failed")))
+
+	err = az.EnsureLoadBalancerDeleted(context.Background(), testClusterName, &svc)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "update lease failed")
+	assert.Contains(t, err.Error(), "list lb failed")
 }
 
 func TestServiceOwnsPublicIP(t *testing.T) {
@@ -1102,10 +1217,10 @@ func TestShouldReleaseExistingOwnedPublicIP(t *testing.T) {
 		desiredPipName        string
 		existingPip           network.PublicIPAddress
 		ipTagRequest          serviceIPTagRequest
-		tags                  map[string]*string
 		lbShouldExist         bool
 		lbIsInternal          bool
 		isUserAssignedPIP     bool
+		serviceReferences     []string
 		expectedShouldRelease bool
 	}{
 		{
@@ -1217,12 +1332,12 @@ func TestShouldReleaseExistingOwnedPublicIP(t *testing.T) {
 			expectedShouldRelease: true,
 		},
 		{
-			desc:           "should delete orphaned managed public IP",
-			existingPip:    existingPipWithTag,
-			lbShouldExist:  false,
-			lbIsInternal:   false,
-			desiredPipName: *existingPipWithTag.Name,
-			tags:           map[string]*string{consts.ServiceTagKey: ptr.To("")},
+			desc:              "should delete orphaned managed public IP",
+			existingPip:       existingPipWithTag,
+			lbShouldExist:     false,
+			lbIsInternal:      false,
+			desiredPipName:    *existingPipWithTag.Name,
+			serviceReferences: []string{},
 			ipTagRequest: serviceIPTagRequest{
 				IPTagsRequestedByAnnotation: true,
 				IPTags:                      existingPipWithTag.PublicIPAddressPropertiesFormat.IPTags,
@@ -1230,24 +1345,24 @@ func TestShouldReleaseExistingOwnedPublicIP(t *testing.T) {
 			expectedShouldRelease: true,
 		},
 		{
-			desc:           "should not delete managed public IP which has references",
-			existingPip:    existingPipWithTag,
-			lbShouldExist:  false,
-			lbIsInternal:   false,
-			desiredPipName: *existingPipWithTag.Name,
-			tags:           map[string]*string{consts.ServiceTagKey: ptr.To("svc1")},
+			desc:              "should not delete managed public IP which has references",
+			existingPip:       existingPipWithTag,
+			lbShouldExist:     false,
+			lbIsInternal:      false,
+			desiredPipName:    *existingPipWithTag.Name,
+			serviceReferences: []string{"svc1"},
 			ipTagRequest: serviceIPTagRequest{
 				IPTagsRequestedByAnnotation: true,
 				IPTags:                      existingPipWithTag.PublicIPAddressPropertiesFormat.IPTags,
 			},
 		},
 		{
-			desc:           "should not delete orphaned unmanaged public IP",
-			existingPip:    existingPipWithTag,
-			lbShouldExist:  false,
-			lbIsInternal:   false,
-			desiredPipName: *existingPipWithTag.Name,
-			tags:           map[string]*string{consts.ServiceTagKey: ptr.To("")},
+			desc:              "should not delete orphaned unmanaged public IP",
+			existingPip:       existingPipWithTag,
+			lbShouldExist:     false,
+			lbIsInternal:      false,
+			desiredPipName:    *existingPipWithTag.Name,
+			serviceReferences: []string{},
 			ipTagRequest: serviceIPTagRequest{
 				IPTagsRequestedByAnnotation: true,
 				IPTags:                      existingPipWithTag.PublicIPAddressPropertiesFormat.IPTags,
@@ -1258,11 +1373,8 @@ func TestShouldReleaseExistingOwnedPublicIP(t *testing.T) {
 
 	for _, c := range tests {
 		t.Run(c.desc, func(t *testing.T) {
-			if c.tags != nil {
-				c.existingPip.Tags = c.tags
-			}
 			existingPip := c.existingPip
-			actualShouldRelease := shouldReleaseExistingOwnedPublicIP(&existingPip, c.lbShouldExist, c.lbIsInternal, c.isUserAssignedPIP, c.desiredPipName, c.ipTagRequest)
+			actualShouldRelease := shouldReleaseExistingOwnedPublicIP(&existingPip, c.serviceReferences, c.lbShouldExist, c.lbIsInternal, c.isUserAssignedPIP, c.desiredPipName, c.ipTagRequest)
 			assert.Equal(t, c.expectedShouldRelease, actualShouldRelease)
 		})
 	}
@@ -1405,7 +1517,6 @@ func TestConvertIPTagMapToSlice(t *testing.T) {
 				ipTagSlice := *c.expected
 				return ptr.Deref(ipTagSlice[i].IPTagType, "") < ptr.Deref(ipTagSlice[j].IPTagType, "")
 			})
-
 		}
 
 		assert.Equal(t, c.expected, actual, "TestCase[%d]: %s", i, c.desc)
@@ -1492,7 +1603,6 @@ func TestGetserviceIPTagRequestForPublicIP(t *testing.T) {
 				ipTagSlice := *c.expected.IPTags
 				return ptr.Deref(ipTagSlice[i].IPTagType, "") < ptr.Deref(ipTagSlice[j].IPTagType, "")
 			})
-
 		}
 
 		assert.Equal(t, actual, c.expected, "TestCase[%d]: %s", i, c.desc)
@@ -1620,7 +1730,7 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 		existingPIPs    []network.PublicIPAddress
 		service         v1.Service
 		local           bool
-		multiSLBConfigs []MultipleStandardLoadBalancerConfiguration
+		multiSLBConfigs []config.MultipleStandardLoadBalancerConfiguration
 		expectedLB      *network.LoadBalancer
 		expectedLBs     *[]network.LoadBalancer
 		expectedError   error
@@ -1647,13 +1757,13 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 				},
 			},
 			service: getInternalTestService("test1"),
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveServices: utilsets.NewString("default/test1"),
 					},
 				},
@@ -1728,13 +1838,13 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 			},
 			service: getTestService("test1", v1.ProtocolTCP, nil, false, 80),
 			local:   true,
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveServices: utilsets.NewString("default/test1"),
 					},
 				},
@@ -1778,7 +1888,6 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 			cloud := GetTestCloud(ctrl)
 			cloud.LoadBalancerSku = "Standard"
 			cloud.MultipleStandardLoadBalancerConfigurations = tc.multiSLBConfigs
-			cloud.plsCache, _ = cloud.newPLSCache()
 			lbClient := mockloadbalancerclient.NewMockInterface(ctrl)
 			lbClient.EXPECT().Delete(gomock.Any(), gomock.Any(), "lb1-internal").MaxTimes(1)
 			lbClient.EXPECT().DeleteLBBackendPool(gomock.Any(), gomock.Any(), "lb1", "default-test1").Return(nil).MaxTimes(1)
@@ -1786,9 +1895,8 @@ func TestGetServiceLoadBalancerMultiSLB(t *testing.T) {
 			lbClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).MaxTimes(1)
 			cloud.LoadBalancerClient = lbClient
 
-			expectedPLS := make([]network.PrivateLinkService, 0)
-			mockPLSClient := cloud.PrivateLinkServiceClient.(*mockprivatelinkserviceclient.MockInterface)
-			mockPLSClient.EXPECT().List(gomock.Any(), gomock.Any()).Return(expectedPLS, nil)
+			mockPLSRepo := cloud.plsRepo.(*privatelinkservice.MockRepository)
+			mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil)
 
 			mockPIPClient := mockpublicipclient.NewMockInterface(ctrl)
 			mockPIPClient.EXPECT().List(gomock.Any(), gomock.Any()).Return([]network.PublicIPAddress{}, nil).MaxTimes(2)
@@ -1928,11 +2036,6 @@ func TestGetServiceLoadBalancerCommon(t *testing.T) {
 			mockLBsClient.EXPECT().List(gomock.Any(), "rg").Return(test.existingLBs, nil)
 			mockLBsClient.EXPECT().Delete(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 			az.LoadBalancerClient = mockLBsClient
-
-			expectedPLS := make([]network.PrivateLinkService, 0)
-			mockPLSClient := mockprivatelinkserviceclient.NewMockInterface(ctrl)
-			mockPLSClient.EXPECT().List(gomock.Any(), "rg").Return(expectedPLS, nil).MaxTimes(1)
-			az.PrivateLinkServiceClient = mockPLSClient
 
 			for _, existingLB := range test.existingLBs {
 				err := az.LoadBalancerClient.CreateOrUpdate(context.TODO(), "rg", *existingLB.Name, existingLB, "")
@@ -2234,7 +2337,7 @@ func TestIsFrontendIPChanged(t *testing.T) {
 			setServiceLoadBalancerIP(&service, test.loadBalancerIP)
 			test.service.Annotations[consts.ServiceAnnotationLoadBalancerInternalSubnet] = test.annotations
 			var subnet network.Subnet
-			flag, rerr := az.isFrontendIPChanged("testCluster", test.config,
+			flag, rerr := az.isFrontendIPChanged(context.TODO(), "testCluster", test.config,
 				&service, test.lbFrontendIPConfigName, &subnet)
 			if rerr != nil {
 				fmt.Println(rerr.Error())
@@ -2300,7 +2403,7 @@ func TestDeterminePublicIPName(t *testing.T) {
 				err := az.PublicIPAddressesClient.CreateOrUpdate(context.TODO(), "rg", *existingPIP.Name, existingPIP)
 				assert.NoError(t, err.Error())
 			}
-			pipName, _, err := az.determinePublicIPName("testCluster", &service, test.isIPv6)
+			pipName, _, err := az.determinePublicIPName(context.TODO(), "testCluster", &service, test.isIPv6)
 			assert.Equal(t, test.expectedPIPName, pipName)
 			assert.Equal(t, test.expectedError, err != nil)
 		})
@@ -3546,7 +3649,7 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 		},
 	}
 
-	//change to false to test that reconciliation will fix it (despite the fact that disable-tcp-reset was removed in 1.20)
+	// change to false to test that reconciliation will fix it (despite the fact that disable-tcp-reset was removed in 1.20)
 	(*slb5.LoadBalancerPropertiesFormat.LoadBalancingRules)[0].EnableTCPReset = ptr.To(false)
 	(*slb5.LoadBalancerPropertiesFormat.LoadBalancingRules)[1].EnableTCPReset = ptr.To(false)
 
@@ -3897,12 +4000,12 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 
 			mockLBBackendPool := az.LoadBalancerBackendPool.(*MockBackendPool)
 			if test.shouldRefreshLBAfterReconcileBackendPools {
-				mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, false, &test.expectedLB, test.expectedError)
+				mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(false, false, &test.expectedLB, test.expectedError)
 			}
-			mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ string, _ *v1.Service, lb *network.LoadBalancer) (bool, bool, *network.LoadBalancer, error) {
+			mockLBBackendPool.EXPECT().ReconcileBackendPools(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ string, _ *v1.Service, lb *network.LoadBalancer) (bool, bool, *network.LoadBalancer, error) {
 				return false, false, lb, nil
 			}).AnyTimes()
-			mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+			mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 			lb, rerr := az.reconcileLoadBalancer(context.TODO(), "testCluster", &service, clusterResources.nodes, test.wantLb)
 			assert.Equal(t, test.expectedError, rerr)
@@ -4044,7 +4147,7 @@ func TestGetServiceLoadBalancerStatus(t *testing.T) {
 
 	for _, test := range testCases {
 		t.Run(test.desc, func(t *testing.T) {
-			status, _, _, err := az.getServiceLoadBalancerStatus(test.service, test.lb)
+			status, _, _, err := az.getServiceLoadBalancerStatus(context.TODO(), test.service, test.lb)
 			assert.Equal(t, test.expectedStatus, status)
 			assert.Equal(t, test.expectedError, err != nil)
 		})
@@ -4128,7 +4231,7 @@ func TestSafeDeletePublicIP(t *testing.T) {
 				mockLBsClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 				az.LoadBalancerClient = mockLBsClient
 			}
-			rerr := az.safeDeletePublicIP(&service, "rg", test.pip, test.lb)
+			rerr := az.safeDeletePublicIP(context.TODO(), &service, "rg", test.pip, test.lb)
 			if test.expectedError == nil {
 				assert.Equal(t, 0, len(*test.lb.FrontendIPConfigurations))
 				assert.Equal(t, 0, len(*test.lb.LoadBalancingRules))
@@ -4384,7 +4487,10 @@ func TestReconcilePublicIPsCommon(t *testing.T) {
 			existingPIPs: []network.PublicIPAddress{
 				{
 					Name: ptr.To("pip1"),
-					Tags: map[string]*string{consts.ServiceTagKey: ptr.To("default/test1")},
+					Tags: map[string]*string{
+						consts.ServiceTagKey:       ptr.To("default/test1"),
+						consts.LegacyServiceTagKey: ptr.To("foo"), // It should be ignored when ServiceTagKey is present.
+					},
 					PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
 						PublicIPAddressVersion: network.IPv4,
 						IPAddress:              ptr.To("1.2.3.4"),
@@ -4688,7 +4794,6 @@ func TestReconcilePublicIPsCommon(t *testing.T) {
 					}
 
 					return network.PublicIPAddress{}, &retry.Error{HTTPStatusCode: http.StatusNotFound}
-
 				})
 				deleter := mockPIPsClient.EXPECT().Delete(gomock.Any(), "rg", *pip.Name).Return(nil).AnyTimes()
 				deleter.Do(func(_ context.Context, _ string, publicIPAddressName string) *retry.Error {
@@ -4717,7 +4822,7 @@ func TestReconcilePublicIPsCommon(t *testing.T) {
 				return
 			})
 
-			pips, err := az.reconcilePublicIPs("testCluster", &service, "", test.wantLb)
+			pips, err := az.reconcilePublicIPs(context.TODO(), "testCluster", &service, "", test.wantLb)
 			if !test.expectedError {
 				assert.NoError(t, err)
 			}
@@ -4972,7 +5077,6 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			foundDNSLabelAnnotation: true,
 			isIPv6:                  false,
 			existingPIPs: []network.PublicIPAddress{{
-
 				Name: ptr.To("pip1"),
 				PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
 					DNSSettings: &network.PublicIPAddressDNSSettings{
@@ -5189,7 +5293,7 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 				return []network.PublicIPAddress{*basicPIP}, nil
 			}).AnyTimes()
 
-			pip, err := az.ensurePublicIPExists(&service, test.pipName, test.inputDNSLabel, "", false, test.foundDNSLabelAnnotation, test.isIPv6)
+			pip, err := az.ensurePublicIPExists(context.TODO(), &service, test.pipName, test.inputDNSLabel, "", false, test.foundDNSLabelAnnotation, test.isIPv6)
 			assert.Equal(t, test.expectedError, err != nil, "unexpectedly encountered (or not) error: %v", err)
 			if test.expectedID != "" {
 				assert.Equal(t, test.expectedID, ptr.Deref(pip.ID, ""))
@@ -5199,6 +5303,7 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 		})
 	}
 }
+
 func TestEnsurePublicIPExistsWithExtendedLocation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -5277,7 +5382,7 @@ func TestEnsurePublicIPExistsWithExtendedLocation(t *testing.T) {
 					assert.Nil(t, publicIPAddressParameters.Zones)
 					return nil
 				}).Times(1)
-			pip, err := az.ensurePublicIPExists(&service, tc.pipName, "", "", false, false, tc.isIPv6)
+			pip, err := az.ensurePublicIPExists(context.TODO(), &service, tc.pipName, "", "", false, false, tc.isIPv6)
 			assert.NotNil(t, pip, "ensurePublicIPExists shall create a new pip"+
 				"with extendedLocation if there is no existing pip")
 			assert.Nil(t, err, "ensurePublicIPExists should create a new pip without errors.")
@@ -5383,7 +5488,7 @@ func TestShouldUpdateLoadBalancer(t *testing.T) {
 			}
 
 			mockVMSet := NewMockVMSet(ctrl)
-			mockVMSet.EXPECT().GetAgentPoolVMSetNames(gomock.Any()).Return(&[]string{"vmas"}, nil).MaxTimes(1)
+			mockVMSet.EXPECT().GetAgentPoolVMSetNames(gomock.Any(), gomock.Any()).Return(&[]string{"vmas"}, nil).MaxTimes(1)
 			mockVMSet.EXPECT().GetPrimaryVMSetName().Return(az.Config.PrimaryAvailabilitySetName).MaxTimes(3)
 			az.VMSet = mockVMSet
 
@@ -5520,25 +5625,74 @@ func TestBindServicesToPIP(t *testing.T) {
 }
 
 func TestUnbindServiceFromPIP(t *testing.T) {
-	pips := []*network.PublicIPAddress{
-		{Tags: nil},
-		{Tags: map[string]*string{consts.ServiceTagKey: ptr.To("")}},
-		{Tags: map[string]*string{consts.ServiceTagKey: ptr.To("ns1/svc1")}},
-		{Tags: map[string]*string{consts.ServiceTagKey: ptr.To("ns1/svc1,ns2/svc2")}},
-	}
-	serviceName := "ns2/svc2"
-	service := getTestService(serviceName, v1.ProtocolTCP, nil, false, 80)
-	setServiceLoadBalancerIP(&service, "1.2.3.4")
-	expectedTags := []map[string]*string{
-		nil,
-		{consts.ServiceTagKey: ptr.To("")},
-		{consts.ServiceTagKey: ptr.To("ns1/svc1")},
-		{consts.ServiceTagKey: ptr.To("ns1/svc1")},
+	tests := []struct {
+		Name                      string
+		InputTags                 map[string]*string
+		InputIsUserAssigned       bool
+		ExpectedTags              map[string]*string
+		ExpectedServiceReferences []string
+		ExpectedErr               bool
+	}{
+		{
+			Name:        "Nil",
+			ExpectedErr: true,
+		},
+		{
+			Name:                "Empty tags",
+			InputTags:           map[string]*string{},
+			InputIsUserAssigned: true,
+			ExpectedTags:        map[string]*string{},
+		},
+		{
+			Name: "Single service",
+			InputTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1"),
+			},
+			ExpectedTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1"),
+			},
+			ExpectedServiceReferences: []string{"ns1/svc1"},
+		},
+		{
+			Name: "Multiple services #1",
+			InputTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1,ns2/svc2"),
+			},
+			ExpectedTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1"),
+			},
+			ExpectedServiceReferences: []string{"ns1/svc1"},
+		},
+		{
+			Name: "Multiple services #2",
+			InputTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1,ns2/svc2,ns3/svc3"),
+			},
+			ExpectedTags: map[string]*string{
+				consts.ServiceTagKey: ptr.To("ns1/svc1,ns3/svc3"),
+			},
+			ExpectedServiceReferences: []string{"ns1/svc1", "ns3/svc3"},
+		},
 	}
 
-	for i, pip := range pips {
-		_ = unbindServiceFromPIP(pip, &service, serviceName, "", false)
-		assert.Equal(t, expectedTags[i], pip.Tags)
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			svcName := "ns2/svc2"
+			svc := getTestService(svcName, v1.ProtocolTCP, nil, false, 80)
+			setServiceLoadBalancerIP(&svc, "1.2.3.4")
+
+			pip := &network.PublicIPAddress{
+				Tags: tt.InputTags,
+			}
+			serviceReferences, err := unbindServiceFromPIP(pip, svcName, tt.InputIsUserAssigned)
+			if tt.ExpectedErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.ExpectedServiceReferences, serviceReferences)
+				assert.Equal(t, tt.ExpectedTags, pip.Tags)
+			}
+		})
 	}
 }
 
@@ -6027,11 +6181,10 @@ func TestRemoveFrontendIPConfigurationFromLoadBalancerDelete(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		mockLBClient := cloud.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
 		mockLBClient.EXPECT().Delete(gomock.Any(), "rg", "lb").Return(nil)
-		expectedPLS := make([]network.PrivateLinkService, 0)
-		mockPLSClient := cloud.PrivateLinkServiceClient.(*mockprivatelinkserviceclient.MockInterface)
-		mockPLSClient.EXPECT().List(gomock.Any(), "rg").Return(expectedPLS, nil).MaxTimes(1)
+		mockPLSRepo := cloud.plsRepo.(*privatelinkservice.MockRepository)
+		mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil)
 		existingLBs := []network.LoadBalancer{{Name: ptr.To("lb")}}
-		_, err := cloud.removeFrontendIPConfigurationFromLoadBalancer(&lb, &existingLBs, []*network.FrontendIPConfiguration{fip}, "testCluster", &service)
+		_, err := cloud.removeFrontendIPConfigurationFromLoadBalancer(context.TODO(), &lb, &existingLBs, []*network.FrontendIPConfiguration{fip}, "testCluster", &service)
 		assert.NoError(t, err)
 	})
 }
@@ -6059,10 +6212,9 @@ func TestRemoveFrontendIPConfigurationFromLoadBalancerUpdate(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
 		mockLBClient := cloud.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
 		mockLBClient.EXPECT().CreateOrUpdate(gomock.Any(), "rg", "lb", gomock.Any(), gomock.Any()).Return(nil)
-		expectedPLS := make([]network.PrivateLinkService, 0)
-		mockPLSClient := cloud.PrivateLinkServiceClient.(*mockprivatelinkserviceclient.MockInterface)
-		mockPLSClient.EXPECT().List(gomock.Any(), "rg").Return(expectedPLS, nil).MaxTimes(1)
-		_, err := cloud.removeFrontendIPConfigurationFromLoadBalancer(&lb, &[]network.LoadBalancer{}, []*network.FrontendIPConfiguration{fip}, "testCluster", &service)
+		mockPLSRepo := cloud.plsRepo.(*privatelinkservice.MockRepository)
+		mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil)
+		_, err := cloud.removeFrontendIPConfigurationFromLoadBalancer(context.TODO(), &lb, &[]network.LoadBalancer{}, []*network.FrontendIPConfiguration{fip}, "testCluster", &service)
 		assert.NoError(t, err)
 	})
 }
@@ -6073,7 +6225,7 @@ func TestCleanOrphanedLoadBalancerLBInUseByVMSS(t *testing.T) {
 
 	t.Run("cleanOrphanedLoadBalancer should retry deleting lb when meeting LoadBalancerInUseByVirtualMachineScaleSet", func(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
-		vmss, err := newScaleSet(context.TODO(), cloud)
+		vmss, err := newScaleSet(cloud)
 		assert.NoError(t, err)
 		cloud.VMSet = vmss
 		cloud.LoadBalancerSku = consts.LoadBalancerSkuStandard
@@ -6085,6 +6237,8 @@ func TestCleanOrphanedLoadBalancerLBInUseByVMSS(t *testing.T) {
 		expectedVMSS := buildTestVMSSWithLB(testVMSSName, "vmss-vm-", []string{testLBBackendpoolID0}, false)
 		mockVMSSClient := cloud.VirtualMachineScaleSetsClient.(*mockvmssclient.MockInterface)
 		mockVMSSClient.EXPECT().List(gomock.Any(), "rg").Return([]compute.VirtualMachineScaleSet{expectedVMSS}, nil)
+		mockVMSSClient.EXPECT().Get(gomock.Any(), "rg", testVMSSName).Return(expectedVMSS, nil)
+		mockVMSSClient.EXPECT().CreateOrUpdate(gomock.Any(), "rg", testVMSSName, gomock.Any()).Return(nil)
 
 		service := getTestService("test", v1.ProtocolTCP, nil, false, 80)
 		lb := getTestLoadBalancer(ptr.To("test"), ptr.To("rg"), ptr.To("test"), ptr.To("test"), service, consts.LoadBalancerSkuStandard)
@@ -6092,13 +6246,13 @@ func TestCleanOrphanedLoadBalancerLBInUseByVMSS(t *testing.T) {
 
 		existingLBs := []network.LoadBalancer{{Name: ptr.To("test")}}
 
-		err = cloud.cleanOrphanedLoadBalancer(&lb, existingLBs, &service, "test")
+		err = cloud.cleanOrphanedLoadBalancer(context.TODO(), &lb, existingLBs, &service, "test")
 		assert.NoError(t, err)
 	})
 
 	t.Run("cleanupOrphanedLoadBalancer should not call delete api if the lb does not exist", func(t *testing.T) {
 		cloud := GetTestCloud(ctrl)
-		vmss, err := newScaleSet(context.TODO(), cloud)
+		vmss, err := newScaleSet(cloud)
 		assert.NoError(t, err)
 		cloud.VMSet = vmss
 		cloud.LoadBalancerSku = consts.LoadBalancerSkuStandard
@@ -6109,7 +6263,7 @@ func TestCleanOrphanedLoadBalancerLBInUseByVMSS(t *testing.T) {
 
 		existingLBs := []network.LoadBalancer{}
 
-		err = cloud.cleanOrphanedLoadBalancer(&lb, existingLBs, &service, "test")
+		err = cloud.cleanOrphanedLoadBalancer(context.TODO(), &lb, existingLBs, &service, "test")
 		assert.NoError(t, err)
 	})
 }
@@ -6125,7 +6279,7 @@ func TestReconcileZonesForFrontendIPConfigs(t *testing.T) {
 		existingPIPV4             network.PublicIPAddress
 		existingPIPV6             network.PublicIPAddress
 		status                    *v1.LoadBalancerStatus
-		getZoneError              *retry.Error
+		getZoneError              error
 		regionZonesMap            map[string][]string
 		expectedZones             *[]string
 		expectedDirty             bool
@@ -6155,14 +6309,15 @@ func TestReconcileZonesForFrontendIPConfigs(t *testing.T) {
 		{
 			description:  "reconcileFrontendIPConfigs should report an error if failed to get zones",
 			service:      getInternalTestServiceDualStack("test", 80),
-			getZoneError: retry.NewError(false, errors.New("get zone failed")),
+			getZoneError: errors.New("get zone failed"),
 			expectedErr:  errors.New("get zone failed"),
 		},
 		{
 			description: "reconcileFrontendIPConfigs should use the nil zones of the existing frontend",
 			service: getTestServiceWithAnnotation("test", map[string]string{
 				consts.ServiceAnnotationLoadBalancerInternalSubnet: "subnet",
-				consts.ServiceAnnotationLoadBalancerInternal:       consts.TrueAnnotationValue}, true, 80),
+				consts.ServiceAnnotationLoadBalancerInternal:       consts.TrueAnnotationValue,
+			}, true, 80),
 			existingFrontendIPConfigs: []network.FrontendIPConfiguration{
 				{
 					Name: ptr.To("atest1"),
@@ -6179,7 +6334,8 @@ func TestReconcileZonesForFrontendIPConfigs(t *testing.T) {
 			description: "reconcileFrontendIPConfigs should use the non-nil zones of the existing frontend",
 			service: getTestServiceWithAnnotation("test", map[string]string{
 				consts.ServiceAnnotationLoadBalancerInternalSubnet: "subnet",
-				consts.ServiceAnnotationLoadBalancerInternal:       consts.TrueAnnotationValue}, true, 80),
+				consts.ServiceAnnotationLoadBalancerInternal:       consts.TrueAnnotationValue,
+			}, true, 80),
 			existingFrontendIPConfigs: []network.FrontendIPConfiguration{
 				{
 					Name: ptr.To("not-this-one"),
@@ -6250,9 +6406,9 @@ func TestReconcileZonesForFrontendIPConfigs(t *testing.T) {
 			subnetClient.EXPECT().Get(gomock.Any(), "rg", "vnet", "subnet", gomock.Any()).Return(
 				network.Subnet{ID: ptr.To("subnet0"), SubnetPropertiesFormat: &network.SubnetPropertiesFormat{AddressPrefixes: &[]string{"1.2.3.4/31", "2001::1/127"}}}, nil).MaxTimes(1)
 
-			zoneClient := mockzoneclient.NewMockInterface(ctrl)
-			zoneClient.EXPECT().GetZones(gomock.Any(), gomock.Any()).Return(map[string][]string{}, tc.getZoneError).MaxTimes(2)
-			cloud.ZoneClient = zoneClient
+			zoneMock := zone.NewMockRepository(ctrl)
+			zoneMock.EXPECT().ListZones(gomock.Any()).Return(map[string][]string{}, tc.getZoneError).MaxTimes(2)
+			cloud.zoneRepo = zoneMock
 
 			service := tc.service
 			isDualStack := isServiceDualStack(&service)
@@ -6261,7 +6417,7 @@ func TestReconcileZonesForFrontendIPConfigs(t *testing.T) {
 				consts.IPVersionIPv4: getResourceByIPFamily(defaultLBFrontendIPConfigName, isDualStack, consts.IPVersionIPv4),
 				consts.IPVersionIPv6: getResourceByIPFamily(defaultLBFrontendIPConfigName, isDualStack, consts.IPVersionIPv6),
 			}
-			_, _, dirty, err := cloud.reconcileFrontendIPConfigs("testCluster", &service, &lb, tc.status, true, lbFrontendIPConfigNames)
+			_, _, dirty, err := cloud.reconcileFrontendIPConfigs(context.TODO(), "testCluster", &service, &lb, tc.status, true, lbFrontendIPConfigNames)
 			if tc.expectedErr == nil {
 				assert.NoError(t, err)
 			} else {
@@ -6551,7 +6707,7 @@ func TestReconcileFrontendIPConfigs(t *testing.T) {
 				false: getResourceByIPFamily(defaultLBFrontendIPConfigName, isDualStack, false),
 				true:  getResourceByIPFamily(defaultLBFrontendIPConfigName, isDualStack, true),
 			}
-			_, _, dirty, err := cloud.reconcileFrontendIPConfigs("testCluster", &service, &lb, tc.status, tc.wantLB, lbFrontendIPConfigNames)
+			_, _, dirty, err := cloud.reconcileFrontendIPConfigs(context.TODO(), "testCluster", &service, &lb, tc.status, tc.wantLB, lbFrontendIPConfigNames)
 			if tc.expectedErr != nil {
 				assert.Equal(t, tc.expectedErr, err)
 			} else {
@@ -6751,9 +6907,9 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 		desc                          string
 		expectedDeleteCall            bool
 		expectedDecoupleErr           error
-		multiSLBConfigs               []MultipleStandardLoadBalancerConfiguration
+		multiSLBConfigs               []config.MultipleStandardLoadBalancerConfiguration
 		nodesWithCorrectVMSet         *utilsets.IgnoreCaseSet
-		expectedMultiSLBConfigs       []MultipleStandardLoadBalancerConfiguration
+		expectedMultiSLBConfigs       []config.MultipleStandardLoadBalancerConfiguration
 		expectedNodesWithCorrectVMSet *utilsets.IgnoreCaseSet
 		expectedErr                   *retry.Error
 	}{
@@ -6774,31 +6930,31 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 		{
 			desc:               "should cleanup active nodes when using multi-slb",
 			expectedDeleteCall: true,
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "test",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
 					Name: "test2",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node3"),
 					},
 				},
 			},
 			nodesWithCorrectVMSet: utilsets.NewString("node1", "node2", "node3"),
-			expectedMultiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			expectedMultiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "test",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString(),
 					},
 				},
 				{
 					Name: "test2",
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node3"),
 					},
 				},
@@ -6820,6 +6976,7 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 				gomock.Any(),
 				gomock.Any(),
 				gomock.Any(),
+				gomock.Any(),
 			).Return(false, tc.expectedDecoupleErr)
 			cloud.VMSet = mockVMSet
 			cloud.LoadBalancerClient = mockLBClient
@@ -6836,7 +6993,7 @@ func TestSafeDeleteLoadBalancer(t *testing.T) {
 					BackendAddressPools: &[]network.BackendAddressPool{},
 				},
 			}
-			err := cloud.safeDeleteLoadBalancer(lb, "cluster", "vmss", &svc)
+			err := cloud.safeDeleteLoadBalancer(context.TODO(), lb, "cluster", "vmss", &svc)
 			assert.Equal(t, tc.expectedErr, err)
 			if len(tc.multiSLBConfigs) > 0 {
 				assert.Equal(t, tc.expectedMultiSLBConfigs, cloud.MultipleStandardLoadBalancerConfigurations)
@@ -6892,7 +7049,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 
 	for _, tc := range []struct {
 		description string
-		lbConfigs   []MultipleStandardLoadBalancerConfiguration
+		lbConfigs   []config.MultipleStandardLoadBalancerConfiguration
 		svc         v1.Service
 		namespace   *v1.Namespace
 		labels      map[string]string
@@ -6902,14 +7059,14 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should respect service annotation",
 			svc:         getTestService("test", v1.ProtocolTCP, map[string]string{consts.ServiceAnnotationLoadBalancerConfigurations: "A ,b"}, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			expectedLBs: []string{"a"},
@@ -6917,14 +7074,14 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should report an error if a service selects a load balancer that is not defined in the configuration",
 			svc:         getTestService("test", v1.ProtocolTCP, map[string]string{consts.ServiceAnnotationLoadBalancerConfigurations: "b"}, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			expectedErr: errors.New(`service "test" selects 1 load balancers by annotation, but none of them is defined in cloud provider configuration`),
@@ -6932,10 +7089,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should respect namespace selector",
 			svc:         getTestService("test", v1.ProtocolTCP, nil, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -6943,7 +7100,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
@@ -6951,7 +7108,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			namespace: &v1.Namespace{
@@ -6966,10 +7123,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 			description: "should respect label selector",
 			svc:         getTestService("test", v1.ProtocolTCP, nil, false),
 			labels:      map[string]string{"k2": "v2", "k3": "v3"},
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -6977,7 +7134,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
@@ -6985,7 +7142,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			expectedLBs: []string{"b"},
@@ -7000,10 +7157,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 					Labels: map[string]string{"k1": "v1"},
 				},
 			},
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "fails to match service label",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -7011,7 +7168,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "fails to match service namespace",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
@@ -7019,7 +7176,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "empty",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			expectedLBs: []string{"empty"},
@@ -7028,10 +7185,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 			description: "should return the intersection of annotation, namespace and label selector",
 			svc:         getTestService("test", v1.ProtocolTCP, map[string]string{consts.ServiceAnnotationLoadBalancerConfigurations: "a,b"}, false),
 			labels:      map[string]string{"k2": "v2"},
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -7039,7 +7196,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
@@ -7062,7 +7219,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
@@ -7080,10 +7237,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should return an error if there is no matching lb config",
 			svc:         getTestService("test", v1.ProtocolTCP, map[string]string{consts.ServiceAnnotationLoadBalancerConfigurations: "a,b,c"}, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -7091,7 +7248,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
@@ -7105,7 +7262,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v3"},
 						},
@@ -7113,13 +7270,13 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 				{
 					Name: "d",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						AllowServicePlacement: ptr.To(false),
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveServices: utilsets.NewString("default/test"),
 					},
 				},
@@ -7136,10 +7293,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should report an error if failed to convert label selector as a selector",
 			svc:         getTestService("test", v1.ProtocolTCP, nil, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
@@ -7147,7 +7304,8 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{},
 								},
-							}},
+							},
+						},
 					},
 				},
 			},
@@ -7157,10 +7315,10 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should report an error if failed to convert namespace selector as a selector",
 			svc:         getTestService("test", v1.ProtocolTCP, nil, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
@@ -7168,7 +7326,8 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 									Operator: metav1.LabelSelectorOpIn,
 									Values:   []string{},
 								},
-							}},
+							},
+						},
 					},
 				},
 			},
@@ -7178,27 +7337,27 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 		{
 			description: "should respect allowServicePlacement flag",
 			svc:         getTestService("test", v1.ProtocolTCP, map[string]string{consts.ServiceAnnotationLoadBalancerConfigurations: "a,c"}, false),
-			lbConfigs: []MultipleStandardLoadBalancerConfiguration{
+			lbConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						AllowServicePlacement: ptr.To(false),
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveServices: utilsets.NewString("default/test"),
 					},
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 				{
 					Name: "d",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{},
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{},
 				},
 			},
 			expectedLBs: []string{"a", "c"},
@@ -7218,7 +7377,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				tc.svc.Labels = tc.labels
 			}
 
-			lbs, err := az.getEligibleLoadBalancersForService(&tc.svc)
+			lbs, err := az.getEligibleLoadBalancersForService(context.TODO(), &tc.svc)
 			assert.Equal(t, tc.expectedLBs, lbs)
 			if tc.expectedErr != nil {
 				assert.Equal(t, tc.expectedErr.Error(), err.Error())
@@ -7240,7 +7399,7 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 		useStandardLB     bool
 		clusterName       string
 		lbName            string
-		multiSLBConfigs   []MultipleStandardLoadBalancerConfiguration
+		multiSLBConfigs   []config.MultipleStandardLoadBalancerConfiguration
 		serviceAnnotation map[string]string
 		serviceLabel      map[string]string
 		expected          string
@@ -7313,10 +7472,10 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 			description:   "should select the most eligible load balancer when using multi-slb",
 			vmSet:         primary,
 			useStandardLB: true,
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -7324,7 +7483,7 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 				},
 				{
 					Name: "b",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchExpressions: []metav1.LabelSelectorRequirement{
 								{
@@ -7338,7 +7497,7 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 				},
 				{
 					Name: "c",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceNamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
@@ -7354,10 +7513,10 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 			description:   "should report an error if failed to select eligible load balancers",
 			vmSet:         primary,
 			useStandardLB: true,
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "a",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						ServiceLabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
@@ -7385,7 +7544,7 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 			if c.serviceLabel != nil {
 				svc.Labels = c.serviceLabel
 			}
-			loadbalancerName, err := az.getAzureLoadBalancerName(&svc, &[]network.LoadBalancer{}, c.clusterName, c.vmSet, c.isInternal)
+			loadbalancerName, err := az.getAzureLoadBalancerName(context.TODO(), &svc, &[]network.LoadBalancer{}, c.clusterName, c.vmSet, c.isInternal)
 			assert.Equal(t, c.expected, loadbalancerName)
 			if c.expectedErr != nil {
 				assert.EqualError(t, err, c.expectedErr.Error())
@@ -7600,17 +7759,17 @@ func TestReconcileMultipleStandardLoadBalancerConfigurations(t *testing.T) {
 
 			if tc.useMultipleLB {
 				az.LoadBalancerBackendPool = newBackendPoolTypeNodeIP(az)
-				az.MultipleStandardLoadBalancerConfigurations = []MultipleStandardLoadBalancerConfiguration{
+				az.MultipleStandardLoadBalancerConfigurations = []config.MultipleStandardLoadBalancerConfiguration{
 					{Name: "lb1"},
 					{Name: "lb2"},
 				}
 				if !tc.noPrimaryConfig {
-					az.MultipleStandardLoadBalancerConfigurations = append(az.MultipleStandardLoadBalancerConfigurations, MultipleStandardLoadBalancerConfiguration{Name: "kubernetes"})
+					az.MultipleStandardLoadBalancerConfigurations = append(az.MultipleStandardLoadBalancerConfigurations, config.MultipleStandardLoadBalancerConfiguration{Name: "kubernetes"})
 				}
 			}
 
 			svc := getTestService("test", v1.ProtocolTCP, nil, false)
-			err := az.reconcileMultipleStandardLoadBalancerConfigurations(&existingLBs, &svc, "kubernetes", &existingLBs, tc.nodes)
+			err := az.reconcileMultipleStandardLoadBalancerConfigurations(context.TODO(), &existingLBs, &svc, "kubernetes", &existingLBs, tc.nodes)
 			assert.Equal(t, err, tc.expectedErr)
 
 			activeServices := make(map[string]*utilsets.IgnoreCaseSet)
@@ -7620,7 +7779,6 @@ func TestReconcileMultipleStandardLoadBalancerConfigurations(t *testing.T) {
 			for lbConfigName, svcNames := range tc.expectedActiveServices {
 				assert.Equal(t, svcNames, activeServices[lbConfigName])
 			}
-
 		})
 	}
 }
@@ -8060,7 +8218,7 @@ func TestServiceOwnsFrontendIP(t *testing.T) {
 				mockPIPsClient := cloud.PublicIPAddressesClient.(*mockpublicipclient.MockInterface)
 				mockPIPsClient.EXPECT().List(gomock.Any(), "rg").Return(test.existingPIPs, test.listError).MaxTimes(2)
 			}
-			isOwned, isPrimary, fipIPVersion := cloud.serviceOwnsFrontendIP(test.fip, test.service)
+			isOwned, isPrimary, fipIPVersion := cloud.serviceOwnsFrontendIP(context.TODO(), test.fip, test.service)
 			if test.expectedFIPIPVersion != "" {
 				assert.Equal(t, test.expectedFIPIPVersion, fipIPVersion)
 			}
@@ -8078,7 +8236,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		description          string
 		lbName               string
 		init                 bool
-		existingLBConfigs    []MultipleStandardLoadBalancerConfiguration
+		existingLBConfigs    []config.MultipleStandardLoadBalancerConfiguration
 		existingNodes        []*v1.Node
 		existingLBs          []network.LoadBalancer
 		expectedPutLBTimes   int
@@ -8086,22 +8244,22 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 	}{
 		{
 			description: "should remove unwanted nodes and arrange existing nodes with primary vmSet as expected",
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node3", "node4"),
 					},
 				},
@@ -8174,34 +8332,34 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		{
 			description: "should respect node selector",
 			lbName:      "lb2-internal",
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
 						},
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node3", "node4"),
 					},
 				},
 				{
 					Name: "lb3",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
@@ -8210,7 +8368,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 				{
 					Name: "lb4",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 					},
 				},
@@ -8279,16 +8437,16 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		},
 		{
 			description: "should remove the node on the lb if it is no longer eligible",
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
 						},
 					},
-					MultipleStandardLoadBalancerConfigurationStatus: MultipleStandardLoadBalancerConfigurationStatus{
+					MultipleStandardLoadBalancerConfigurationStatus: config.MultipleStandardLoadBalancerConfigurationStatus{
 						ActiveNodes: utilsets.NewString("node1", "node2"),
 					},
 				},
@@ -8302,10 +8460,10 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		},
 		{
 			description: "should skip lbs that do not exist or will not be created",
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
@@ -8314,7 +8472,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
@@ -8323,7 +8481,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 				{
 					Name: "lb3",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k3": "v3"},
@@ -8370,10 +8528,10 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		},
 		{
 			description: "should skip lbs that do not exist or will not be created when no lb is selected by node selector",
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k1": "v1"},
@@ -8382,7 +8540,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k2": "v2"},
@@ -8391,7 +8549,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 				},
 				{
 					Name: "lb3",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 						NodeSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"k3": "v3"},
@@ -8429,16 +8587,16 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 		{
 			description: "should record current node distributions after restarting the controller",
 			init:        true,
-			existingLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			existingLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-1",
 					},
 				},
 				{
 					Name: "lb2",
-					MultipleStandardLoadBalancerConfigurationSpec: MultipleStandardLoadBalancerConfigurationSpec{
+					MultipleStandardLoadBalancerConfigurationSpec: config.MultipleStandardLoadBalancerConfigurationSpec{
 						PrimaryVMSet: "vmss-2",
 					},
 				},
@@ -8527,7 +8685,7 @@ func TestReconcileMultipleStandardLoadBalancerNodes(t *testing.T) {
 			az.LoadBalancerBackendPool = newBackendPoolTypeNodeIP(az)
 			az.MultipleStandardLoadBalancerConfigurations = tc.existingLBConfigs
 			svc := getTestService("test", v1.ProtocolTCP, nil, false)
-			_ = az.reconcileMultipleStandardLoadBalancerBackendNodes("kubernetes", tc.lbName, &tc.existingLBs, &svc, tc.existingNodes, tc.init)
+			_ = az.reconcileMultipleStandardLoadBalancerBackendNodes(context.TODO(), "kubernetes", tc.lbName, &tc.existingLBs, &svc, tc.existingNodes, tc.init)
 
 			expectedLBToNodesMap := make(map[string]*utilsets.IgnoreCaseSet)
 			for _, multiSLBConfig := range az.MultipleStandardLoadBalancerConfigurations {
@@ -8668,22 +8826,22 @@ func TestReconcileBackendPoolHosts(t *testing.T) {
 
 	cloud := GetTestCloud(ctrl)
 	mockLBBackendPool := NewMockBackendPool(ctrl)
-	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), bp1).DoAndReturn(fakeEnsureHostsInPool())
-	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), bp2).Return(nil)
+	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), bp1).DoAndReturn(fakeEnsureHostsInPool())
+	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), bp2).Return(nil)
 	cloud.LoadBalancerBackendPool = mockLBBackendPool
 
 	var err error
-	lb1, err = cloud.reconcileBackendPoolHosts(lb1, existingLBs, &svc, []*v1.Node{}, clusterName, "vmss", lbBackendPoolIDs)
+	lb1, err = cloud.reconcileBackendPoolHosts(context.Background(), lb1, existingLBs, &svc, []*v1.Node{}, clusterName, "vmss", lbBackendPoolIDs)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedLB, lb1)
 
-	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("error"))
-	_, err = cloud.reconcileBackendPoolHosts(lb1, existingLBs, &svc, []*v1.Node{}, clusterName, "vmss", lbBackendPoolIDs)
+	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("error"))
+	_, err = cloud.reconcileBackendPoolHosts(context.Background(), lb1, existingLBs, &svc, []*v1.Node{}, clusterName, "vmss", lbBackendPoolIDs)
 	assert.Equal(t, errors.New("error"), err)
 }
 
-func fakeEnsureHostsInPool() func(*v1.Service, []*v1.Node, string, string, string, string, network.BackendAddressPool) error {
-	return func(_ *v1.Service, _ []*v1.Node, _, _, _, _ string, backendPool network.BackendAddressPool) error {
+func fakeEnsureHostsInPool() func(context.Context, *v1.Service, []*v1.Node, string, string, string, string, network.BackendAddressPool) error {
+	return func(_ context.Context, _ *v1.Service, _ []*v1.Node, _, _, _, _ string, backendPool network.BackendAddressPool) error {
 		backendPool.LoadBalancerBackendAddresses = &[]network.LoadBalancerBackendAddress{
 			{
 				LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{

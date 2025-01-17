@@ -25,16 +25,16 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/recording"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
 func TestClient(t *testing.T) {
-	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "Client Suite")
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Client Suite")
 }
 
 var resourceGroupName = "aks-cit-Provider"
@@ -47,11 +47,11 @@ var err error
 var recorder *recording.Recorder
 var realClient Interface
 
-var _ = ginkgo.BeforeSuite(func(ctx context.Context) {
+var _ = BeforeSuite(func(ctx context.Context) {
 	recorder, err = recording.NewRecorder("testdata/Provider")
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	Expect(err).ToNot(HaveOccurred())
 	subscriptionID = recorder.SubscriptionID()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 	cred := recorder.TokenCredential()
 	resourceGroupClient, err = armresources.NewResourceGroupsClient(subscriptionID, cred, &arm.ClientOptions{
 		ClientOptions: azcore.ClientOptions{
@@ -59,14 +59,13 @@ var _ = ginkgo.BeforeSuite(func(ctx context.Context) {
 			TracingProvider: utils.TracingProvider,
 		},
 	})
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 	realClient, err = New(subscriptionID, recorder.TokenCredential(), &arm.ClientOptions{
 		ClientOptions: azcore.ClientOptions{
-			Transport:       recorder.HTTPClient(),
-			TracingProvider: utils.TracingProvider,
+			Transport: recorder.HTTPClient(),
 		},
 	})
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 	_, err = resourceGroupClient.CreateOrUpdate(
 		ctx,
 		resourceGroupName,
@@ -74,14 +73,13 @@ var _ = ginkgo.BeforeSuite(func(ctx context.Context) {
 			Location: to.Ptr(location),
 		},
 		nil)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
 })
 
-var _ = ginkgo.AfterSuite(func(ctx context.Context) {
-	poller, err := resourceGroupClient.BeginDelete(ctx, resourceGroupName, nil)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	_, err = poller.PollUntilDone(ctx, nil)
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+var _ = AfterSuite(func(ctx context.Context) {
+	_, err := resourceGroupClient.BeginDelete(ctx, resourceGroupName, nil)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = recorder.Stop()
-	gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	Expect(err).ToNot(HaveOccurred())
 })

@@ -130,7 +130,8 @@ func init() {
 	afterAllFunc = func(ctx context.Context) {
 		_, err = vaultClient.Delete(ctx, resourceGroupName, *parentResource.Name, nil)
 		Expect(err).NotTo(HaveOccurred())
-		_, err := vaultClient.BeginPurgeDeleted(ctx, *parentResource.Name, "eastus", nil)
+		_, err := utils.NewPollerWrapper(vaultClient.BeginPurgeDeleted(ctx, *parentResource.Name, "eastus", nil)).WaitforPollerResp(ctx)
 		Expect(err).NotTo(HaveOccurred())
+
 	}
 }

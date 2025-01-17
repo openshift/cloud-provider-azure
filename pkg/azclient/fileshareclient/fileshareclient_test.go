@@ -20,40 +20,39 @@ package fileshareclient
 import (
 	"context"
 
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var beforeAllFunc func(context.Context)
 var afterAllFunc func(context.Context)
 var additionalTestCases func()
 
-var _ = ginkgo.Describe("FileSharesClient", ginkgo.Ordered, func() {
+var _ = Describe("FileSharesClient", Ordered, func() {
 
 	if beforeAllFunc != nil {
-		ginkgo.BeforeAll(beforeAllFunc)
+		BeforeAll(beforeAllFunc)
 	}
 
 	if additionalTestCases != nil {
 		additionalTestCases()
 	}
 
-	ginkgo.When("get requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("get requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, parentResourceName, resourceName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(newResource).NotTo(gomega.BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newResource).NotTo(BeNil())
 		})
 	})
-	ginkgo.When("invalid get requests are raised", func() {
-		ginkgo.It("should return 404 error", func(ctx context.Context) {
+	When("invalid get requests are raised", func() {
+		It("should return 404 error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, parentResourceName, resourceName+"notfound")
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(newResource).To(gomega.BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(newResource).To(BeNil())
 		})
 	})
-
 	if afterAllFunc != nil {
-		ginkgo.AfterAll(afterAllFunc)
+		AfterAll(afterAllFunc)
 	}
 })

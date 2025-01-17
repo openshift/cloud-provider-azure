@@ -20,57 +20,56 @@ package sshpublickeyresourceclient
 import (
 	"context"
 
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var beforeAllFunc func(context.Context)
 var afterAllFunc func(context.Context)
 var additionalTestCases func()
 
-var _ = ginkgo.Describe("SSHPublicKeysClient", ginkgo.Ordered, func() {
+var _ = Describe("SSHPublicKeysClient", Ordered, func() {
 
 	if beforeAllFunc != nil {
-		ginkgo.BeforeAll(beforeAllFunc)
+		BeforeAll(beforeAllFunc)
 	}
 
 	if additionalTestCases != nil {
 		additionalTestCases()
 	}
 
-	ginkgo.When("get requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("get requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, resourceName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(newResource).NotTo(gomega.BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newResource).NotTo(BeNil())
 		})
 	})
-	ginkgo.When("invalid get requests are raised", func() {
-		ginkgo.It("should return 404 error", func(ctx context.Context) {
+	When("invalid get requests are raised", func() {
+		It("should return 404 error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, resourceName+"notfound")
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(newResource).To(gomega.BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(newResource).To(BeNil())
 		})
 	})
 
-	ginkgo.When("list requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("list requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			resourceList, err := realClient.List(ctx, resourceGroupName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(resourceList).NotTo(gomega.BeNil())
-			gomega.Expect(len(resourceList)).To(gomega.Equal(1))
-			gomega.Expect(*resourceList[0].Name).To(gomega.Equal(resourceName))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resourceList).NotTo(BeNil())
+			Expect(len(resourceList)).To(Equal(1))
+			Expect(*resourceList[0].Name).To(Equal(resourceName))
 		})
 	})
-	ginkgo.When("invalid list requests are raised", func() {
-		ginkgo.It("should return error", func(ctx context.Context) {
+	When("invalid list requests are raised", func() {
+		It("should return error", func(ctx context.Context) {
 			resourceList, err := realClient.List(ctx, resourceGroupName+"notfound")
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(resourceList).To(gomega.BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(resourceList).To(BeNil())
 		})
 	})
-
 	if afterAllFunc != nil {
-		ginkgo.AfterAll(afterAllFunc)
+		AfterAll(afterAllFunc)
 	}
 })

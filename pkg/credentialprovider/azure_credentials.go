@@ -59,13 +59,13 @@ type CredentialProvider interface {
 
 // acrProvider implements the credential provider interface for Azure Container Registry.
 type acrProvider struct {
-	config         *providerconfig.AzureAuthConfig
+	config         *providerconfig.AzureClientConfig
 	environment    *azclient.Environment
 	credential     azcore.TokenCredential
 	registryMirror map[string]string // Registry mirror relation: source registry -> target registry
 }
 
-func NewAcrProvider(config *providerconfig.AzureAuthConfig, environment *azclient.Environment, credential azcore.TokenCredential) CredentialProvider {
+func NewAcrProvider(config *providerconfig.AzureClientConfig, environment *azclient.Environment, credential azcore.TokenCredential) CredentialProvider {
 	return &acrProvider{
 		config:      config,
 		credential:  credential,
@@ -78,7 +78,7 @@ func NewAcrProviderFromConfig(configFile string, registryMirrorStr string) (Cred
 	if len(configFile) == 0 {
 		return nil, errors.New("no azure credential file is provided")
 	}
-	config, err := configloader.Load[providerconfig.AzureAuthConfig](context.Background(), nil, &configloader.FileLoaderConfig{FilePath: configFile})
+	config, err := configloader.Load[providerconfig.AzureClientConfig](context.Background(), nil, &configloader.FileLoaderConfig{FilePath: configFile})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
@@ -97,7 +97,7 @@ func NewAcrProviderFromConfig(configFile string, registryMirrorStr string) (Cred
 
 	var managedIdentityCredential azcore.TokenCredential
 
-	clientOption, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
+	clientOption, _, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (a *acrProvider) GetCredentials(ctx context.Context, image string, _ []stri
 
 // getFromACR gets credentials from ACR.
 func (a *acrProvider) getFromACR(ctx context.Context, loginServer string) (string, string, error) {
-	config, err := azclient.GetAzureCloudConfig(&a.config.ARMClientConfig)
+	config, _, err := azclient.GetAzureCloudConfigAndEnvConfig(&a.config.ARMClientConfig)
 	if err != nil {
 		return "", "", err
 	}

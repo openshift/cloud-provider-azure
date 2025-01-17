@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient/mockpublicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
 
@@ -45,7 +47,7 @@ func TestDeleteLB(t *testing.T) {
 	mockLBClient := az.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
 	mockLBClient.EXPECT().Delete(gomock.Any(), az.ResourceGroup, "lb").Return(&retry.Error{HTTPStatusCode: http.StatusInternalServerError})
 
-	err := az.DeleteLB(&v1.Service{}, "lb")
+	err := az.DeleteLB(context.TODO(), &v1.Service{}, "lb")
 	assert.EqualError(t, fmt.Errorf("Retriable: false, RetryAfter: 0s, HTTPStatusCode: 500, RawError: %w", error(nil)), fmt.Sprintf("%s", err.Error()))
 }
 
@@ -57,7 +59,7 @@ func TestListManagedLBs(t *testing.T) {
 		existingLBs     []network.LoadBalancer
 		expectedLBs     *[]network.LoadBalancer
 		callTimes       int
-		multiSLBConfigs []MultipleStandardLoadBalancerConfiguration
+		multiSLBConfigs []config.MultipleStandardLoadBalancerConfiguration
 		clientErr       *retry.Error
 		expectedErr     error
 	}{
@@ -93,7 +95,7 @@ func TestListManagedLBs(t *testing.T) {
 				{Name: ptr.To("lb1-internal")},
 				{Name: ptr.To("lb2")},
 			},
-			multiSLBConfigs: []MultipleStandardLoadBalancerConfiguration{
+			multiSLBConfigs: []config.MultipleStandardLoadBalancerConfiguration{
 				{Name: "kubernetes"},
 				{Name: "lb1"},
 			},
@@ -116,11 +118,11 @@ func TestListManagedLBs(t *testing.T) {
 		mockLBClient := az.LoadBalancerClient.(*mockloadbalancerclient.MockInterface)
 		mockLBClient.EXPECT().List(gomock.Any(), az.ResourceGroup).Return(test.existingLBs, test.clientErr)
 		mockVMSet := NewMockVMSet(ctrl)
-		mockVMSet.EXPECT().GetAgentPoolVMSetNames(gomock.Any()).Return(&[]string{"vmas-0", "vmas-1"}, nil).Times(test.callTimes)
+		mockVMSet.EXPECT().GetAgentPoolVMSetNames(gomock.Any(), gomock.Any()).Return(&[]string{"vmas-0", "vmas-1"}, nil).Times(test.callTimes)
 		mockVMSet.EXPECT().GetPrimaryVMSetName().Return("vmas-0").AnyTimes()
 		az.VMSet = mockVMSet
 
-		lbs, err := az.ListManagedLBs(&v1.Service{}, []*v1.Node{}, "kubernetes")
+		lbs, err := az.ListManagedLBs(context.TODO(), &v1.Service{}, []*v1.Node{}, "kubernetes")
 		assert.Equal(t, test.expectedErr, err)
 		assert.Equal(t, test.expectedLBs, lbs)
 	}
@@ -167,19 +169,19 @@ func TestCreateOrUpdateLB(t *testing.T) {
 			},
 		}}, nil).MaxTimes(2)
 
-		err := az.CreateOrUpdateLB(&v1.Service{}, network.LoadBalancer{
+		err := az.CreateOrUpdateLB(context.TODO(), &v1.Service{}, network.LoadBalancer{
 			Name: ptr.To("lb"),
 			Etag: ptr.To("etag"),
 		})
 		assert.EqualError(t, test.expectedErr, err.Error())
 
 		// loadbalancer should be removed from cache if the etag is mismatch or the operation is canceled
-		shouldBeEmpty, err := az.lbCache.GetWithDeepCopy("lb", cache.CacheReadTypeDefault)
+		shouldBeEmpty, err := az.lbCache.GetWithDeepCopy(context.TODO(), "lb", cache.CacheReadTypeDefault)
 		assert.NoError(t, err)
 		assert.Empty(t, shouldBeEmpty)
 
 		// public ip cache should be populated since there's GetPIP
-		shouldNotBeEmpty, err := az.pipCache.Get(az.ResourceGroup, cache.CacheReadTypeDefault)
+		shouldNotBeEmpty, err := az.pipCache.Get(context.TODO(), az.ResourceGroup, cache.CacheReadTypeDefault)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shouldNotBeEmpty)
 	}
@@ -211,7 +213,7 @@ func TestCreateOrUpdateLBBackendPool(t *testing.T) {
 		lbClient.EXPECT().CreateOrUpdateBackendPools(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(tc.createOrUpdateErr)
 		az.LoadBalancerClient = lbClient
 
-		err := az.CreateOrUpdateLBBackendPool("kubernetes", network.BackendAddressPool{})
+		err := az.CreateOrUpdateLBBackendPool(context.TODO(), "kubernetes", network.BackendAddressPool{})
 		assert.Equal(t, tc.expectedErr, err != nil)
 	}
 }
@@ -242,7 +244,7 @@ func TestDeleteLBBackendPool(t *testing.T) {
 		lbClient.EXPECT().DeleteLBBackendPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(tc.deleteErr)
 		az.LoadBalancerClient = lbClient
 
-		err := az.DeleteLBBackendPool("kubernetes", "kubernetes")
+		err := az.DeleteLBBackendPool(context.TODO(), "kubernetes", "kubernetes")
 		assert.Equal(t, tc.expectedErr, err != nil)
 	}
 }
@@ -317,7 +319,7 @@ func TestMigrateToIPBasedBackendPoolAndWaitForCompletion(t *testing.T) {
 			lbName := testClusterName
 			backendPoolNames := []string{testClusterName}
 			nicsCountMap := map[string]int{testClusterName: 2}
-			err := az.MigrateToIPBasedBackendPoolAndWaitForCompletion(lbName, backendPoolNames, nicsCountMap)
+			err := az.MigrateToIPBasedBackendPoolAndWaitForCompletion(context.TODO(), lbName, backendPoolNames, nicsCountMap)
 			if tc.expectedError != nil {
 				assert.EqualError(t, err, tc.expectedError.Error())
 			} else {
@@ -425,6 +427,104 @@ func TestServiceOwnsRuleSharedProbe(t *testing.T) {
 			az := GetTestCloud(ctrl)
 			svc := getTestService("test", v1.ProtocolTCP, nil, false)
 			assert.True(t, az.serviceOwnsRule(&svc, consts.SharedProbeName))
+		})
+	}
+}
+
+func TestIsNICPool(t *testing.T) {
+	tests := []struct {
+		desc     string
+		bp       network.BackendAddressPool
+		expected bool
+	}{
+		{
+			desc: "nil BackendAddressPoolPropertiesFormat",
+			bp: network.BackendAddressPool{
+				Name: ptr.To("pool1"),
+			},
+			expected: false,
+		},
+		{
+			desc: "nil LoadBalancerBackendAddresses",
+			bp: network.BackendAddressPool{
+				Name:                               ptr.To("pool1"),
+				BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{},
+			},
+			expected: false,
+		},
+		{
+			desc: "empty LoadBalancerBackendAddresses",
+			bp: network.BackendAddressPool{
+				Name: ptr.To("pool1"),
+				BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
+					LoadBalancerBackendAddresses: &[]network.LoadBalancerBackendAddress{},
+				},
+			},
+			expected: false,
+		},
+		{
+			desc: "LoadBalancerBackendAddress with empty IPAddress",
+			bp: network.BackendAddressPool{
+				Name: ptr.To("pool1"),
+				BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
+					LoadBalancerBackendAddresses: &[]network.LoadBalancerBackendAddress{
+						{
+							Name: ptr.To("addr1"),
+							LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{
+								IPAddress: ptr.To(""),
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			desc: "LoadBalancerBackendAddress with non-empty IPAddress",
+			bp: network.BackendAddressPool{
+				Name: ptr.To("pool1"),
+				BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
+					LoadBalancerBackendAddresses: &[]network.LoadBalancerBackendAddress{
+						{
+							Name: ptr.To("addr1"),
+							LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{
+								IPAddress: ptr.To("10.0.0.1"),
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			desc: "LoadBalancerBackendAddress with both empty and non-empty IPAddress",
+			bp: network.BackendAddressPool{
+				Name: ptr.To("pool1"),
+				BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
+					LoadBalancerBackendAddresses: &[]network.LoadBalancerBackendAddress{
+						{
+							Name: ptr.To("addr1"),
+							LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{
+								IPAddress: ptr.To(""),
+							},
+						},
+						{
+							Name: ptr.To("addr2"),
+							LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{
+								IPAddress: ptr.To("10.0.0.2"),
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			result := isNICPool(test.bp)
+			assert.Equal(t, test.expected, result)
 		})
 	}
 }

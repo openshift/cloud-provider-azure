@@ -1,8 +1,12 @@
-# Exclude files and directories which are not needed for the OCP-specific image build process
-docs/
-examples/
-site/
-helm/
-
-/cloudbuild.yaml
-/netlify.toml
+*
+!.git
+!cloud-controller-manager
+!Makefile
+!hack/pkg-config.sh
+!vendor
+!cmd
+!pkg
+!bin
+!go.mod
+!go.sum
+!tests

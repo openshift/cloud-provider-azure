@@ -20,17 +20,17 @@ package resourcegroupclient
 import (
 	"context"
 
-	"github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/ginkgo/v2"
 )
 
 var beforeAllFunc func(context.Context)
 var afterAllFunc func(context.Context)
 var additionalTestCases func()
 
-var _ = ginkgo.Describe("ResourceGroupsClient", ginkgo.Ordered, func() {
+var _ = Describe("ResourceGroupsClient", Ordered, func() {
 
 	if beforeAllFunc != nil {
-		ginkgo.BeforeAll(beforeAllFunc)
+		BeforeAll(beforeAllFunc)
 	}
 
 	if additionalTestCases != nil {
@@ -38,6 +38,6 @@ var _ = ginkgo.Describe("ResourceGroupsClient", ginkgo.Ordered, func() {
 	}
 
 	if afterAllFunc != nil {
-		ginkgo.AfterAll(afterAllFunc)
+		AfterAll(afterAllFunc)
 	}
 })

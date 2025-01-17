@@ -26,23 +26,23 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/retryrepectthrottled"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
-var _ = ginkgo.Describe("Throttle", func() {
-	ginkgo.Describe("Throttle", func() {
-		ginkgo.It("should respect retry-after", func() {
+var _ = Describe("Throttle", func() {
+	Describe("Throttle", func() {
+		It("should respect retry-after", func() {
 			once := sync.Once{}
 			throttlePolicy := &retryrepectthrottled.ThrottlingPolicy{}
 			pipeline := runtime.NewPipeline("testmodule", "v0.1.0", runtime.PipelineOptions{}, &policy.ClientOptions{
 				PerCallPolicies: []policy.Policy{
 					throttlePolicy,
 					utils.FuncPolicyWrapper(
-						func(*policy.Request) (*http.Response, error) {
+						func(req *policy.Request) (*http.Response, error) {
 							resp := &http.Response{
 								StatusCode: http.StatusOK,
 								Body:       http.NoBody,
@@ -62,22 +62,22 @@ var _ = ginkgo.Describe("Throttle", func() {
 				},
 			})
 			req, err := runtime.NewRequest(context.Background(), http.MethodPut, "http://localhost:8080")
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			err = req.SetBody(streaming.NopCloser(strings.NewReader(`{"etag":"etag"}`)), "application/json")
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			_, err = pipeline.Do(req)
-			gomega.Expect(err).To(gomega.HaveOccurred())
+			Expect(err).To(HaveOccurred())
 			req, err = runtime.NewRequest(context.Background(), http.MethodPut, "http://localhost:8080")
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			_, err = pipeline.Do(req)
-			gomega.Expect(err).To(gomega.HaveOccurred())
+			Expect(err).To(HaveOccurred())
 			throttlePolicy.RetryAfterWriter = time.Now().Add(-time.Second * 10)
 			req, err = runtime.NewRequest(context.Background(), http.MethodPut, "http://localhost:8080")
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			err = req.SetBody(streaming.NopCloser(strings.NewReader(`{"etag":"etag"}`)), "application/json")
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 			_, err = pipeline.Do(req)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
