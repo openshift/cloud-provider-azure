@@ -22,8 +22,8 @@ import (
 	"strings"
 
 	armprivatedns "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var beforeAllFunc func(context.Context)
@@ -31,49 +31,48 @@ var afterAllFunc func(context.Context)
 var additionalTestCases func()
 var newResource *armprivatedns.VirtualNetworkLink = &armprivatedns.VirtualNetworkLink{}
 
-var _ = ginkgo.Describe("VirtualNetworkLinksClient", ginkgo.Ordered, func() {
+var _ = Describe("VirtualNetworkLinksClient", Ordered, func() {
 
 	if beforeAllFunc != nil {
-		ginkgo.BeforeAll(beforeAllFunc)
+		BeforeAll(beforeAllFunc)
 	}
 
 	if additionalTestCases != nil {
 		additionalTestCases()
 	}
 
-	ginkgo.When("creation requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("creation requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			newResource, err := realClient.CreateOrUpdate(ctx, resourceGroupName, parentResourceName, resourceName, *newResource)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(newResource).NotTo(gomega.BeNil())
-			gomega.Expect(strings.EqualFold(*newResource.Name, resourceName)).To(gomega.BeTrue())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newResource).NotTo(BeNil())
+			Expect(strings.EqualFold(*newResource.Name, resourceName)).To(BeTrue())
 		})
 	})
 
-	ginkgo.When("get requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("get requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, parentResourceName, resourceName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(newResource).NotTo(gomega.BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newResource).NotTo(BeNil())
 		})
 	})
-	ginkgo.When("invalid get requests are raised", func() {
-		ginkgo.It("should return 404 error", func(ctx context.Context) {
+	When("invalid get requests are raised", func() {
+		It("should return 404 error", func(ctx context.Context) {
 			newResource, err := realClient.Get(ctx, resourceGroupName, parentResourceName, resourceName+"notfound")
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			gomega.Expect(newResource).To(gomega.BeNil())
+			Expect(err).To(HaveOccurred())
+			Expect(newResource).To(BeNil())
 		})
 	})
 
-	ginkgo.When("update requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("update requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			newResource, err := realClient.CreateOrUpdate(ctx, resourceGroupName, parentResourceName, resourceName, *newResource)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(newResource).NotTo(gomega.BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newResource).NotTo(BeNil())
 		})
 	})
-
 	if afterAllFunc != nil {
-		ginkgo.AfterAll(afterAllFunc)
+		AfterAll(afterAllFunc)
 	}
 })

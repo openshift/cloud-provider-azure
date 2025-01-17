@@ -30,10 +30,18 @@ import (
 )
 
 type AuthProvider struct {
-	ComputeCredential     azcore.TokenCredential
-	NetworkCredential     azcore.TokenCredential
+	FederatedIdentityCredential azcore.TokenCredential
+
+	ManagedIdentityCredential   azcore.TokenCredential
+	ClientSecretCredential      azcore.TokenCredential
+	ClientCertificateCredential azcore.TokenCredential
+
+	NetworkTokenCredential        azcore.TokenCredential
+	NetworkClientSecretCredential azcore.TokenCredential
+
 	MultiTenantCredential azcore.TokenCredential
-	CloudConfig           cloud.Configuration
+
+	ClientOptions *policy.ClientOptions
 }
 
 func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, clientOptionsMutFn ...func(option *policy.ClientOptions)) (*AuthProvider, error) {
@@ -43,20 +51,11 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 	}
 	for _, fn := range clientOptionsMutFn {
 		fn(clientOption)
-		if clientOption == nil {
-			clientOption, err = GetAzCoreClientOption(armConfig)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
-	var computeCredential azcore.TokenCredential
-	var networkTokenCredential azcore.TokenCredential
-	var multiTenantCredential azcore.TokenCredential
-
 	// federatedIdentityCredential is used for workload identity federation
+	var federatedIdentityCredential azcore.TokenCredential
 	if aadFederatedTokenFile, enabled := config.GetAzureFederatedTokenFile(); enabled {
-		computeCredential, err = azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
+		federatedIdentityCredential, err = azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
 			ClientOptions: *clientOption,
 			ClientID:      config.GetAADClientID(),
 			TenantID:      armConfig.GetTenantID(),
@@ -66,8 +65,10 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 			return nil, err
 		}
 	}
+
 	// managedIdentityCredential is used for managed identity extension
-	if computeCredential == nil && config.UseManagedIdentityExtension {
+	var managedIdentityCredential azcore.TokenCredential
+	if config.UseManagedIdentityExtension {
 		credOptions := &azidentity.ManagedIdentityCredentialOptions{
 			ClientOptions: *clientOption,
 		}
@@ -78,26 +79,35 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 				credOptions.ID = azidentity.ClientID(config.UserAssignedIdentityID)
 			}
 		}
-		computeCredential, err = azidentity.NewManagedIdentityCredential(credOptions)
+		managedIdentityCredential, err = azidentity.NewManagedIdentityCredential(credOptions)
 		if err != nil {
 			return nil, err
 		}
-		if config.AuxiliaryTokenProvider != nil && IsMultiTenant(armConfig) {
-			networkTokenCredential, err = armauth.NewKeyVaultCredential(
-				computeCredential,
-				config.AuxiliaryTokenProvider.SecretResourceID(),
-			)
-			if err != nil {
-				return nil, fmt.Errorf("create KeyVaultCredential for auxiliary token provider: %w", err)
-			}
+		managedIdentityCredential = armauth.NewExpireEarlyTokenWrapper(managedIdentityCredential)
+	}
+
+	var (
+		networkTokenCredential azcore.TokenCredential
+	)
+	if config.UseManagedIdentityExtension && config.AuxiliaryTokenProvider != nil && IsMultiTenant(armConfig) {
+		networkTokenCredential, err = armauth.NewKeyVaultCredential(
+			managedIdentityCredential,
+			config.AuxiliaryTokenProvider.SecretResourceID(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create KeyVaultCredential for auxiliary token provider: %w", err)
 		}
 	}
 
-	if computeCredential == nil && len(config.GetAADClientSecret()) > 0 {
+	// ClientSecretCredential is used for client secret
+	var clientSecretCredential azcore.TokenCredential
+	var networkClientSecretCredential azcore.TokenCredential
+	var multiTenantCredential azcore.TokenCredential
+	if len(config.GetAADClientSecret()) > 0 {
 		credOptions := &azidentity.ClientSecretCredentialOptions{
 			ClientOptions: *clientOption,
 		}
-		computeCredential, err = azidentity.NewClientSecretCredential(armConfig.GetTenantID(), config.GetAADClientID(), config.GetAADClientSecret(), credOptions)
+		clientSecretCredential, err = azidentity.NewClientSecretCredential(armConfig.GetTenantID(), config.GetAADClientID(), config.GetAADClientSecret(), credOptions)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +115,7 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 			credOptions := &azidentity.ClientSecretCredentialOptions{
 				ClientOptions: *clientOption,
 			}
-			networkTokenCredential, err = azidentity.NewClientSecretCredential(armConfig.NetworkResourceTenantID, config.GetAADClientID(), config.AADClientSecret, credOptions)
+			networkClientSecretCredential, err = azidentity.NewClientSecretCredential(armConfig.NetworkResourceTenantID, config.GetAADClientID(), config.AADClientSecret, credOptions)
 			if err != nil {
 				return nil, err
 			}
@@ -123,7 +133,8 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 	}
 
 	// ClientCertificateCredential is used for client certificate
-	if computeCredential == nil && len(config.AADClientCertPath) > 0 {
+	var clientCertificateCredential azcore.TokenCredential
+	if len(config.AADClientCertPath) > 0 {
 		credOptions := &azidentity.ClientCertificateCredentialOptions{
 			ClientOptions:        *clientOption,
 			SendCertificateChain: true,
@@ -136,12 +147,12 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 		if err != nil {
 			return nil, fmt.Errorf("decoding the client certificate: %w", err)
 		}
-		computeCredential, err = azidentity.NewClientCertificateCredential(armConfig.GetTenantID(), config.GetAADClientID(), certificate, privateKey, credOptions)
+		clientCertificateCredential, err = azidentity.NewClientCertificateCredential(armConfig.GetTenantID(), config.GetAADClientID(), certificate, privateKey, credOptions)
 		if err != nil {
 			return nil, err
 		}
 		if IsMultiTenant(armConfig) {
-			networkTokenCredential, err = azidentity.NewClientCertificateCredential(armConfig.NetworkResourceTenantID, config.GetAADClientID(), certificate, privateKey, credOptions)
+			networkClientSecretCredential, err = azidentity.NewClientCertificateCredential(armConfig.NetworkResourceTenantID, config.GetAADClientID(), certificate, privateKey, credOptions)
 			if err != nil {
 				return nil, err
 			}
@@ -157,29 +168,48 @@ func NewAuthProvider(armConfig *ARMClientConfig, config *AzureAuthConfig, client
 	}
 
 	return &AuthProvider{
-		ComputeCredential:     computeCredential,
-		NetworkCredential:     networkTokenCredential,
-		MultiTenantCredential: multiTenantCredential,
-		CloudConfig:           clientOption.Cloud,
+		FederatedIdentityCredential:   federatedIdentityCredential,
+		ManagedIdentityCredential:     managedIdentityCredential,
+		ClientSecretCredential:        clientSecretCredential,
+		ClientCertificateCredential:   clientCertificateCredential,
+		NetworkClientSecretCredential: networkClientSecretCredential,
+		NetworkTokenCredential:        networkTokenCredential,
+		MultiTenantCredential:         multiTenantCredential,
+
+		ClientOptions: clientOption,
 	}, nil
 }
 
 func (factory *AuthProvider) GetAzIdentity() azcore.TokenCredential {
-	return factory.ComputeCredential
+	switch true {
+	case factory.FederatedIdentityCredential != nil:
+		return factory.FederatedIdentityCredential
+	case factory.ManagedIdentityCredential != nil:
+		return factory.ManagedIdentityCredential
+	case factory.ClientSecretCredential != nil:
+		return factory.ClientSecretCredential
+	case factory.ClientCertificateCredential != nil:
+		return factory.ClientCertificateCredential
+	default:
+		return nil
+	}
 }
 
 func (factory *AuthProvider) GetNetworkAzIdentity() azcore.TokenCredential {
-	if factory.NetworkCredential != nil {
-		return factory.NetworkCredential
+	if factory.NetworkClientSecretCredential != nil {
+		return factory.NetworkClientSecretCredential
 	}
-	return factory.ComputeCredential
+	if factory.NetworkTokenCredential != nil {
+		return factory.NetworkTokenCredential
+	}
+	return nil
 }
 
 func (factory *AuthProvider) GetMultiTenantIdentity() azcore.TokenCredential {
 	if factory.MultiTenantCredential != nil {
 		return factory.MultiTenantCredential
 	}
-	return factory.ComputeCredential
+	return nil
 }
 
 func (factory *AuthProvider) IsMultiTenantModeEnabled() bool {
@@ -187,6 +217,6 @@ func (factory *AuthProvider) IsMultiTenantModeEnabled() bool {
 }
 
 func (factory *AuthProvider) DefaultTokenScope() string {
-	audience := factory.CloudConfig.Services[cloud.ResourceManager].Audience
+	audience := factory.ClientOptions.Cloud.Services[cloud.ResourceManager].Audience
 	return fmt.Sprintf("%s/.default", strings.TrimRight(audience, "/"))
 }

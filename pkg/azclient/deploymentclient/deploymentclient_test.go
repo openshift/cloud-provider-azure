@@ -20,32 +20,31 @@ package deploymentclient
 import (
 	"context"
 
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 var beforeAllFunc func(context.Context)
 var afterAllFunc func(context.Context)
 var additionalTestCases func()
 
-var _ = ginkgo.Describe("DeploymentsClient", ginkgo.Ordered, func() {
+var _ = Describe("DeploymentsClient", Ordered, func() {
 
 	if beforeAllFunc != nil {
-		ginkgo.BeforeAll(beforeAllFunc)
+		BeforeAll(beforeAllFunc)
 	}
 
 	if additionalTestCases != nil {
 		additionalTestCases()
 	}
 
-	ginkgo.When("deletion requests are raised", func() {
-		ginkgo.It("should not return error", func(ctx context.Context) {
+	When("deletion requests are raised", func() {
+		It("should not return error", func(ctx context.Context) {
 			err = realClient.Delete(ctx, resourceGroupName, resourceName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
-
 	if afterAllFunc != nil {
-		ginkgo.AfterAll(afterAllFunc)
+		AfterAll(afterAllFunc)
 	}
 })

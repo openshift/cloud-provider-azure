@@ -28,8 +28,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	armcompute "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
-	armcontainerservice "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v6"
+	armcontainerservice "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/gomega"
 )
 
@@ -67,8 +66,7 @@ func init() {
 					{
 						Name:   to.Ptr("agentpool1"),
 						Count:  to.Ptr[int32](3),
-						VMSize: to.Ptr(string(armcompute.VirtualMachineSizeTypesStandardD2SV3)),
-						Mode:   to.Ptr(armcontainerservice.AgentPoolModeSystem),
+						VMSize: to.Ptr("Standard_DS2_v2"),
 					},
 				},
 				DNSPrefix: to.Ptr(resourceGroupName + resourceName + "dnsPrefix"),

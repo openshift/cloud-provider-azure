@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,7 +35,6 @@ import (
 
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/mock_azclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/privatezoneclient/mock_privatezoneclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient/mock_virtualnetworklinkclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/blobclient/mockblobclient"
@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/subnetclient/mocksubnetclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
+	"sigs.k8s.io/cloud-provider-azure/pkg/util/lockmap"
 )
 
 const TestLocation = "testLocation"
@@ -395,14 +396,16 @@ func TestEnsureStorageAccount(t *testing.T) {
 	cloud.Location = location
 	cloud.SubscriptionID = "testSub"
 
-	name := "testStorageAccount"
 	sku := &storage.Sku{
 		Name: "testSku",
 		Tier: "testSkuTier",
 	}
 	testStorageAccounts :=
 		[]storage.Account{
-			{Name: &name, Kind: "kind", Location: &location, Sku: sku, AccountProperties: &storage.AccountProperties{NetworkRuleSet: &storage.NetworkRuleSet{}}}}
+			{Name: ptr.To("testStorageAccount"), Kind: "kind", Location: &location, Sku: sku, AccountProperties: &storage.AccountProperties{NetworkRuleSet: &storage.NetworkRuleSet{}}},
+			{Name: ptr.To("wantedAccount"), Kind: "kind", Location: &location, Sku: sku, AccountProperties: &storage.AccountProperties{NetworkRuleSet: &storage.NetworkRuleSet{}}},
+			{Name: ptr.To("otherAccount"), Kind: "kind", Location: &location, Sku: sku, AccountProperties: &storage.AccountProperties{NetworkRuleSet: &storage.NetworkRuleSet{}}},
+		}
 
 	value := "foo bar"
 	storageAccountListKeys := storage.AccountListKeysResult{
@@ -423,10 +426,12 @@ func TestEnsureStorageAccount(t *testing.T) {
 		storageType                     StorageType
 		requireInfrastructureEncryption *bool
 		keyVaultURL                     *string
+		sourceAccountName               string
 		accountName                     string
 		subscriptionID                  string
 		resourceGroup                   string
 		expectedErr                     string
+		expectedAccountName             string
 	}{
 		{
 			name:                            "[Success] EnsureStorageAccount with createPrivateEndpoint and storagetype blob",
@@ -454,6 +459,16 @@ func TestEnsureStorageAccount(t *testing.T) {
 			resourceGroup:                   "rg",
 			accessTier:                      "AccessTierHot",
 			accountName:                     "",
+			expectedErr:                     "",
+		},
+		{
+			name:                            "[Success] EnsureStorageAccount returns with source account",
+			mockStorageAccountsClient:       true,
+			setAccountOptions:               true,
+			requireInfrastructureEncryption: ptr.To(true),
+			resourceGroup:                   "rg",
+			sourceAccountName:               "wantedAccount",
+			accountName:                     "wantedAccount",
 			expectedErr:                     "",
 		},
 		{
@@ -522,11 +537,9 @@ func TestEnsureStorageAccount(t *testing.T) {
 			mockSubnetsClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, vnetName, subnetName, gomock.Any()).Return(nil).Times(1)
 			cloud.SubnetsClient = mockSubnetsClient
 
-			computeClientFactory := mock_azclient.NewMockClientFactory(ctrl)
-			mockPrivateDNSClient := mock_privatezoneclient.NewMockInterface(ctrl)
+			mockPrivateDNSClient := cloud.ComputeClientFactory.GetPrivateZoneClient().(*mock_privatezoneclient.MockInterface)
 			mockPrivateDNSClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any()).Return(&privatedns.PrivateZone{}, errors.New("ResourceNotFound")).Times(1)
 			mockPrivateDNSClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
-			computeClientFactory.EXPECT().GetPrivateZoneClient().Return(mockPrivateDNSClient).AnyTimes()
 
 			mockPrivateDNSZoneGroup := mockprivatednszonegroupclient.NewMockInterface(ctrl)
 			mockPrivateDNSZoneGroup.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any(), "", false).Return(nil).Times(1)
@@ -534,11 +547,13 @@ func TestEnsureStorageAccount(t *testing.T) {
 			mockPrivateEndpointClient := mockprivateendpointclient.NewMockInterface(ctrl)
 			mockPrivateEndpointClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), "", true).Return(nil).Times(1)
 			cloud.privateendpointclient = mockPrivateEndpointClient
-			mockVirtualNetworkLinksClient := mock_virtualnetworklinkclient.NewMockInterface(ctrl)
+			mockVirtualNetworkLinksClient := cloud.ComputeClientFactory.GetVirtualNetworkLinkClient().(*mock_virtualnetworklinkclient.MockInterface)
 			mockVirtualNetworkLinksClient.EXPECT().Get(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any()).Return(&privatedns.VirtualNetworkLink{}, errors.New("ResourceNotFound")).Times(1)
 			mockVirtualNetworkLinksClient.EXPECT().CreateOrUpdate(gomock.Any(), vnetResourceGroup, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(1)
-			computeClientFactory.EXPECT().GetVirtualNetworkLinkClient().Return(mockVirtualNetworkLinksClient).AnyTimes()
-			cloud.ComputeClientFactory = computeClientFactory
+		}
+
+		if test.sourceAccountName != "" {
+			mockStorageAccountsClient.EXPECT().ListKeys(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(storageAccountListKeys, nil).AnyTimes()
 		}
 
 		var testAccountOptions *AccountOptions
@@ -555,10 +570,14 @@ func TestEnsureStorageAccount(t *testing.T) {
 				SoftDeleteBlobs:           7,
 				SoftDeleteContainers:      7,
 				PickRandomMatchingAccount: test.pickRandomMatchingAccount,
+				SourceAccountName:         test.sourceAccountName,
 			}
 		}
 
-		_, _, err := cloud.EnsureStorageAccount(ctx, testAccountOptions, "test")
+		accountName, _, err := cloud.EnsureStorageAccount(ctx, testAccountOptions, "test")
+		if test.expectedAccountName != "" {
+			assert.Equal(t, accountName, test.expectedAccountName, test.name)
+		}
 		assert.Equal(t, err == nil, test.expectedErr == "", fmt.Sprintf("returned error: %v", err), test.name)
 		if test.expectedErr != "" {
 			assert.Equal(t, err != nil, strings.Contains(err.Error(), test.expectedErr), err.Error(), test.name)
@@ -609,7 +628,7 @@ func TestGetStorageAccountWithCache(t *testing.T) {
 		}
 
 		if test.setStorageAccountCache {
-			getter := func(_ string) (interface{}, error) { return nil, nil }
+			getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 			cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 		}
 
@@ -664,7 +683,7 @@ func TestGetFileServicePropertiesCache(t *testing.T) {
 			mockFileClient.EXPECT().GetServiceProperties(gomock.Any(), gomock.Any(), gomock.Any()).Return(storage.FileServiceProperties{}, nil).AnyTimes()
 		}
 		if test.setFileServicePropertiesCache {
-			getter := func(_ string) (interface{}, error) { return nil, nil }
+			getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 			cloud.fileServicePropertiesCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 		}
 
@@ -684,7 +703,7 @@ func TestAddStorageAccountTags(t *testing.T) {
 	defer cancel()
 
 	cloud := &Cloud{}
-	cloud.lockMap = newLockMap()
+	cloud.lockMap = lockmap.NewLockMap()
 	tests := []struct {
 		name           string
 		subsID         string
@@ -714,7 +733,7 @@ func TestAddStorageAccountTags(t *testing.T) {
 		},
 	}
 
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 	cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
 
 	for _, test := range tests {
@@ -786,9 +805,9 @@ func TestRemoveStorageAccountTags(t *testing.T) {
 		},
 	}
 
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 	cloud.storageAccountCache, _ = cache.NewTimedCache(time.Minute, getter, false)
-	cloud.lockMap = newLockMap()
+	cloud.lockMap = lockmap.NewLockMap()
 	for _, test := range tests {
 		mockStorageAccountsClient := mockstorageaccountclient.NewMockInterface(ctrl)
 		cloud.StorageAccountClient = mockStorageAccountsClient
@@ -1559,7 +1578,7 @@ func TestIsMultichannelEnabledEqual(t *testing.T) {
 	accountName := "account2"
 
 	cloud := GetTestCloud(ctrl)
-	getter := func(_ string) (interface{}, error) { return nil, nil }
+	getter := func(_ context.Context, _ string) (interface{}, error) { return nil, nil }
 
 	multichannelEnabled := storage.FileServiceProperties{
 		FileServicePropertiesProperties: &storage.FileServicePropertiesProperties{
