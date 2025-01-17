@@ -30,8 +30,6 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
-const AzureStackCloudAPIVersion = "2019-07-01"
-
 type Client struct {
 	*armprivatedns.PrivateZonesClient
 	subscriptionID string
@@ -58,13 +56,13 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "PrivateZonesClient.Get"
 
 // Get gets the PrivateZone
-func (client *Client) Get(ctx context.Context, resourceGroupName string, privatezoneName string) (result *armprivatedns.PrivateZone, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, resourceName string) (result *armprivatedns.PrivateZone, err error) {
 
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PrivateZone", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.PrivateZonesClient.Get(ctx, resourceGroupName, privatezoneName, nil)
+	resp, err := client.PrivateZonesClient.Get(ctx, resourceGroupName, resourceName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +73,12 @@ func (client *Client) Get(ctx context.Context, resourceGroupName string, private
 const CreateOrUpdateOperationName = "PrivateZonesClient.Create"
 
 // CreateOrUpdate creates or updates a PrivateZone.
-func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, privatezoneName string, resource armprivatedns.PrivateZone) (result *armprivatedns.PrivateZone, err error) {
+func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, resourceName string, resource armprivatedns.PrivateZone) (result *armprivatedns.PrivateZone, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PrivateZone", "create_or_update")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, CreateOrUpdateOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := utils.NewPollerWrapper(client.PrivateZonesClient.BeginCreateOrUpdate(ctx, resourceGroupName, privatezoneName, resource, nil)).WaitforPollerResp(ctx)
+	resp, err := utils.NewPollerWrapper(client.PrivateZonesClient.BeginCreateOrUpdate(ctx, resourceGroupName, resourceName, resource, nil)).WaitforPollerResp(ctx)
 	if err != nil {
 		return nil, err
 	}

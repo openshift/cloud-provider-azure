@@ -24,7 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/tracing"
-	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/metrics"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
@@ -56,16 +56,16 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "IPGroupsClient.Get"
 
 // Get gets the IPGroup
-func (client *Client) Get(ctx context.Context, resourceGroupName string, ipgroupName string, expand *string) (result *armnetwork.IPGroup, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, resourceName string, expand *string) (result *armnetwork.IPGroup, err error) {
 	var ops *armnetwork.IPGroupsClientGetOptions
 	if expand != nil {
 		ops = &armnetwork.IPGroupsClientGetOptions{Expand: expand}
 	}
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "IPGroup", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.IPGroupsClient.Get(ctx, resourceGroupName, ipgroupName, ops)
+	resp, err := client.IPGroupsClient.Get(ctx, resourceGroupName, resourceName, ops)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +76,12 @@ func (client *Client) Get(ctx context.Context, resourceGroupName string, ipgroup
 const CreateOrUpdateOperationName = "IPGroupsClient.Create"
 
 // CreateOrUpdate creates or updates a IPGroup.
-func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, ipgroupName string, resource armnetwork.IPGroup) (result *armnetwork.IPGroup, err error) {
+func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, resourceName string, resource armnetwork.IPGroup) (result *armnetwork.IPGroup, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "IPGroup", "create_or_update")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, CreateOrUpdateOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := utils.NewPollerWrapper(client.IPGroupsClient.BeginCreateOrUpdate(ctx, resourceGroupName, ipgroupName, resource, nil)).WaitforPollerResp(ctx)
+	resp, err := utils.NewPollerWrapper(client.IPGroupsClient.BeginCreateOrUpdate(ctx, resourceGroupName, resourceName, resource, nil)).WaitforPollerResp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,12 @@ func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName stri
 const DeleteOperationName = "IPGroupsClient.Delete"
 
 // Delete deletes a IPGroup by name.
-func (client *Client) Delete(ctx context.Context, resourceGroupName string, ipgroupName string) (err error) {
+func (client *Client) Delete(ctx context.Context, resourceGroupName string, resourceName string) (err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "IPGroup", "delete")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, DeleteOperationName, client.tracer, nil)
 	defer endSpan(err)
-	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, ipgroupName, nil)).WaitforPollerResp(ctx)
+	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, resourceName, nil)).WaitforPollerResp(ctx)
 	return err
 }
 
@@ -108,7 +108,7 @@ const ListOperationName = "IPGroupsClient.List"
 // List gets a list of IPGroup in the resource group.
 func (client *Client) List(ctx context.Context, resourceGroupName string) (result []*armnetwork.IPGroup, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "IPGroup", "list")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, ListOperationName, client.tracer, nil)
 	defer endSpan(err)
 	pager := client.IPGroupsClient.NewListByResourceGroupPager(resourceGroupName, nil)

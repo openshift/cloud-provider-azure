@@ -56,13 +56,13 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "VaultsClient.Get"
 
 // Get gets the Vault
-func (client *Client) Get(ctx context.Context, resourceGroupName string, vaultName string) (result *armkeyvault.Vault, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, resourceName string) (result *armkeyvault.Vault, err error) {
 
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Vault", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.VaultsClient.Get(ctx, resourceGroupName, vaultName, nil)
+	resp, err := client.VaultsClient.Get(ctx, resourceGroupName, resourceName, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ const ListOperationName = "VaultsClient.List"
 // List gets a list of Vault in the resource group.
 func (client *Client) List(ctx context.Context, resourceGroupName string) (result []*armkeyvault.Vault, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Vault", "list")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, ListOperationName, client.tracer, nil)
 	defer endSpan(err)
 	pager := client.VaultsClient.NewListByResourceGroupPager(resourceGroupName, nil)

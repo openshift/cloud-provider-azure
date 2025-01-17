@@ -24,13 +24,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/tracing"
-	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/metrics"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
-
-const AzureStackCloudAPIVersion = "2018-11-01"
 
 type Client struct {
 	*armnetwork.SubnetsClient
@@ -58,16 +56,16 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "SubnetsClient.Get"
 
 // Get gets the Subnet
-func (client *Client) Get(ctx context.Context, resourceGroupName string, virtualnetworkName string, subnetName string, expand *string) (result *armnetwork.Subnet, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, parentResourceName string, resourceName string, expand *string) (result *armnetwork.Subnet, err error) {
 	var ops *armnetwork.SubnetsClientGetOptions
 	if expand != nil {
 		ops = &armnetwork.SubnetsClientGetOptions{Expand: expand}
 	}
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Subnet", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.SubnetsClient.Get(ctx, resourceGroupName, virtualnetworkName, subnetName, ops)
+	resp, err := client.SubnetsClient.Get(ctx, resourceGroupName, parentResourceName, resourceName, ops)
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +76,12 @@ func (client *Client) Get(ctx context.Context, resourceGroupName string, virtual
 const CreateOrUpdateOperationName = "SubnetsClient.Create"
 
 // CreateOrUpdate creates or updates a Subnet.
-func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, virtualnetworkName string, subnetName string, resource armnetwork.Subnet) (result *armnetwork.Subnet, err error) {
+func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, resourceName string, parentResourceName string, resource armnetwork.Subnet) (result *armnetwork.Subnet, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Subnet", "create_or_update")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, CreateOrUpdateOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := utils.NewPollerWrapper(client.SubnetsClient.BeginCreateOrUpdate(ctx, resourceGroupName, virtualnetworkName, subnetName, resource, nil)).WaitforPollerResp(ctx)
+	resp, err := utils.NewPollerWrapper(client.SubnetsClient.BeginCreateOrUpdate(ctx, resourceGroupName, resourceName, parentResourceName, resource, nil)).WaitforPollerResp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -96,24 +94,24 @@ func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName stri
 const DeleteOperationName = "SubnetsClient.Delete"
 
 // Delete deletes a Subnet by name.
-func (client *Client) Delete(ctx context.Context, resourceGroupName string, virtualnetworkName string, subnetName string) (err error) {
+func (client *Client) Delete(ctx context.Context, resourceGroupName string, parentResourceName string, resourceName string) (err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Subnet", "delete")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, DeleteOperationName, client.tracer, nil)
 	defer endSpan(err)
-	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, virtualnetworkName, subnetName, nil)).WaitforPollerResp(ctx)
+	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, parentResourceName, resourceName, nil)).WaitforPollerResp(ctx)
 	return err
 }
 
 const ListOperationName = "SubnetsClient.List"
 
 // List gets a list of Subnet in the resource group.
-func (client *Client) List(ctx context.Context, resourceGroupName string, virtualnetworkName string) (result []*armnetwork.Subnet, err error) {
+func (client *Client) List(ctx context.Context, resourceGroupName string, parentResourceName string) (result []*armnetwork.Subnet, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Subnet", "list")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, ListOperationName, client.tracer, nil)
 	defer endSpan(err)
-	pager := client.SubnetsClient.NewListPager(resourceGroupName, virtualnetworkName, nil)
+	pager := client.SubnetsClient.NewListPager(resourceGroupName, parentResourceName, nil)
 	for pager.More() {
 		nextResult, err := pager.NextPage(ctx)
 		if err != nil {

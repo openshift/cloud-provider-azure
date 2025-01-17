@@ -19,11 +19,9 @@ package azclient
 import (
 	"os"
 	"strings"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/useragent"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
@@ -39,16 +37,6 @@ type ARMClientConfig struct {
 	TenantID string `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
 	// The AAD Tenant ID for the Subscription that the network resources are deployed in.
 	NetworkResourceTenantID string `json:"networkResourceTenantID,omitempty" yaml:"networkResourceTenantID,omitempty"`
-	// Enable exponential backoff to manage resource request retries
-	CloudProviderBackoff bool `json:"cloudProviderBackoff,omitempty" yaml:"cloudProviderBackoff,omitempty"`
-	// Backoff retry limit
-	CloudProviderBackoffRetries int32 `json:"cloudProviderBackoffRetries,omitempty" yaml:"cloudProviderBackoffRetries,omitempty"`
-	// Backoff duration
-	CloudProviderBackoffDuration int `json:"cloudProviderBackoffDuration,omitempty" yaml:"cloudProviderBackoffDuration,omitempty"`
-	// DisableAzureStackCloud disables AzureStackCloud support. It should be used
-	// when setting AzureAuthConfig.Cloud with "AZURESTACKCLOUD" to customize ARM endpoints
-	// while the cluster is not running on AzureStack.
-	DisableAzureStackCloud bool `json:"disableAzureStackCloud,omitempty" yaml:"disableAzureStackCloud,omitempty"`
 }
 
 func (config *ARMClientConfig) GetTenantID() string {
@@ -59,30 +47,20 @@ func (config *ARMClientConfig) GetTenantID() string {
 	return config.TenantID
 }
 
-func GetAzCoreClientOption(armConfig *ARMClientConfig) (*policy.ClientOptions, *Environment, error) {
-	var env *Environment
-	var err error
+func GetAzCoreClientOption(armConfig *ARMClientConfig) (*policy.ClientOptions, error) {
 	//Get default settings
-	clientConfig := utils.GetDefaultAzCoreClientOption()
+	azCoreClientConfig := utils.GetDefaultAzCoreClientOption()
 	if armConfig != nil {
 		//update user agent header
-		if userAgent := strings.TrimSpace(armConfig.UserAgent); userAgent != "" {
-			clientConfig.Telemetry.Disabled = true
-			clientConfig.PerCallPolicies = append(clientConfig.PerCallPolicies, useragent.NewCustomUserAgentPolicy(userAgent))
-		}
+		azCoreClientConfig.Telemetry.ApplicationID = strings.TrimSpace(armConfig.UserAgent)
 		//set cloud
-		clientConfig.Cloud, env, err = GetAzureCloudConfigAndEnvConfig(armConfig)
+		cloudConfig, err := GetAzureCloudConfig(armConfig)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		if armConfig.CloudProviderBackoff && armConfig.CloudProviderBackoffDuration > 0 {
-			clientConfig.Retry.RetryDelay = time.Duration(armConfig.CloudProviderBackoffDuration) * time.Second
-		}
-		if armConfig.CloudProviderBackoff && armConfig.CloudProviderBackoffRetries > 0 {
-			clientConfig.Retry.MaxRetries = armConfig.CloudProviderBackoffRetries
-		}
+		azCoreClientConfig.Cloud = *cloudConfig
 	}
-	return &clientConfig, env, nil
+	return &azCoreClientConfig, nil
 }
 
 func IsMultiTenant(armConfig *ARMClientConfig) bool {

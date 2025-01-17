@@ -30,8 +30,6 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
-const AzureStackCloudAPIVersion = "2019-06-01"
-
 type Client struct {
 	*armstorage.BlobContainersClient
 	subscriptionID string
@@ -58,13 +56,13 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "BlobContainersClient.Get"
 
 // Get gets the BlobContainer
-func (client *Client) Get(ctx context.Context, resourceGroupName string, accountName string, blobcontainerName string) (result *armstorage.BlobContainer, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, parentResourceName string, resourceName string) (result *armstorage.BlobContainer, err error) {
 
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "BlobContainer", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.BlobContainersClient.Get(ctx, resourceGroupName, accountName, blobcontainerName, nil)
+	resp, err := client.BlobContainersClient.Get(ctx, resourceGroupName, parentResourceName, resourceName, nil)
 	if err != nil {
 		return nil, err
 	}

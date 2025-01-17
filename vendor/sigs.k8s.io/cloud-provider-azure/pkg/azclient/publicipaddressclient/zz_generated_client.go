@@ -24,14 +24,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/tracing"
-	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
+	armnetwork "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/metrics"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/etag"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
-
-const AzureStackCloudAPIVersion = "2018-11-01"
 
 type Client struct {
 	*armnetwork.PublicIPAddressesClient
@@ -45,7 +42,6 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 	}
 	tr := options.TracingProvider.NewTracer(utils.ModuleName, utils.ModuleVersion)
 
-	options.ClientOptions.PerCallPolicies = append(options.ClientOptions.PerCallPolicies, utils.FuncPolicyWrapper(etag.AppendEtag))
 	client, err := armnetwork.NewPublicIPAddressesClient(subscriptionID, credential, options)
 	if err != nil {
 		return nil, err
@@ -60,16 +56,16 @@ func New(subscriptionID string, credential azcore.TokenCredential, options *arm.
 const GetOperationName = "PublicIPAddressesClient.Get"
 
 // Get gets the PublicIPAddress
-func (client *Client) Get(ctx context.Context, resourceGroupName string, publicipaddressName string, expand *string) (result *armnetwork.PublicIPAddress, err error) {
+func (client *Client) Get(ctx context.Context, resourceGroupName string, resourceName string, expand *string) (result *armnetwork.PublicIPAddress, err error) {
 	var ops *armnetwork.PublicIPAddressesClientGetOptions
 	if expand != nil {
 		ops = &armnetwork.PublicIPAddressesClientGetOptions{Expand: expand}
 	}
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PublicIPAddress", "get")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, GetOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := client.PublicIPAddressesClient.Get(ctx, resourceGroupName, publicipaddressName, ops)
+	resp, err := client.PublicIPAddressesClient.Get(ctx, resourceGroupName, resourceName, ops)
 	if err != nil {
 		return nil, err
 	}
@@ -80,12 +76,12 @@ func (client *Client) Get(ctx context.Context, resourceGroupName string, publici
 const CreateOrUpdateOperationName = "PublicIPAddressesClient.Create"
 
 // CreateOrUpdate creates or updates a PublicIPAddress.
-func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, publicipaddressName string, resource armnetwork.PublicIPAddress) (result *armnetwork.PublicIPAddress, err error) {
+func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName string, resourceName string, resource armnetwork.PublicIPAddress) (result *armnetwork.PublicIPAddress, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PublicIPAddress", "create_or_update")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, CreateOrUpdateOperationName, client.tracer, nil)
 	defer endSpan(err)
-	resp, err := utils.NewPollerWrapper(client.PublicIPAddressesClient.BeginCreateOrUpdate(ctx, resourceGroupName, publicipaddressName, resource, nil)).WaitforPollerResp(ctx)
+	resp, err := utils.NewPollerWrapper(client.PublicIPAddressesClient.BeginCreateOrUpdate(ctx, resourceGroupName, resourceName, resource, nil)).WaitforPollerResp(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -98,12 +94,12 @@ func (client *Client) CreateOrUpdate(ctx context.Context, resourceGroupName stri
 const DeleteOperationName = "PublicIPAddressesClient.Delete"
 
 // Delete deletes a PublicIPAddress by name.
-func (client *Client) Delete(ctx context.Context, resourceGroupName string, publicipaddressName string) (err error) {
+func (client *Client) Delete(ctx context.Context, resourceGroupName string, resourceName string) (err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PublicIPAddress", "delete")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, DeleteOperationName, client.tracer, nil)
 	defer endSpan(err)
-	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, publicipaddressName, nil)).WaitforPollerResp(ctx)
+	_, err = utils.NewPollerWrapper(client.BeginDelete(ctx, resourceGroupName, resourceName, nil)).WaitforPollerResp(ctx)
 	return err
 }
 
@@ -112,7 +108,7 @@ const ListOperationName = "PublicIPAddressesClient.List"
 // List gets a list of PublicIPAddress in the resource group.
 func (client *Client) List(ctx context.Context, resourceGroupName string) (result []*armnetwork.PublicIPAddress, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "PublicIPAddress", "list")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, ListOperationName, client.tracer, nil)
 	defer endSpan(err)
 	pager := client.PublicIPAddressesClient.NewListPager(resourceGroupName, nil)

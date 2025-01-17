@@ -30,8 +30,6 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
-const AzureStackCloudAPIVersion = "2018-02-01"
-
 type Client struct {
 	*armstorage.AccountsClient
 	subscriptionID string
@@ -60,7 +58,7 @@ const ListOperationName = "AccountsClient.List"
 // List gets a list of Account in the resource group.
 func (client *Client) List(ctx context.Context, resourceGroupName string) (result []*armstorage.Account, err error) {
 	metricsCtx := metrics.BeginARMRequest(client.subscriptionID, resourceGroupName, "Account", "list")
-	defer func() { metricsCtx.Observe(ctx, err) }()
+	defer metricsCtx.Observe(ctx, err)
 	ctx, endSpan := runtime.StartSpan(ctx, ListOperationName, client.tracer, nil)
 	defer endSpan(err)
 	pager := client.AccountsClient.NewListByResourceGroupPager(resourceGroupName, nil)
