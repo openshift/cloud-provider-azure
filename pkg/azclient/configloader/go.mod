@@ -1,6 +1,6 @@
 module sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader
 
-go 1.22.10
+go 1.22.9
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.16.0

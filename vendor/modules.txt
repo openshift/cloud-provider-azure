@@ -1533,7 +1533,7 @@ sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/client/metrics
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/pkg/common/metrics
 sigs.k8s.io/apiserver-network-proxy/konnectivity-client/proto/client
 # sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.0.55 => ./pkg/azclient
-## explicit; go 1.22.10
+## explicit; go 1.22.9
 sigs.k8s.io/cloud-provider-azure/pkg/azclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/accountclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/accountclient/mock_accountclient
@@ -1587,7 +1587,7 @@ sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworkclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient/mock_virtualnetworklinkclient
 # sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader v0.0.27 => ./pkg/azclient/configloader
-## explicit; go 1.22.10
+## explicit; go 1.22.9
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader
 # sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd
 ## explicit; go 1.18
