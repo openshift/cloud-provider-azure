@@ -14,21 +14,24 @@
 
 # syntax=docker/dockerfile:1
 
-FROM --platform=linux/amd64 golang:1.23-bullseye@sha256:45b43371f21ec51276118e6806a22cbb0bca087ddd54c491fdc7149be01035d5 AS builder
+FROM --platform=linux/amd64 mcr.microsoft.com/oss/go/microsoft/golang:1.23-bullseye@sha256:94a7ec6c0a7952c37cf1bf87d02e712d881b8c4749528c4602b0e564c2957bda AS builder
 
 ARG ENABLE_GIT_COMMAND=true
 ARG ARCH=amd64
+
+RUN if [ "$ARCH" = "arm64" ] ; then \
+    apt-get update && apt-get install -y gcc-aarch64-linux-gnu ; \
+    elif [ "$ARCH" = "arm" ] ; then \
+    apt-get update && apt-get install -y gcc-arm-linux-gnueabihf ; \
+    fi
 
 WORKDIR /go/src/sigs.k8s.io/cloud-provider-azure
 COPY . .
 
 # Cache the go build into the the Go's compiler cache folder so we take benefits of compiler caching across docker build calls
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build ./cmd/cloud-controller-manager
-
-RUN --mount=type=cache,target=/root/.cache/go-build \
     make bin/azure-cloud-controller-manager ENABLE_GIT_COMMAND=${ENABLE_GIT_COMMAND} ARCH=${ARCH}
 
-FROM gcr.io/distroless/base
+FROM gcr.io/distroless/base:latest@sha256:74ddbf52d93fafbdd21b399271b0b4aac1babf8fa98cab59e5692e01169a1348
 COPY --from=builder /go/src/sigs.k8s.io/cloud-provider-azure/bin/azure-cloud-controller-manager /usr/local/bin/cloud-controller-manager
 ENTRYPOINT [ "/usr/local/bin/cloud-controller-manager" ]

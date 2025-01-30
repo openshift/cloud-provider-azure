@@ -21,6 +21,8 @@ interactions:
                 - "21"
             Content-Type:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-Identity?api-version=2021-04-01
         method: PUT
       response:
@@ -49,6 +51,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
         status: 201 Created
         code: 201
         duration: 200ms
@@ -72,6 +76,8 @@ interactions:
                 - "43"
             Content-Type:
                 - application/json
+            User-Agent:
+                - azsdk-go-armmsi/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Identity/providers/Microsoft.ManagedIdentity/userAssignedIdentities/testResource?api-version=2023-01-31
         method: PUT
       response:
@@ -102,6 +108,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11998"
         status: 201 Created
         code: 201
         duration: 200ms
@@ -121,6 +129,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - ccm-Identity-client azsdk-go-armmsi/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Identity/providers/Microsoft.ManagedIdentity/userAssignedIdentities/testResource?api-version=2023-01-31
         method: GET
       response:
@@ -149,6 +159,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
         status: 200 OK
         code: 200
         duration: 200ms
@@ -168,6 +180,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - ccm-Identity-client azsdk-go-armmsi/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Identity/providers/Microsoft.ManagedIdentity/userAssignedIdentities/testResourcenotfound?api-version=2023-01-31
         method: GET
       response:
@@ -217,6 +231,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - azsdk-go-armmsi/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Identity/providers/Microsoft.ManagedIdentity/userAssignedIdentities/testResource?api-version=2023-01-31
         method: DELETE
       response:
@@ -243,6 +259,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "12000"
         status: 200 OK
         code: 200
         duration: 200ms
@@ -262,6 +280,8 @@ interactions:
         headers:
             Accept:
                 - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-Identity?api-version=2021-04-01
         method: DELETE
       response:
@@ -290,6 +310,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "11999"
         status: 202 Accepted
         code: 202
         duration: 200ms
@@ -306,7 +328,9 @@ interactions:
         request_uri: ""
         body: ""
         form: {}
-        headers: {}
+        headers:
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
         url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/operationresults/eyJqb2JJZCI6IlJFU09VUkNFR1JPVVBERUxFVElPTkpPQi1BS1M6MkRDSVQ6MkRJREVOVElUWS1FQVNUVVMiLCJqb2JMb2NhdGlvbiI6ImVhc3R1cyJ9?api-version=2021-04-01&c=c&h=h&s=s&t=t
         method: GET
       response:
@@ -333,6 +357,8 @@ interactions:
                 - CONFIG_NOCACHE
             X-Content-Type-Options:
                 - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
         status: 200 OK
         code: 200
         duration: 200ms

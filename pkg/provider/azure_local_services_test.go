@@ -18,14 +18,14 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/mock/gomock"
@@ -34,13 +34,12 @@ import (
 	discovery_v1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/loadbalancerclient/mockloadbalancerclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/backendaddresspoolclient/mock_backendaddresspoolclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
-	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 	utilsets "sigs.k8s.io/cloud-provider-azure/pkg/util/sets"
 )
 
@@ -55,53 +54,53 @@ func TestLoadBalancerBackendPoolUpdater(t *testing.T) {
 	testCases := []struct {
 		name                               string
 		operations                         []batchOperation
-		existingBackendPools               []network.BackendAddressPool
-		expectedGetBackendPool             network.BackendAddressPool
+		existingBackendPools               []*armnetwork.BackendAddressPool
+		expectedGetBackendPool             *armnetwork.BackendAddressPool
 		extraWait                          bool
 		notLocal                           bool
 		changeLB                           bool
 		removeOperationServiceName         string
-		expectedCreateOrUpdateBackendPools []network.BackendAddressPool
-		expectedBackendPools               []network.BackendAddressPool
+		expectedCreateOrUpdateBackendPools []*armnetwork.BackendAddressPool
+		expectedBackendPools               []*armnetwork.BackendAddressPool
 	}{
 		{
 			name:       "Add node IPs to backend pool",
 			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
+			expectedCreateOrUpdateBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
 			},
-			expectedBackendPools: []network.BackendAddressPool{
+			expectedBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
 			},
 		},
 		{
 			name:       "Remove node IPs from backend pool",
 			operations: []batchOperation{addOperationPool1, removeOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
+			expectedCreateOrUpdateBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			expectedBackendPools: []network.BackendAddressPool{
+			expectedBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
 		},
 		{
 			name:       "Multiple operations targeting different backend pools",
 			operations: []batchOperation{addOperationPool1, addOperationPool2, removeOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 				getTestBackendAddressPoolWithIPs("lb1", "pool2", []string{}),
 			},
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
+			expectedCreateOrUpdateBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 				getTestBackendAddressPoolWithIPs("lb1", "pool2", []string{"10.0.0.1", "10.0.0.2"}),
 			},
-			expectedBackendPools: []network.BackendAddressPool{
+			expectedBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 				getTestBackendAddressPoolWithIPs("lb1", "pool2", []string{"10.0.0.1", "10.0.0.2"}),
 			},
@@ -110,15 +109,15 @@ func TestLoadBalancerBackendPoolUpdater(t *testing.T) {
 			name:       "Multiple operations in two batches",
 			operations: []batchOperation{addOperationPool1, removeOperationPool1},
 			extraWait:  true,
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
+			expectedCreateOrUpdateBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
 			expectedGetBackendPool: getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-			expectedBackendPools: []network.BackendAddressPool{
+			expectedBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
 		},
@@ -153,55 +152,49 @@ func TestLoadBalancerBackendPoolUpdater(t *testing.T) {
 			client := fake.NewSimpleClientset(&svc)
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 			cloud.serviceLister = informerFactory.Core().V1().Services().Lister()
-			mockLBClient := mockloadbalancerclient.NewMockInterface(ctrl)
+			mockbpClient := cloud.NetworkClientFactory.GetBackendAddressPoolClient().(*mock_backendaddresspoolclient.MockInterface)
 			if len(tc.existingBackendPools) > 0 {
-				mockLBClient.EXPECT().GetLBBackendPool(
+				mockbpClient.EXPECT().Get(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.existingBackendPools[0].Name,
-					gomock.Any(),
 				).Return(tc.existingBackendPools[0], nil)
 			}
 			if len(tc.existingBackendPools) == 2 {
-				mockLBClient.EXPECT().GetLBBackendPool(
+				mockbpClient.EXPECT().Get(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.existingBackendPools[1].Name,
-					gomock.Any(),
 				).Return(tc.existingBackendPools[1], nil)
 			}
 			if tc.extraWait {
-				mockLBClient.EXPECT().GetLBBackendPool(
+				mockbpClient.EXPECT().Get(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.expectedGetBackendPool.Name,
-					gomock.Any(),
 				).Return(tc.expectedGetBackendPool, nil)
 			}
 			if len(tc.expectedCreateOrUpdateBackendPools) > 0 {
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(
+				mockbpClient.EXPECT().CreateOrUpdate(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.expectedCreateOrUpdateBackendPools[0].Name,
-					tc.expectedCreateOrUpdateBackendPools[0],
-					gomock.Any(),
-				).Return(nil)
+					*tc.expectedCreateOrUpdateBackendPools[0],
+				).Return(nil, nil)
 			}
 			if len(tc.existingBackendPools) == 2 || tc.extraWait {
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(
+				mockbpClient.EXPECT().CreateOrUpdate(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.expectedCreateOrUpdateBackendPools[1].Name,
-					tc.expectedCreateOrUpdateBackendPools[1],
-					gomock.Any(),
-				).Return(nil)
+					*tc.expectedCreateOrUpdateBackendPools[1],
+				).Return(nil, nil)
 			}
-			cloud.LoadBalancerClient = mockLBClient
 
 			u := newLoadBalancerBackendPoolUpdater(cloud, time.Second)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -230,90 +223,57 @@ func TestLoadBalancerBackendPoolUpdater(t *testing.T) {
 }
 
 func TestLoadBalancerBackendPoolUpdaterFailed(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
 
 	addOperationPool1 := getAddIPsToBackendPoolOperation("ns1/svc1", "lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"})
 
 	testCases := []struct {
 		name                               string
 		operations                         []batchOperation
-		existingBackendPools               []network.BackendAddressPool
-		expectedGetBackendPool             network.BackendAddressPool
-		getBackendPoolErr                  *retry.Error
-		putBackendPoolErr                  *retry.Error
-		expectedCreateOrUpdateBackendPools []network.BackendAddressPool
-		expectedBackendPools               []network.BackendAddressPool
+		existingBackendPools               []*armnetwork.BackendAddressPool
+		expectedGetBackendPool             *armnetwork.BackendAddressPool
+		getBackendPoolErr                  error
+		putBackendPoolErr                  error
+		expectedCreateOrUpdateBackendPools []*armnetwork.BackendAddressPool
+		expectedBackendPools               []*armnetwork.BackendAddressPool
 	}{
-		{
-			name:       "Retriable error when getting backend pool",
-			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
-			},
-			getBackendPoolErr: retry.NewError(true, errors.New("error")),
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-			},
-			expectedBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-			},
-		},
-		{
-			name:       "Retriable error when updating backend pool",
-			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
-			},
-			expectedGetBackendPool: getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
-			putBackendPoolErr:      retry.NewError(true, errors.New("error")),
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-			},
-			expectedBackendPools: []network.BackendAddressPool{
-				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
-			},
-		},
 		{
 			name:       "Non-retriable error when getting backend pool",
 			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			getBackendPoolErr: retry.NewError(false, fmt.Errorf("error")),
-			expectedBackendPools: []network.BackendAddressPool{
+			getBackendPoolErr: &azcore.ResponseError{ErrorCode: "error"},
+			expectedBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
 		},
 		{
 			name:       "Non-retriable error when updating backend pool",
 			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
 			expectedGetBackendPool: getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
-			putBackendPoolErr:      retry.NewError(false, fmt.Errorf("error")),
-			expectedCreateOrUpdateBackendPools: []network.BackendAddressPool{
+			putBackendPoolErr:      &azcore.ResponseError{ErrorCode: "error"},
+			expectedCreateOrUpdateBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{"10.0.0.1", "10.0.0.2"}),
 			},
 		},
 		{
 			name:       "Backend pool not found",
 			operations: []batchOperation{addOperationPool1},
-			existingBackendPools: []network.BackendAddressPool{
+			existingBackendPools: []*armnetwork.BackendAddressPool{
 				getTestBackendAddressPoolWithIPs("lb1", "pool1", []string{}),
 			},
-			getBackendPoolErr: &retry.Error{
-				HTTPStatusCode: http.StatusNotFound,
-				Retriable:      false,
-				RawError:       errors.New("error"),
-			},
+			getBackendPoolErr: &azcore.ResponseError{StatusCode: http.StatusNotFound, ErrorCode: "error"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(_ *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
 			cloud := GetTestCloud(ctrl)
 			cloud.localServiceNameToServiceInfoMap = sync.Map{}
 			cloud.localServiceNameToServiceInfoMap.Store("ns1/svc1", &serviceInfo{lbName: "lb1"})
@@ -321,62 +281,40 @@ func TestLoadBalancerBackendPoolUpdaterFailed(t *testing.T) {
 			client := fake.NewSimpleClientset(&svc)
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 			cloud.serviceLister = informerFactory.Core().V1().Services().Lister()
-			mockLBClient := mockloadbalancerclient.NewMockInterface(ctrl)
-			mockLBClient.EXPECT().GetLBBackendPool(
+			mockLBClient := cloud.NetworkClientFactory.GetBackendAddressPoolClient().(*mock_backendaddresspoolclient.MockInterface)
+			mockBPClient := cloud.NetworkClientFactory.GetBackendAddressPoolClient().(*mock_backendaddresspoolclient.MockInterface)
+			mockLBClient.EXPECT().Get(
 				gomock.Any(),
 				gomock.Any(),
 				"lb1",
 				*tc.existingBackendPools[0].Name,
-				gomock.Any(),
 			).Return(tc.existingBackendPools[0], tc.getBackendPoolErr)
-			if tc.getBackendPoolErr != nil && tc.getBackendPoolErr.Retriable {
-				mockLBClient.EXPECT().GetLBBackendPool(
-					gomock.Any(),
-					gomock.Any(),
-					"lb1",
-					*tc.existingBackendPools[0].Name,
-					gomock.Any(),
-				).Return(tc.existingBackendPools[0], nil)
-			}
 			if len(tc.existingBackendPools) == 2 {
-				mockLBClient.EXPECT().GetLBBackendPool(
+				mockLBClient.EXPECT().Get(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.existingBackendPools[1].Name,
-					gomock.Any(),
 				).Return(tc.existingBackendPools[1], nil)
 			}
-			if tc.putBackendPoolErr != nil && tc.putBackendPoolErr.Retriable {
-				mockLBClient.EXPECT().GetLBBackendPool(
-					gomock.Any(),
-					gomock.Any(),
-					"lb1",
-					*tc.expectedGetBackendPool.Name,
-					gomock.Any(),
-				).Return(tc.expectedGetBackendPool, nil)
-			}
 			if len(tc.expectedCreateOrUpdateBackendPools) > 0 {
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(
+				mockBPClient.EXPECT().CreateOrUpdate(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.expectedCreateOrUpdateBackendPools[0].Name,
-					tc.expectedCreateOrUpdateBackendPools[0],
-					gomock.Any(),
-				).Return(tc.putBackendPoolErr)
+					*tc.expectedCreateOrUpdateBackendPools[0],
+				).Return(nil, tc.putBackendPoolErr)
 			}
 			if len(tc.expectedCreateOrUpdateBackendPools) == 2 {
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(
+				mockLBClient.EXPECT().CreateOrUpdate(
 					gomock.Any(),
 					gomock.Any(),
 					"lb1",
 					*tc.expectedCreateOrUpdateBackendPools[1].Name,
-					tc.expectedCreateOrUpdateBackendPools[1],
-					gomock.Any(),
-				).Return(nil)
+					*tc.expectedCreateOrUpdateBackendPools[1],
+				).Return(nil, nil)
 			}
-			cloud.LoadBalancerClient = mockLBClient
 
 			u := newLoadBalancerBackendPoolUpdater(cloud, time.Second)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -393,23 +331,23 @@ func TestLoadBalancerBackendPoolUpdaterFailed(t *testing.T) {
 	}
 }
 
-func getTestBackendAddressPoolWithIPs(lbName, bpName string, ips []string) network.BackendAddressPool {
-	bp := network.BackendAddressPool{
+func getTestBackendAddressPoolWithIPs(lbName, bpName string, ips []string) *armnetwork.BackendAddressPool {
+	bp := &armnetwork.BackendAddressPool{
 		ID:   ptr.To(fmt.Sprintf("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/%s/backendAddressPools/%s", lbName, bpName)),
 		Name: ptr.To(bpName),
-		BackendAddressPoolPropertiesFormat: &network.BackendAddressPoolPropertiesFormat{
-			VirtualNetwork: &network.SubResource{
+		Properties: &armnetwork.BackendAddressPoolPropertiesFormat{
+			VirtualNetwork: &armnetwork.SubResource{
 				ID: ptr.To("/subscriptions/subscriptionID/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet"),
 			},
 			Location:                     ptr.To("eastus"),
-			LoadBalancerBackendAddresses: &[]network.LoadBalancerBackendAddress{},
+			LoadBalancerBackendAddresses: []*armnetwork.LoadBalancerBackendAddress{},
 		},
 	}
 	for _, ip := range ips {
 		if len(ip) > 0 {
-			*bp.LoadBalancerBackendAddresses = append(*bp.LoadBalancerBackendAddresses, network.LoadBalancerBackendAddress{
+			bp.Properties.LoadBalancerBackendAddresses = append(bp.Properties.LoadBalancerBackendAddresses, &armnetwork.LoadBalancerBackendAddress{
 				Name: ptr.To(""),
-				LoadBalancerBackendAddressPropertiesFormat: &network.LoadBalancerBackendAddressPropertiesFormat{
+				Properties: &armnetwork.LoadBalancerBackendAddressPropertiesFormat{
 					IPAddress: ptr.To(ip),
 				},
 			})
@@ -485,8 +423,8 @@ func TestEndpointSlicesInformer(t *testing.T) {
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 			cloud.serviceLister = informerFactory.Core().V1().Services().Lister()
 			cloud.LoadBalancerBackendPoolUpdateIntervalInSeconds = 1
-			cloud.LoadBalancerSku = consts.LoadBalancerSkuStandard
-			cloud.MultipleStandardLoadBalancerConfigurations = []MultipleStandardLoadBalancerConfiguration{
+			cloud.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+			cloud.MultipleStandardLoadBalancerConfigurations = []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
 				},
@@ -499,10 +437,9 @@ func TestEndpointSlicesInformer(t *testing.T) {
 
 			existingBackendPool := getTestBackendAddressPoolWithIPs("lb1", "test-svc1", []string{"10.0.0.1"})
 			expectedBackendPool := getTestBackendAddressPoolWithIPs("lb1", "test-svc1", []string{"10.0.0.2"})
-			mockLBClient := mockloadbalancerclient.NewMockInterface(ctrl)
-			mockLBClient.EXPECT().GetLBBackendPool(gomock.Any(), gomock.Any(), "lb1", "test-svc1", "").Return(existingBackendPool, nil).Times(tc.expectedGetBackendPoolCount)
-			mockLBClient.EXPECT().CreateOrUpdateBackendPools(gomock.Any(), gomock.Any(), "lb1", "test-svc1", expectedBackendPool, "").Return(nil).Times(tc.expectedPutBackendPoolCount)
-			cloud.LoadBalancerClient = mockLBClient
+			mockLBClient := cloud.NetworkClientFactory.GetBackendAddressPoolClient().(*mock_backendaddresspoolclient.MockInterface)
+			mockLBClient.EXPECT().Get(gomock.Any(), gomock.Any(), "lb1", "test-svc1").Return(existingBackendPool, nil).Times(tc.expectedGetBackendPoolCount)
+			mockLBClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), "lb1", "test-svc1", *expectedBackendPool).Return(nil, nil).Times(tc.expectedPutBackendPoolCount)
 
 			u := newLoadBalancerBackendPoolUpdater(cloud, time.Second)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -530,7 +467,7 @@ func TestGetBackendPoolNamesAndIDsForService(t *testing.T) {
 	defer ctrl.Finish()
 
 	cloud := GetTestCloud(ctrl)
-	cloud.MultipleStandardLoadBalancerConfigurations = []MultipleStandardLoadBalancerConfiguration{
+	cloud.MultipleStandardLoadBalancerConfigurations = []config.MultipleStandardLoadBalancerConfiguration{
 		{},
 	}
 	svc := getTestService("test", v1.ProtocolTCP, nil, false)
@@ -546,33 +483,26 @@ func TestCheckAndApplyLocalServiceBackendPoolUpdates(t *testing.T) {
 	for _, tc := range []struct {
 		description string
 		existingEPS *discovery_v1.EndpointSlice
-		expectedErr error
 	}{
 		{
 			description: "should update backend pool as expected",
 			existingEPS: getTestEndpointSlice("eps1", "default", "svc1", "node2"),
 		},
 		{
-			description: "should report an error if failed to get the endpointslice",
-			expectedErr: errors.New("failed to find EndpointSlice for service default/svc1"),
+			description: "should not report an error if failed to get the endpointslice",
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			cloud := GetTestCloud(ctrl)
 			cloud.localServiceNameToServiceInfoMap.Store("default/svc1", &serviceInfo{lbName: "lb1"})
 			svc := getTestService("svc1", v1.ProtocolTCP, nil, false)
-			var client kubernetes.Interface
-			if tc.existingEPS != nil {
-				client = fake.NewSimpleClientset(&svc, tc.existingEPS)
-			} else {
-				client = fake.NewSimpleClientset(&svc)
-			}
+			client := fake.NewSimpleClientset(&svc)
 			cloud.KubeClient = client
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 			cloud.serviceLister = informerFactory.Core().V1().Services().Lister()
 			cloud.LoadBalancerBackendPoolUpdateIntervalInSeconds = 1
-			cloud.LoadBalancerSku = consts.LoadBalancerSkuStandard
-			cloud.MultipleStandardLoadBalancerConfigurations = []MultipleStandardLoadBalancerConfiguration{
+			cloud.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+			cloud.MultipleStandardLoadBalancerConfigurations = []config.MultipleStandardLoadBalancerConfiguration{
 				{
 					Name: "lb1",
 				},
@@ -582,13 +512,16 @@ func TestCheckAndApplyLocalServiceBackendPoolUpdates(t *testing.T) {
 				"node1": utilsets.NewString("10.0.0.1", "fd00::1"),
 				"node2": utilsets.NewString("10.0.0.2", "fd00::2"),
 			}
+			if tc.existingEPS != nil {
+				cloud.endpointSlicesCache.Store(fmt.Sprintf("%s/%s", tc.existingEPS.Name, tc.existingEPS.Namespace), tc.existingEPS)
+			}
 
 			existingBackendPool := getTestBackendAddressPoolWithIPs("lb1", "default-svc1", []string{"10.0.0.1"})
 			existingBackendPoolIPv6 := getTestBackendAddressPoolWithIPs("lb1", "default-svc1-ipv6", []string{"fd00::1"})
-			existingLB := network.LoadBalancer{
+			existingLB := armnetwork.LoadBalancer{
 				Name: ptr.To("lb1"),
-				LoadBalancerPropertiesFormat: &network.LoadBalancerPropertiesFormat{
-					BackendAddressPools: &[]network.BackendAddressPool{
+				Properties: &armnetwork.LoadBalancerPropertiesFormat{
+					BackendAddressPools: []*armnetwork.BackendAddressPool{
 						existingBackendPool,
 						existingBackendPoolIPv6,
 					},
@@ -596,14 +529,13 @@ func TestCheckAndApplyLocalServiceBackendPoolUpdates(t *testing.T) {
 			}
 			expectedBackendPool := getTestBackendAddressPoolWithIPs("lb1", "default-svc1", []string{"10.0.0.2"})
 			expectedBackendPoolIPv6 := getTestBackendAddressPoolWithIPs("lb1", "default-svc1-ipv6", []string{"fd00::2"})
-			mockLBClient := mockloadbalancerclient.NewMockInterface(ctrl)
+			mockLBClient := cloud.NetworkClientFactory.GetBackendAddressPoolClient().(*mock_backendaddresspoolclient.MockInterface)
 			if tc.existingEPS != nil {
-				mockLBClient.EXPECT().GetLBBackendPool(gomock.Any(), gomock.Any(), "lb1", "default-svc1", "").Return(existingBackendPool, nil)
-				mockLBClient.EXPECT().GetLBBackendPool(gomock.Any(), gomock.Any(), "lb1", "default-svc1-ipv6", "").Return(existingBackendPoolIPv6, nil)
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(gomock.Any(), gomock.Any(), "lb1", "default-svc1", expectedBackendPool, "").Return(nil)
-				mockLBClient.EXPECT().CreateOrUpdateBackendPools(gomock.Any(), gomock.Any(), "lb1", "default-svc1-ipv6", expectedBackendPoolIPv6, "").Return(nil)
+				mockLBClient.EXPECT().Get(gomock.Any(), gomock.Any(), "lb1", "default-svc1").Return(existingBackendPool, nil)
+				mockLBClient.EXPECT().Get(gomock.Any(), gomock.Any(), "lb1", "default-svc1-ipv6").Return(existingBackendPoolIPv6, nil)
+				mockLBClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), "lb1", "default-svc1", *expectedBackendPool).Return(nil, nil)
+				mockLBClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), "lb1", "default-svc1-ipv6", *expectedBackendPoolIPv6).Return(nil, nil)
 			}
-			cloud.LoadBalancerClient = mockLBClient
 
 			u := newLoadBalancerBackendPoolUpdater(cloud, time.Second)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -611,12 +543,12 @@ func TestCheckAndApplyLocalServiceBackendPoolUpdates(t *testing.T) {
 			cloud.backendPoolUpdater = u
 			go cloud.backendPoolUpdater.run(ctx)
 
-			err := cloud.checkAndApplyLocalServiceBackendPoolUpdates(existingLB, &svc)
-			if tc.expectedErr != nil {
-				assert.Equal(t, tc.expectedErr, err)
-			} else {
-				assert.NoError(t, err)
+			if tc.existingEPS != nil {
+				_, _ = client.DiscoveryV1().EndpointSlices("default").Create(context.Background(), tc.existingEPS, metav1.CreateOptions{})
 			}
+
+			err := cloud.checkAndApplyLocalServiceBackendPoolUpdates(existingLB, &svc)
+			assert.NoError(t, err)
 			time.Sleep(2 * time.Second)
 		})
 	}

@@ -18,10 +18,8 @@ package credentialprovider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -31,6 +29,7 @@ import (
 	providerconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/containers/azcontainerregistry"
@@ -59,13 +58,14 @@ type CredentialProvider interface {
 
 // acrProvider implements the credential provider interface for Azure Container Registry.
 type acrProvider struct {
-	config         *providerconfig.AzureAuthConfig
+	config         *providerconfig.AzureClientConfig
 	environment    *azclient.Environment
+	cloudConfig    cloud.Configuration
 	credential     azcore.TokenCredential
 	registryMirror map[string]string // Registry mirror relation: source registry -> target registry
 }
 
-func NewAcrProvider(config *providerconfig.AzureAuthConfig, environment *azclient.Environment, credential azcore.TokenCredential) CredentialProvider {
+func NewAcrProvider(config *providerconfig.AzureClientConfig, environment *azclient.Environment, credential azcore.TokenCredential) CredentialProvider {
 	return &acrProvider{
 		config:      config,
 		credential:  credential,
@@ -78,26 +78,14 @@ func NewAcrProviderFromConfig(configFile string, registryMirrorStr string) (Cred
 	if len(configFile) == 0 {
 		return nil, errors.New("no azure credential file is provided")
 	}
-	config, err := configloader.Load[providerconfig.AzureAuthConfig](context.Background(), nil, &configloader.FileLoaderConfig{FilePath: configFile})
+	config, err := configloader.Load[providerconfig.AzureClientConfig](context.Background(), nil, &configloader.FileLoaderConfig{FilePath: configFile})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	var envConfig azclient.Environment
-	envFilePath, ok := os.LookupEnv(azclient.EnvironmentFilepathName)
-	if ok {
-		content, err := os.ReadFile(envFilePath)
-		if err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal(content, &envConfig); err != nil {
-			return nil, err
-		}
-	}
-
 	var managedIdentityCredential azcore.TokenCredential
 
-	clientOption, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
+	clientOption, env, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +109,8 @@ func NewAcrProviderFromConfig(configFile string, registryMirrorStr string) (Cred
 	return &acrProvider{
 		config:         config,
 		credential:     managedIdentityCredential,
-		environment:    &envConfig,
+		environment:    env,
+		cloudConfig:    clientOption.Cloud,
 		registryMirror: parseRegistryMirror(registryMirrorStr),
 	}, nil
 }
@@ -201,14 +190,11 @@ func (a *acrProvider) GetCredentials(ctx context.Context, image string, _ []stri
 
 // getFromACR gets credentials from ACR.
 func (a *acrProvider) getFromACR(ctx context.Context, loginServer string) (string, string, error) {
-	config, err := azclient.GetAzureCloudConfig(&a.config.ARMClientConfig)
-	if err != nil {
-		return "", "", err
-	}
 	var armAccessToken azcore.AccessToken
+	var err error
 	if armAccessToken, err = a.credential.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: []string{
-			strings.TrimRight(config.Services[azcontainerregistry.ServiceName].Audience, "/") + "/.default",
+			strings.TrimRight(a.cloudConfig.Services[azcontainerregistry.ServiceName].Audience, "/") + "/.default",
 		},
 	}); err != nil {
 		klog.Errorf("Failed to ensure fresh service principal token: %v", err)
