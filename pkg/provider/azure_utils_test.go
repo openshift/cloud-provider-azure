@@ -17,14 +17,11 @@ limitations under the License.
 package provider
 
 import (
-	"reflect"
+	"context"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-08-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-07-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/mock/gomock"
@@ -36,67 +33,6 @@ import (
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
-
-func TestSimpleLockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-}
-
-func TestSimpleLockUnlockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-	testLockMap.UnlockEntry("entry1")
-}
-
-func TestConcurrentLockEntry(t *testing.T) {
-	testLockMap := newLockMap()
-
-	callbackChan1 := make(chan interface{})
-	callbackChan2 := make(chan interface{})
-
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan1)
-	ensureCallbackHappens(t, callbackChan1)
-
-	go testLockMap.lockAndCallback(t, "entry1", callbackChan2)
-	ensureNoCallback(t, callbackChan2)
-
-	testLockMap.UnlockEntry("entry1")
-	ensureCallbackHappens(t, callbackChan2)
-	testLockMap.UnlockEntry("entry1")
-}
-
-func (lm *LockMap) lockAndCallback(_ *testing.T, entry string, callbackChan chan<- interface{}) {
-	lm.LockEntry(entry)
-	callbackChan <- true
-}
-
-var callbackTimeout = 2 * time.Second
-
-func ensureCallbackHappens(t *testing.T, callbackChan <-chan interface{}) bool {
-	select {
-	case <-callbackChan:
-		return true
-	case <-time.After(callbackTimeout):
-		t.Fatalf("timed out waiting for callback")
-		return false
-	}
-}
-
-func ensureNoCallback(t *testing.T, callbackChan <-chan interface{}) bool {
-	select {
-	case <-callbackChan:
-		t.Fatalf("unexpected callback")
-		return false
-	case <-time.After(callbackTimeout):
-		return true
-	}
-}
 
 func TestReconcileTags(t *testing.T) {
 	for _, testCase := range []struct {
@@ -179,6 +115,69 @@ func TestReconcileTags(t *testing.T) {
 			},
 			expectedChanged: true,
 		},
+		{
+			description: "reconcileTags should support prefix matching in systemTags",
+			currentTagsOnResource: map[string]*string{
+				"prefix-a": ptr.To("b"),
+				"c":        ptr.To("d"),
+			},
+			systemTags: "prefix",
+			expectedTags: map[string]*string{
+				"prefix-a": ptr.To("b"),
+			},
+			expectedChanged: true,
+		},
+		{
+			description: "reconcileTags should support prefix matching in systemTags case insensitive",
+			currentTagsOnResource: map[string]*string{
+				"prefix-a": ptr.To("b"),
+				"c":        ptr.To("d"),
+			},
+			systemTags: "PrEFiX",
+			expectedTags: map[string]*string{
+				"prefix-a": ptr.To("b"),
+			},
+			expectedChanged: true,
+		},
+		{
+			description: "reconcileTags should support prefix matching in systemTags with multiple prefixes",
+			currentTagsOnResource: map[string]*string{
+				"prefix-a": ptr.To("b"),
+				"sys-b":    ptr.To("c"),
+			},
+			systemTags: "prefix, sys",
+			expectedTags: map[string]*string{
+				"prefix-a": ptr.To("b"),
+				"sys-b":    ptr.To("c"),
+			},
+			expectedChanged: false,
+		},
+		{
+			description: "reconcileTags should work with full length aks managed cluster tags",
+			currentTagsOnResource: map[string]*string{
+				"aks-managed-cluster-name": ptr.To("test-name"),
+				"aks-managed-cluster-rg":   ptr.To("test-rg"),
+			},
+			systemTags: "aks-managed-cluster-name, aks-managed-cluster-rg",
+			expectedTags: map[string]*string{
+				"aks-managed-cluster-name": ptr.To("test-name"),
+				"aks-managed-cluster-rg":   ptr.To("test-rg"),
+			},
+			expectedChanged: false,
+		},
+		{
+			description: "real case test for systemTags",
+			currentTagsOnResource: map[string]*string{
+				"aks-managed-cluster-name": ptr.To("test-name"),
+				"aks-managed-cluster-rg":   ptr.To("test-rg"),
+			},
+			systemTags: "aks-managed",
+			expectedTags: map[string]*string{
+				"aks-managed-cluster-name": ptr.To("test-name"),
+				"aks-managed-cluster-rg":   ptr.To("test-rg"),
+			},
+			expectedChanged: false,
+		},
 	} {
 		t.Run(testCase.description, func(t *testing.T) {
 			cloud := &Cloud{}
@@ -188,6 +187,102 @@ func TestReconcileTags(t *testing.T) {
 
 			tags, changed := cloud.reconcileTags(testCase.currentTagsOnResource, testCase.newTags)
 			assert.Equal(t, testCase.expectedChanged, changed)
+			assert.Equal(t, testCase.expectedTags, tags)
+		})
+	}
+}
+
+func TestParseTags(t *testing.T) {
+	for _, testCase := range []struct {
+		description, tags string
+		tagsMap           map[string]string
+		expectedTags      map[string]*string
+	}{
+		{
+			description: "parseTags should return a map of tags",
+			tags:        "a=b, c=d",
+			tagsMap: map[string]string{
+				"e": "f",
+				"g": "h",
+			},
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("d"),
+				"e": ptr.To("f"),
+				"g": ptr.To("h"),
+			},
+		},
+		{
+			description:  "parseTags should work when `tags` and `tagsMap` are all empty",
+			tags:         "",
+			tagsMap:      map[string]string{},
+			expectedTags: map[string]*string{},
+		},
+		{
+			description: "parseTags should let the tagsMap override the tags",
+			tags:        "a=e, c=f",
+			tagsMap: map[string]string{
+				"a": "b",
+				"c": "d",
+			},
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("d"),
+			},
+		},
+		{
+			description: "parseTags override should ignore the case of keys and values",
+			tags:        "A=e, C=f",
+			tagsMap: map[string]string{
+				"a": "b",
+				"c": "d",
+			},
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("d"),
+			},
+		},
+		{
+			description: "parseTags should keep the blank character after or before string 'Null', eg. 'Null '",
+			tags:        "a=b, c=Null , d= null",
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("Null "),
+				"d": ptr.To(" null"),
+			},
+		},
+		{
+			description: "parseTags should also keep blank character of values from tagsMap, case insensitive as well",
+			tags:        "",
+			tagsMap: map[string]string{
+				"a": "b",
+				"c": "Null ",
+				"d": " nuLl",
+			},
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("Null "),
+				"d": ptr.To(" nuLl"),
+			},
+		},
+		{
+			description: "parseTags should trim the blank character of values from tags other than 'Null'",
+			tags:        "a=b, c= d , d= e",
+			tagsMap: map[string]string{
+				"x": " y ",
+				"z": " z",
+			},
+			expectedTags: map[string]*string{
+				"a": ptr.To("b"),
+				"c": ptr.To("d"),
+				"d": ptr.To("e"),
+				"x": ptr.To("y"),
+				"z": ptr.To("z"),
+			},
+		},
+	} {
+		t.Run(testCase.description, func(t *testing.T) {
+			tags := parseTags(testCase.tags, testCase.tagsMap)
 			assert.Equal(t, testCase.expectedTags, tags)
 		})
 	}
@@ -295,12 +390,12 @@ func TestGetNodePrivateIPAddresses(t *testing.T) {
 func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 	for _, testCase := range []struct {
 		description string
-		rules       []network.SecurityRule
-		expected    []network.SecurityRule
+		rules       []*armnetwork.SecurityRule
+		expected    []*armnetwork.SecurityRule
 	}{
 		{
 			description: "no duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -308,7 +403,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule2"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -319,7 +414,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 		},
 		{
 			description: "duplicated rules",
-			rules: []network.SecurityRule{
+			rules: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule1"),
 				},
@@ -330,7 +425,7 @@ func TestRemoveDuplicatedSecurityRules(t *testing.T) {
 					Name: ptr.To("rule1"),
 				},
 			},
-			expected: []network.SecurityRule{
+			expected: []*armnetwork.SecurityRule{
 				{
 					Name: ptr.To("rule2"),
 				},
@@ -388,7 +483,7 @@ func TestGetVMSSVMCacheKey(t *testing.T) {
 }
 
 func TestIsNodeInVMSSVMCache(t *testing.T) {
-	getter := func(_ string) (interface{}, error) {
+	getter := func(_ context.Context, _ string) (interface{}, error) {
 		return nil, nil
 	}
 	emptyCacheEntryTimedCache, _ := azcache.NewTimedCache(fakeCacheTTL, getter, false)
@@ -824,7 +919,7 @@ func TestIsFIPIPv6(t *testing.T) {
 	testcases := []struct {
 		desc           string
 		svc            v1.Service
-		fip            *network.FrontendIPConfiguration
+		fip            *armnetwork.FrontendIPConfiguration
 		expectedIsIPv6 bool
 	}{
 		{
@@ -854,7 +949,7 @@ func TestIsFIPIPv6(t *testing.T) {
 					IPFamilies: []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol},
 				},
 			},
-			fip: &network.FrontendIPConfiguration{
+			fip: &armnetwork.FrontendIPConfiguration{
 				Name: ptr.To("fip"),
 			},
 			expectedIsIPv6: false,
@@ -866,17 +961,26 @@ func TestIsFIPIPv6(t *testing.T) {
 					IPFamilies: []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol},
 				},
 			},
-			fip: &network.FrontendIPConfiguration{
+			fip: &armnetwork.FrontendIPConfiguration{
 				Name: ptr.To("fip-IPv6"),
 			},
 			expectedIsIPv6: true,
+		},
+		{
+			desc: "enpty ip families",
+			svc: v1.Service{
+				Spec: v1.ServiceSpec{
+					IPFamilies: []v1.IPFamily{},
+				},
+			},
+			expectedIsIPv6: false,
 		},
 	}
 	for _, tc := range testcases {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			az := GetTestCloud(ctrl)
-			isIPv6, err := az.isFIPIPv6(&tc.svc, "rg", tc.fip)
+			isIPv6, err := az.isFIPIPv6(&tc.svc, tc.fip)
 			assert.Nil(t, err)
 			assert.Equal(t, tc.expectedIsIPv6, isIPv6)
 		})
@@ -903,26 +1007,26 @@ func TestGetResourceIDPrefix(t *testing.T) {
 func TestIsInternalLoadBalancer(t *testing.T) {
 	tests := []struct {
 		name     string
-		lb       network.LoadBalancer
+		lb       armnetwork.LoadBalancer
 		expected bool
 	}{
 		{
 			name: "internal load balancer",
-			lb: network.LoadBalancer{
+			lb: armnetwork.LoadBalancer{
 				Name: ptr.To("test-internal"),
 			},
 			expected: true,
 		},
 		{
 			name: "internal load balancer",
-			lb: network.LoadBalancer{
+			lb: armnetwork.LoadBalancer{
 				Name: ptr.To("TEST-INTERNAL"),
 			},
 			expected: true,
 		},
 		{
 			name: "not internal load balancer",
-			lb: network.LoadBalancer{
+			lb: armnetwork.LoadBalancer{
 				Name: ptr.To("test"),
 			},
 			expected: false,
@@ -934,47 +1038,6 @@ func TestIsInternalLoadBalancer(t *testing.T) {
 			lb := test.lb
 			result := isInternalLoadBalancer(&lb)
 			assert.Equal(t, test.expected, result)
-		})
-	}
-}
-
-func TestToArmcomputeDisk(t *testing.T) {
-	type args struct {
-		disks []compute.DataDisk
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    []*armcompute.DataDisk
-		wantErr bool
-	}{
-		{
-			name: "normal",
-			args: args{
-				disks: []compute.DataDisk{
-					{
-						Name: ptr.To("disk1"),
-					},
-				},
-			},
-			want: []*armcompute.DataDisk{
-				{
-					Name: ptr.To("disk1"),
-				},
-			},
-			wantErr: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := ToArmcomputeDisk(tt.args.disks)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ToArmcomputeDisk() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ToArmcomputeDisk() = %v, want %v", got, tt.want)
-			}
 		})
 	}
 }

@@ -68,12 +68,12 @@ func RealMain(opts types.Options, d types.Deployer, tester types.Tester) (result
 		return err
 	}
 
-	if err := writeVersionToMetadataJSON(opts, d); err != nil {
+	// ensure the artifacts dir
+	if err := os.MkdirAll(artifacts.BaseDir(), os.ModePerm); err != nil {
 		return err
 	}
 
-	// ensure the artifacts dir
-	if err := os.MkdirAll(artifacts.BaseDir(), os.ModePerm); err != nil {
+	if err := writeVersionToMetadataJSON(d); err != nil {
 		return err
 	}
 
@@ -97,9 +97,11 @@ func RealMain(opts types.Options, d types.Deployer, tester types.Tester) (result
 			select {
 			case <-c:
 				if opts.ShouldUp() || opts.ShouldTest() {
-					klog.Info("Captured ^C, gracefully attempting to cleanup resources..")
-					if err := writer.WrapStep("Down", d.Down); err != nil {
-						result = err
+					if opts.ShouldDown() {
+						klog.Info("Captured ^C, gracefully attempting to cleanup resources..")
+						if err := writer.WrapStep("Down", d.Down); err != nil {
+							result = err
+						}
 					}
 					os.Exit(0)
 				}
@@ -123,9 +125,23 @@ func RealMain(opts types.Options, d types.Deployer, tester types.Tester) (result
 		if err := junitRunner.Close(); err != nil && result == nil {
 			result = err
 		}
+		// If the deployer has an Finish func, run it
+		if dWithFinish, ok := d.(types.DeployerWithFinish); ok {
+			if err := dWithFinish.Finish(); err != nil {
+				result = err
+			}
+		}
 	}()
 
 	klog.Infof("ID for this run: %q", opts.RunID())
+
+	// If the deployer has an initialization routine, run it
+	if dWithInit, ok := d.(types.DeployerWithInit); ok {
+		if err := dWithInit.Init(); err != nil {
+			// we do not continue to up / test etc. if initialization fails
+			return err
+		}
+	}
 
 	// build if specified
 	if opts.ShouldBuild() {
@@ -200,10 +216,10 @@ func RealMain(opts types.Options, d types.Deployer, tester types.Tester) (result
 	return nil
 }
 
-func writeVersionToMetadataJSON(opts types.Options, d types.Deployer) error {
+func writeVersionToMetadataJSON(d types.Deployer) error {
 	// setup the json metadata writer
 	metadataJSON, err := os.Create(
-		filepath.Join(opts.RunDir(), "metadata.json"),
+		filepath.Join(artifacts.BaseDir(), "metadata.json"),
 	)
 	if err != nil {
 		return err
@@ -230,8 +246,5 @@ func writeVersionToMetadataJSON(opts types.Options, d types.Deployer) error {
 	if err := metadataJSON.Sync(); err != nil {
 		return err
 	}
-	if err := metadataJSON.Close(); err != nil {
-		return err
-	}
-	return nil
+	return metadataJSON.Close()
 }

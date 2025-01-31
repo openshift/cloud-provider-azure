@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -24,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 // TestFillNetInterfacePublicIPs tests if IPv6 IPs from imds load balancer are
@@ -109,7 +112,7 @@ func TestGetPlatformSubFaultDomain(t *testing.T) {
 	} {
 		t.Run(testCase.description, func(t *testing.T) {
 			cloud := &Cloud{
-				Config: Config{
+				Config: config.Config{
 					Location:            "eastus",
 					UseInstanceMetadata: true,
 				},
@@ -137,7 +140,7 @@ func TestGetPlatformSubFaultDomain(t *testing.T) {
 				t.Errorf("Test [%s] unexpected error: %v", testCase.description, err)
 			}
 
-			fd, err := cloud.GetPlatformSubFaultDomain()
+			fd, err := cloud.GetPlatformSubFaultDomain(context.TODO())
 			if testCase.expectedErr != nil {
 				assert.Equal(t, testCase.expectedErr, err)
 			} else {

@@ -44,16 +44,38 @@ func init() {
 	additionalTestCases = func() {
 		When("get requests are raised", func() {
 			It("should return 404 error", func(ctx context.Context) {
-				newResource, err := realClient.GetInstanceView(ctx, resourceGroupName, parentResourceName, resourceName)
+				newResource, err := realClient.GetInstanceView(ctx, resourceGroupName, virtualmachinescalesetName, resourceName)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(newResource).NotTo(BeNil())
 			})
 		})
 		When("list requests are raised", func() {
 			It("should return 404 error", func(ctx context.Context) {
-				newResource, err := realClient.ListVMInstanceView(ctx, resourceGroupName, parentResourceName)
+				newResource, err := realClient.ListVMInstanceView(ctx, resourceGroupName, virtualmachinescalesetName)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(newResource).NotTo(BeNil())
+			})
+		})
+		When("update requests are raised", func() {
+			It("should not return error", func(ctx context.Context) {
+				newResource, err := realClient.Update(ctx, resourceGroupName, virtualmachinescalesetName,"0", armcompute.VirtualMachineScaleSetVM{
+					Tags: map[string]*string{
+						"key1": to.Ptr("value1"),
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(newResource).NotTo(BeNil())
+			})
+		})
+		When("update requests are raised with invalid etag", func() {
+			It("should return error", func(ctx context.Context) {
+				_, err := realClient.Update(ctx, resourceGroupName, virtualmachinescalesetName,"0", armcompute.VirtualMachineScaleSetVM{
+					Tags: map[string]*string{
+						"key1": to.Ptr("value1"),
+					},
+					Etag: to.Ptr("invalid-etag"),
+				})
+				Expect(err).To(HaveOccurred())
 			})
 		})
 	}
@@ -101,7 +123,7 @@ func init() {
 		Expect(err).NotTo(HaveOccurred())
 		vmssClient = computeClientFactory.NewVirtualMachineScaleSetsClient()
 
-		vmsspoller, err := vmssClient.BeginCreateOrUpdate(ctx, resourceGroupName, parentResourceName, armcompute.VirtualMachineScaleSet{
+		vmsspoller, err := vmssClient.BeginCreateOrUpdate(ctx, resourceGroupName, virtualmachinescalesetName, armcompute.VirtualMachineScaleSet{
 			Location: to.Ptr(location),
 			SKU: &armcompute.SKU{
 				Name:     to.Ptr(string(armcompute.VirtualMachineSizeTypesStandardD2SV3)),
@@ -163,7 +185,7 @@ func init() {
 		resourceName = "0"
 	}
 	afterAllFunc = func(ctx context.Context) {
-		vmsspoller, err := vmssClient.BeginDelete(ctx, resourceGroupName, parentResourceName, nil)
+		vmsspoller, err := vmssClient.BeginDelete(ctx, resourceGroupName, virtualmachinescalesetName, nil)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = vmsspoller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{
 			Frequency: 1 * time.Second,
