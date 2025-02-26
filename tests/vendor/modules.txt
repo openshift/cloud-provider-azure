@@ -49,7 +49,7 @@ github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime
 github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming
 github.com/Azure/azure-sdk-for-go/sdk/azcore/to
 github.com/Azure/azure-sdk-for-go/sdk/azcore/tracing
-# github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.1
+# github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.8.2
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/azidentity
 github.com/Azure/azure-sdk-for-go/sdk/azidentity/internal
@@ -92,10 +92,10 @@ github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources
 # github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage v1.6.0
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage
-# github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.3.0
+# github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.3.1
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets
-# github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/internal v1.1.0
+# github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/internal v1.1.1
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/internal
 # github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.4.0
@@ -141,7 +141,12 @@ github.com/Azure/go-autorest/logger
 # github.com/Azure/go-autorest/tracing v0.6.0
 ## explicit; go 1.12
 github.com/Azure/go-autorest/tracing
-# github.com/AzureAD/microsoft-authentication-library-for-go v1.3.2
+# github.com/Azure/msi-dataplane v0.4.0
+## explicit; go 1.22
+github.com/Azure/msi-dataplane/pkg/dataplane
+github.com/Azure/msi-dataplane/pkg/dataplane/internal/challenge
+github.com/Azure/msi-dataplane/pkg/dataplane/internal/client
+# github.com/AzureAD/microsoft-authentication-library-for-go v1.3.3
 ## explicit; go 1.18
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/confidential
@@ -164,6 +169,9 @@ github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/options
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/shared
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/version
 github.com/AzureAD/microsoft-authentication-library-for-go/apps/public
+# github.com/antlr4-go/antlr/v4 v4.13.1
+## explicit; go 1.22
+github.com/antlr4-go/antlr/v4
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
@@ -183,6 +191,10 @@ github.com/davecgh/go-spew/spew
 ## explicit; go 1.13
 github.com/emicklei/go-restful/v3
 github.com/emicklei/go-restful/v3/log
+# github.com/fsnotify/fsnotify v1.8.0
+## explicit; go 1.17
+github.com/fsnotify/fsnotify
+github.com/fsnotify/fsnotify/internal
 # github.com/fxamacker/cbor/v2 v2.7.0
 ## explicit; go 1.17
 github.com/fxamacker/cbor/v2
@@ -350,7 +362,7 @@ github.com/prometheus/common/model
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
-# github.com/samber/lo v1.48.0
+# github.com/samber/lo v1.49.1
 ## explicit; go 1.18
 github.com/samber/lo
 github.com/samber/lo/internal/constraints
@@ -359,10 +371,10 @@ github.com/samber/lo/mutable
 # github.com/shopspring/decimal v1.4.0
 ## explicit; go 1.10
 github.com/shopspring/decimal
-# github.com/spf13/cobra v1.8.1
+# github.com/spf13/cobra v1.9.1
 ## explicit; go 1.15
 github.com/spf13/cobra
-# github.com/spf13/pflag v1.0.5
+# github.com/spf13/pflag v1.0.6
 ## explicit; go 1.12
 github.com/spf13/pflag
 # github.com/stretchr/testify v1.10.0
@@ -420,11 +432,15 @@ go.opentelemetry.io/otel/trace/noop
 # go.uber.org/mock v0.5.0
 ## explicit; go 1.22
 go.uber.org/mock/gomock
-# golang.org/x/crypto v0.32.0
+# golang.org/x/crypto v0.33.0
 ## explicit; go 1.20
 golang.org/x/crypto/pkcs12
 golang.org/x/crypto/pkcs12/internal/rc2
-# golang.org/x/net v0.34.0
+# golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+## explicit; go 1.20
+golang.org/x/exp/constraints
+golang.org/x/exp/slices
+# golang.org/x/net v0.35.0
 ## explicit; go 1.18
 golang.org/x/net/html
 golang.org/x/net/html/atom
@@ -433,23 +449,24 @@ golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
+golang.org/x/net/internal/httpcommon
 # golang.org/x/oauth2 v0.24.0
 ## explicit; go 1.18
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sync v0.10.0
+# golang.org/x/sync v0.11.0
 ## explicit; go 1.18
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.29.0
+# golang.org/x/sys v0.30.0
 ## explicit; go 1.18
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
-# golang.org/x/term v0.28.0
+# golang.org/x/term v0.29.0
 ## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.21.0
+# golang.org/x/text v0.22.0
 ## explicit; go 1.18
 golang.org/x/text/cases
 golang.org/x/text/encoding
@@ -473,7 +490,7 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/time v0.9.0
+# golang.org/x/time v0.10.0
 ## explicit; go 1.18
 golang.org/x/time/rate
 # golang.org/x/tools v0.28.0
@@ -526,7 +543,7 @@ gopkg.in/inf.v0
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# k8s.io/api v0.32.1
+# k8s.io/api v0.32.2
 ## explicit; go 1.23.0
 k8s.io/api/admissionregistration/v1
 k8s.io/api/admissionregistration/v1alpha1
@@ -585,7 +602,7 @@ k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
 k8s.io/api/storagemigration/v1alpha1
-# k8s.io/apimachinery v0.32.1
+# k8s.io/apimachinery v0.32.2
 ## explicit; go 1.23.0
 k8s.io/apimachinery/pkg/api/equality
 k8s.io/apimachinery/pkg/api/errors
@@ -641,7 +658,7 @@ k8s.io/apimachinery/pkg/version
 k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.32.1
+# k8s.io/client-go v0.32.2
 ## explicit; go 1.23.0
 k8s.io/client-go/applyconfigurations
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
@@ -967,13 +984,13 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/watchlist
 k8s.io/client-go/util/workqueue
-# k8s.io/cloud-provider v0.32.1
+# k8s.io/cloud-provider v0.32.2
 ## explicit; go 1.23.0
 k8s.io/cloud-provider
 k8s.io/cloud-provider/api
 k8s.io/cloud-provider/node/helpers
 k8s.io/cloud-provider/service/helpers
-# k8s.io/component-base v0.32.1
+# k8s.io/component-base v0.32.2
 ## explicit; go 1.23.0
 k8s.io/component-base/cli/flag
 k8s.io/component-base/featuregate
@@ -986,7 +1003,7 @@ k8s.io/component-base/metrics/legacyregistry
 k8s.io/component-base/metrics/prometheus/feature
 k8s.io/component-base/metrics/prometheusextension
 k8s.io/component-base/version
-# k8s.io/component-helpers v0.32.1
+# k8s.io/component-helpers v0.32.2
 ## explicit; go 1.23.0
 k8s.io/component-helpers/node/util
 # k8s.io/klog/v2 v2.130.1
@@ -1052,7 +1069,7 @@ sigs.k8s.io/cloud-provider-azure/pkg/util/string
 sigs.k8s.io/cloud-provider-azure/pkg/util/taints
 sigs.k8s.io/cloud-provider-azure/pkg/util/vm
 sigs.k8s.io/cloud-provider-azure/pkg/version
-# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.4.14
+# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.5.0
 ## explicit; go 1.23.1
 sigs.k8s.io/cloud-provider-azure/pkg/azclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/accountclient
@@ -1137,7 +1154,7 @@ sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworkclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworkclient/mock_virtualnetworkclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/virtualnetworklinkclient/mock_virtualnetworklinkclient
-# sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader v0.3.4
+# sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader v0.4.0
 ## explicit; go 1.23.1
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader
 # sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3
