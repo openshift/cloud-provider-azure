@@ -579,6 +579,14 @@ func (as *availabilitySet) GetZoneByNodeName(ctx context.Context, name string) (
 
 		failureDomain = as.makeZone(ptr.Deref(vm.Location, ""), zoneID)
 	} else {
+		if vm.Properties == nil {
+			return cloudprovider.Zone{}, fmt.Errorf("failed to retrieve PlatformFaultDomain because vm.Properties is nil")
+		}
+
+		if vm.Properties.InstanceView == nil {
+			return cloudprovider.Zone{}, fmt.Errorf("failed to retrieve PlatformFaultDomain because vm.Properties.InstanceView is nil")
+		}
+
 		// Availability zone is not used for the node, falling back to fault domain.
 		failureDomain = strconv.Itoa(int(ptr.Deref(vm.Properties.InstanceView.PlatformFaultDomain, 0)))
 	}
