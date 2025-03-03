@@ -76,7 +76,7 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.5.1
+# sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.5.4
 ## explicit; go 1.23.1
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/policy/retryrepectthrottled
 sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils
