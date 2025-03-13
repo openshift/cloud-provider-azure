@@ -402,7 +402,10 @@ test-e2e: ## Run k8s e2e tests.
 test-e2e-capz: ## Run k8s e2e tests with capz
 	hack/test_k8s_e2e_capz.sh $(TEST_E2E_ARGS)
 
-test-ccm-e2e: ## Run cloud provider e2e tests.
+ensure-azcli:
+	hack/ensure-azcli.sh
+
+test-ccm-e2e: ensure-azcli ## Run cloud provider e2e tests.
 	hack/test-ccm-e2e.sh
 
 .PHONY: clean
@@ -456,9 +459,3 @@ LINTER_VERSION = v1.60.1
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
 	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
-
-## --------------------------------------
-## Openshift specific include
-## --------------------------------------
-
-include openshift.mk
