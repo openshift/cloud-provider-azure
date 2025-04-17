@@ -667,13 +667,12 @@ func (az *Cloud) cleanOrphanedLoadBalancer(ctx context.Context, lb *armnetwork.L
 		klog.V(2).Infof("cleanOrphanedLoadBalancer(%s, %s, %s): deleting the LB since there are no remaining frontendIPConfigurations", lbName, serviceName, clusterName)
 
 		// Remove backend pools from vmSets. This is required for virtual machine scale sets before removing the LB.
-		vmSetName := az.mapLoadBalancerNameToVMSet(lbName, clusterName)
 		if _, ok := az.VMSet.(*availabilitySet); ok {
 			// do nothing for availability set
 			lb.Properties.BackendAddressPools = nil
 		}
 
-		if deleteErr := az.safeDeleteLoadBalancer(ctx, *lb, clusterName, vmSetName, service); deleteErr != nil {
+		if deleteErr := az.safeDeleteLoadBalancer(ctx, *lb, clusterName, service); deleteErr != nil {
 			klog.Warningf("cleanOrphanedLoadBalancer(%s, %s, %s): failed to DeleteLB: %v", lbName, serviceName, clusterName, deleteErr)
 
 			rgName, vmssName, parseErr := errutils.GetVMSSMetadataByRawError(deleteErr)
@@ -713,7 +712,8 @@ func (az *Cloud) cleanOrphanedLoadBalancer(ctx context.Context, lb *armnetwork.L
 }
 
 // safeDeleteLoadBalancer deletes the load balancer after decoupling it from the vmSet
-func (az *Cloud) safeDeleteLoadBalancer(ctx context.Context, lb armnetwork.LoadBalancer, _, vmSetName string, service *v1.Service) error {
+func (az *Cloud) safeDeleteLoadBalancer(ctx context.Context, lb armnetwork.LoadBalancer, clusterName string, service *v1.Service) error {
+	vmSetName := az.mapLoadBalancerNameToVMSet(ptr.Deref(lb.Name, ""), clusterName)
 	lbBackendPoolIDsToDelete := []string{}
 	if lb.Properties != nil && lb.Properties.BackendAddressPools != nil {
 		for _, bp := range lb.Properties.BackendAddressPools {
@@ -1139,6 +1139,18 @@ func (az *Cloud) ensurePublicIPExists(ctx context.Context, service *v1.Service, 
 
 		if pip.Tags == nil {
 			pip.Tags = make(map[string]*string)
+		}
+
+		if az.UseStandardLoadBalancer() {
+			if pip.SKU == nil {
+				pip.SKU = &armnetwork.PublicIPAddressSKU{
+					Name: to.Ptr(armnetwork.PublicIPAddressSKUNameStandard),
+				}
+				changed = true
+			} else if !strings.EqualFold(string(*pip.SKU.Name), string(armnetwork.PublicIPAddressSKUNameStandard)) {
+				pip.SKU.Name = ptr.To(armnetwork.PublicIPAddressSKUNameStandard)
+				changed = true
+			}
 		}
 
 		// return if pip exist and dns label is the same
@@ -1774,6 +1786,11 @@ func (az *Cloud) reconcileLoadBalancer(ctx context.Context, clusterName string, 
 	existingLBs, err := az.ListManagedLBs(ctx, service, nodes, clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("reconcileLoadBalancer: failed to list managed LB: %w", err)
+	}
+
+	if existingLBs, err = az.cleanupBasicLoadBalancer(ctx, clusterName, service, existingLBs); err != nil {
+		klog.ErrorS(err, "reconcileLoadBalancer: failed to check and remove outdated basic load balancers", "service", serviceName)
+		return nil, err
 	}
 
 	// Delete backend pools for local service if:
@@ -2614,6 +2631,10 @@ func (az *Cloud) reconcileFrontendIPConfigs(
 					klog.V(4).Infof("reconcileFrontendIPConfigs for service (%s): keep the original private IP %s", serviceName, privateIP)
 					configProperties.PrivateIPAllocationMethod = to.Ptr(armnetwork.IPAllocationMethodStatic)
 					configProperties.PrivateIPAddress = ptr.To(privateIP)
+				} else if len(service.Status.LoadBalancer.Ingress) > 0 && ingressIPInSubnet(service.Status.LoadBalancer.Ingress) {
+					klog.V(4).Infof("reconcileFrontendIPConfigs for service (%s): keep the original private IP %s from service.status.loadbalacner.ingress", serviceName, privateIP)
+					configProperties.PrivateIPAllocationMethod = to.Ptr(armnetwork.IPAllocationMethodStatic)
+					configProperties.PrivateIPAddress = ptr.To(privateIP)
 				} else {
 					// We'll need to call GetLoadBalancer later to retrieve allocated IP.
 					klog.V(4).Infof("reconcileFrontendIPConfigs for service (%s): dynamically allocate the private IP", serviceName)
@@ -2979,11 +3000,11 @@ func (az *Cloud) getExpectedLoadBalancingRulePropertiesForPort(
 	var lbIdleTimeout *int32
 	if lbIdleTimeout, err = consts.Getint32ValueFromK8sSvcAnnotation(service.Annotations, consts.ServiceAnnotationLoadBalancerIdleTimeout, func(val *int32) error {
 		const (
-			min = 4
-			max = 100
+			idleTimoutMin  = 4
+			idleTimeoutMax = 100
 		)
-		if *val < min || *val > max {
-			return fmt.Errorf("idle timeout value must be a whole number representing minutes between %d and %d, actual value: %d", min, max, *val)
+		if *val < idleTimoutMin || *val > idleTimeoutMax {
+			return fmt.Errorf("idle timeout value must be a whole number representing minutes between %d and %d, actual value: %d", idleTimoutMin, idleTimeoutMax, *val)
 		}
 		return nil
 	}); err != nil {
@@ -3267,12 +3288,28 @@ func (az *Cloud) ensurePIPTagged(service *v1.Service, pip *armnetwork.PublicIPAd
 
 // reconcilePublicIPs reconciles the PublicIP resources similar to how the LB is reconciled.
 func (az *Cloud) reconcilePublicIPs(ctx context.Context, clusterName string, service *v1.Service, lbName string, wantLb bool) ([]*armnetwork.PublicIPAddress, error) {
+	logger := klog.FromContext(ctx).WithName("reconcilePublicIPs").
+		WithValues("loadBalancer", lbName)
+
 	pipResourceGroup := az.getPublicIPAddressResourceGroup(service)
 
-	reconciledPIPs := []*armnetwork.PublicIPAddress{}
-	pips, err := az.listPIP(ctx, pipResourceGroup, azcache.CacheReadTypeDefault)
+	reconciledPIPs := make([]*armnetwork.PublicIPAddress, 0)
+
+	var (
+		pips []*armnetwork.PublicIPAddress
+		err  error
+	)
+	pips, err = az.listPIP(ctx, pipResourceGroup, azcache.CacheReadTypeDefault)
 	if err != nil {
 		return nil, err
+	}
+	if !strings.EqualFold(az.ResourceGroup, pipResourceGroup) {
+		pipsFromClusterRG, err := az.listPIP(ctx, az.ResourceGroup, azcache.CacheReadTypeDefault)
+		if err != nil {
+			logger.Error(err, "Failed to list public IPs from cluster resource group", "resourceGroup", az.ResourceGroup)
+			return nil, err
+		}
+		pips = append(pips, pipsFromClusterRG...)
 	}
 
 	pipsV4, pipsV6 := []*armnetwork.PublicIPAddress{}, []*armnetwork.PublicIPAddress{}
@@ -3309,6 +3346,7 @@ func (az *Cloud) reconcilePublicIPs(ctx context.Context, clusterName string, ser
 
 // reconcilePublicIP reconciles the PublicIP resources similar to how the LB is reconciled with the specified IP family.
 func (az *Cloud) reconcilePublicIP(ctx context.Context, pips []*armnetwork.PublicIPAddress, clusterName string, service *v1.Service, lbName string, wantLb, isIPv6 bool) (*armnetwork.PublicIPAddress, error) {
+	logger := klog.FromContext(ctx).WithName("reconcilePublicIP")
 	isInternal := requiresInternalLoadBalancer(service)
 	serviceName := getServiceName(service)
 	serviceIPTagRequest := getServiceIPTagRequestForPublicIP(service)
@@ -3345,7 +3383,7 @@ func (az *Cloud) reconcilePublicIP(ctx context.Context, pips []*armnetwork.Publi
 	for _, pip := range pipsToBeUpdated {
 		pipCopy := *pip
 		updateFuncs = append(updateFuncs, func() error {
-			klog.V(2).Infof("reconcilePublicIP for service(%s): pip(%s), isIPv6(%v) - updating", serviceName, *pip.Name, isIPv6)
+			logger.V(2).Info("reconcilePublicIP for service", "service", serviceName, "pip", *pip.Name, "isIPv6", isIPv6, "action", "updating")
 			return az.CreateOrUpdatePIP(service, pipResourceGroup, &pipCopy)
 		})
 	}
@@ -3357,8 +3395,16 @@ func (az *Cloud) reconcilePublicIP(ctx context.Context, pips []*armnetwork.Publi
 	for _, pip := range pipsToBeDeleted {
 		pipCopy := *pip
 		deleteFuncs = append(deleteFuncs, func() error {
-			klog.V(2).Infof("reconcilePublicIP for service(%s): pip(%s), isIPv6(%v) - deleting", serviceName, *pip.Name, isIPv6)
-			return az.safeDeletePublicIP(ctx, service, pipResourceGroup, &pipCopy, lb)
+			pipID := strings.ToLower((ptr.Deref(pipCopy.ID, "")))
+			rg, err := getPIPRGFromID(pipID)
+			if err != nil {
+				logger.Error(err, "Failed to get resource group from PIP ID", "pip-id", pipID)
+				return err
+			}
+			logger.V(2).Info("reconcilePublicIP for service",
+				"service", serviceName, "pip", *pip.Name, "rg", rg, "isIPv6", isIPv6, "action", "deleting",
+			)
+			return az.safeDeletePublicIP(ctx, service, rg, &pipCopy, lb)
 		})
 	}
 	errs = utilerrors.AggregateGoroutines(deleteFuncs...)
