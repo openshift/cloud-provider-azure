@@ -105,6 +105,7 @@ type accountWithLocation struct {
 type AccountRepo struct {
 	azureconfig.Config
 	Environment          *azclient.Environment
+	AuthProvider         *azclient.AuthProvider
 	ComputeClientFactory azclient.ClientFactory
 	NetworkClientFactory azclient.ClientFactory
 	subnetRepo           subnet.Repository
@@ -113,7 +114,7 @@ type AccountRepo struct {
 	lockMap              *lockmap.LockMap
 }
 
-func NewRepository(config azureconfig.Config, env *azclient.Environment, computeClientFactory azclient.ClientFactory, networkClientFactory azclient.ClientFactory) (*AccountRepo, error) {
+func NewRepository(config azureconfig.Config, env *azclient.Environment, authProvider *azclient.AuthProvider, computeClientFactory azclient.ClientFactory, networkClientFactory azclient.ClientFactory) (*AccountRepo, error) {
 	getter := func(_ context.Context, _ string) (*armstorage.Account, error) { return nil, nil }
 	storageAccountCache, err := cache.NewTimedCache(time.Minute, getter, config.DisableAPICallCache)
 	if err != nil {
@@ -131,6 +132,7 @@ func NewRepository(config azureconfig.Config, env *azclient.Environment, compute
 		Config:               config,
 		Environment:          env,
 		fileServiceRepo:      fileserviceRepo,
+		AuthProvider:         authProvider,
 		ComputeClientFactory: computeClientFactory,
 		NetworkClientFactory: networkClientFactory,
 		subnetRepo:           subnetRepo,
@@ -190,9 +192,13 @@ func (az *AccountRepo) getStorageAccounts(ctx context.Context, storageAccountCli
 			}
 
 			accounts = append(accounts, accountWithLocation{Name: *acct.Name, StorageType: string(*acct.SKU.Name), Location: *acct.Location})
-			if !accountOptions.PickRandomMatchingAccount {
+			if !accountOptions.PickRandomMatchingAccount && accountOptions.SourceAccountName == "" {
 				// return the first matching account if it's not required to pick a random one
+				// or does not need to find a matching account with source account name
 				break
+			}
+			if accountOptions.SourceAccountName == *acct.Name {
+				return accounts, nil
 			}
 		}
 	}
@@ -412,6 +418,7 @@ func (az *AccountRepo) EnsureStorageAccount(ctx context.Context, accountOptions 
 			}
 
 			if len(accounts) > 0 {
+				klog.V(4).Infof("found %d matching accounts", len(accounts))
 				index := 0
 				if accountOptions.PickRandomMatchingAccount {
 					// randomly pick one matching account
@@ -425,6 +432,7 @@ func (az *AccountRepo) EnsureStorageAccount(ctx context.Context, accountOptions 
 				accountName = accounts[index].Name
 				createNewAccount = false
 				if accountOptions.SourceAccountName != "" {
+					klog.V(4).Infof("source account name(%s) is provided, try to find a matching account with source account name", accountOptions.SourceAccountName)
 					for _, acct := range accounts {
 						if acct.Name == accountOptions.SourceAccountName {
 							klog.V(2).Infof("found a matching account %s type %s location %s with source account name", acct.Name, acct.StorageType, acct.Location)
@@ -433,7 +441,7 @@ func (az *AccountRepo) EnsureStorageAccount(ctx context.Context, accountOptions 
 						}
 					}
 				}
-				klog.V(4).Infof("found a matching account %s type %s location %s", accounts[index].Name, accounts[index].StorageType, accounts[index].Location)
+				klog.V(4).Infof("found a matching account %s with account index %d", accountName, index)
 			}
 		}
 
