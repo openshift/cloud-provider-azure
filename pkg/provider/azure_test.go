@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
@@ -214,10 +216,9 @@ func setMockPublicIP(az *Cloud, mockPIPsClient *mock_publicipaddressclient.MockI
 			SKU: &armnetwork.PublicIPAddressSKU{
 				Name: to.Ptr(armnetwork.PublicIPAddressSKUNameStandard),
 			},
-			ID: ptr.To("testCluster-aservice1"),
+			ID: ptr.To(fmt.Sprintf("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/testCluster-aservice%d%s", i, suffix)),
 		}
 		expectedPIP.Name = ptr.To(fmt.Sprintf("testCluster-aservice%d%s", i, suffix))
-		expectedPIP.ID = ptr.To(fmt.Sprintf("testCluster-aservice%d%s", i, suffix))
 		expectedPIP.Properties = &armnetwork.PublicIPAddressPropertiesFormat{
 			PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 			PublicIPAddressVersion:   ipVer,
@@ -228,12 +229,12 @@ func setMockPublicIP(az *Cloud, mockPIPsClient *mock_publicipaddressclient.MockI
 		mockPIPsClient.EXPECT().Delete(gomock.Any(), az.ResourceGroup, fmt.Sprintf("testCluster-aservice%d%s", i, suffix)).Return(nil).AnyTimes()
 		expectedPIPs = append(expectedPIPs, expectedPIP)
 		expectedPIP = &armnetwork.PublicIPAddress{
-			Name:     ptr.To("testCluster-aservicea"),
+			Name:     ptr.To(fmt.Sprintf("testCluster-aservice%c%s", a, suffix)),
 			Location: &az.Location,
 			Properties: &armnetwork.PublicIPAddressPropertiesFormat{
 				PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 				PublicIPAddressVersion:   ipVer,
-				IPAddress:                ptr.To(ipAddr1),
+				IPAddress:                ptr.To(ipAddra),
 			},
 			Tags: map[string]*string{
 				consts.ServiceTagKey:  ptr.To("default/servicea"),
@@ -242,21 +243,7 @@ func setMockPublicIP(az *Cloud, mockPIPsClient *mock_publicipaddressclient.MockI
 			SKU: &armnetwork.PublicIPAddressSKU{
 				Name: to.Ptr(armnetwork.PublicIPAddressSKUNameStandard),
 			},
-			ID: ptr.To("testCluster-aservice1"),
-		}
-		expectedPIP.Name = ptr.To(fmt.Sprintf("testCluster-aservice%d%s", i, suffix))
-		expectedPIP.ID = ptr.To(fmt.Sprintf("testCluster-aservice%d%s", i, suffix))
-		expectedPIP.Properties = &armnetwork.PublicIPAddressPropertiesFormat{
-			PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
-			PublicIPAddressVersion:   ipVer,
-			IPAddress:                ptr.To(ipAddr1),
-		}
-		expectedPIP.Name = ptr.To(fmt.Sprintf("testCluster-aservice%c%s", a, suffix))
-		expectedPIP.ID = ptr.To(fmt.Sprintf("testCluster-aservice%c%s", a, suffix))
-		expectedPIP.Properties = &armnetwork.PublicIPAddressPropertiesFormat{
-			PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
-			PublicIPAddressVersion:   ipVer,
-			IPAddress:                ptr.To(ipAddra),
+			ID: ptr.To(fmt.Sprintf("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/testCluster-aservice%d%s", i, suffix)),
 		}
 		expectedPIP.Tags[consts.ServiceTagKey] = ptr.To(fmt.Sprintf("default/service%c", a))
 		mockPIPsClient.EXPECT().Get(gomock.Any(), az.ResourceGroup, fmt.Sprintf("testCluster-aservice%c%s", a, suffix), gomock.Any()).Return(expectedPIP, nil).AnyTimes()
@@ -543,6 +530,9 @@ func TestReconcileLoadBalancerAddServicesOnMultipleSubnets(t *testing.T) {
 	}).AnyTimes()
 	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
+	mockPLSRepo := az.plsRepo.(*privatelinkservice.MockRepository)
+	mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil)
+
 	// svc1 is using LB without "-internal" suffix
 	lb, err := az.reconcileLoadBalancer(context.TODO(), testClusterName, &svc1, clusterResources.nodes, true /* wantLb */)
 	if err != nil {
@@ -713,6 +703,9 @@ func TestReconcileLoadBalancerRemoveAllPortsRemovesFrontendConfig(t *testing.T) 
 		return false, false, lb, nil
 	}).AnyTimes()
 	mockLBBackendPool.EXPECT().EnsureHostsInPool(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	mockPLSRepo := az.plsRepo.(*privatelinkservice.MockRepository)
+	mockPLSRepo.EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&armnetwork.PrivateLinkService{ID: to.Ptr(consts.PrivateLinkServiceNotExistID)}, nil).AnyTimes()
 
 	lb, err := az.reconcileLoadBalancer(context.TODO(), testClusterName, &svc, clusterResources.nodes, true /* wantLb */)
 	assert.Nil(t, err)
@@ -2447,6 +2440,163 @@ func TestInitializeCloudFromConfig(t *testing.T) {
 		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
 		assert.NoError(t, err)
 		assert.Equal(t, az.Config.LoadBalancerBackendPoolConfigurationType, consts.LoadBalancerBackendPoolConfigurationTypeNodeIPConfiguration)
+	})
+
+	t.Run("should setup network client factory with network subscription ID - same network sub in same tenant", func(t *testing.T) {
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		az := GetTestCloud(ctrl)
+		zoneMock := az.zoneRepo.(*zone.MockRepository)
+		zoneMock.EXPECT().ListZones(gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).AnyTimes()
+
+		const (
+			tenantID       = "tenant-id"
+			subscriptionID = "subscription-id"
+		)
+
+		az.ComputeClientFactory = nil
+		az.NetworkClientFactory = nil
+
+		azureconfig := config.Config{}
+		azureconfig.ARMClientConfig.TenantID = tenantID
+		azureconfig.SubscriptionID = subscriptionID
+
+		nCall := 0
+		newARMClientFactory = func(
+			config *azclient.ClientFactoryConfig,
+			armConfig *azclient.ARMClientConfig,
+			cloud cloud.Configuration,
+			cred azcore.TokenCredential,
+			clientOptionsMutFn ...func(option *arm.ClientOptions),
+		) (azclient.ClientFactory, error) {
+			switch nCall {
+			case 0:
+				// It should create network client factory
+				assert.Equal(t, subscriptionID, config.SubscriptionID)
+			case 1:
+				// It should create compute client factory
+				assert.Equal(t, subscriptionID, config.SubscriptionID)
+			default:
+				panic("unexpected call")
+			}
+			nCall++
+			return azclient.NewClientFactory(config, armConfig, cloud, cred, clientOptionsMutFn...)
+		}
+		defer func() {
+			newARMClientFactory = azclient.NewClientFactory
+		}()
+
+		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("should setup network client factory with network subscription ID - different network sub in same tenant", func(t *testing.T) {
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		az := GetTestCloud(ctrl)
+		zoneMock := az.zoneRepo.(*zone.MockRepository)
+		zoneMock.EXPECT().ListZones(gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).AnyTimes()
+
+		const (
+			tenantID              = "tenant-id"
+			networkSubscriptionID = "network-subscription-id"
+			computeSubscriptionID = "compute-subscription-id"
+		)
+
+		az.ComputeClientFactory = nil
+		az.NetworkClientFactory = nil
+
+		azureconfig := config.Config{}
+		azureconfig.ARMClientConfig.TenantID = tenantID
+		azureconfig.ARMClientConfig.NetworkResourceTenantID = tenantID
+		azureconfig.NetworkResourceSubscriptionID = networkSubscriptionID
+		azureconfig.SubscriptionID = computeSubscriptionID
+
+		nCall := 0
+		newARMClientFactory = func(
+			config *azclient.ClientFactoryConfig,
+			armConfig *azclient.ARMClientConfig,
+			cloud cloud.Configuration,
+			cred azcore.TokenCredential,
+			clientOptionsMutFn ...func(option *arm.ClientOptions),
+		) (azclient.ClientFactory, error) {
+			switch nCall {
+			case 0:
+				// It should create network client factory
+				assert.Equal(t, networkSubscriptionID, config.SubscriptionID)
+			case 1:
+				// It should create compute client factory
+				assert.Equal(t, computeSubscriptionID, config.SubscriptionID)
+			default:
+				panic("unexpected call")
+			}
+			nCall++
+			return azclient.NewClientFactory(config, armConfig, cloud, cred, clientOptionsMutFn...)
+		}
+		defer func() {
+			newARMClientFactory = azclient.NewClientFactory
+		}()
+
+		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("should setup network client factory with network subscription ID - different network sub in different tenant", func(t *testing.T) {
+
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		az := GetTestCloud(ctrl)
+		zoneMock := az.zoneRepo.(*zone.MockRepository)
+		zoneMock.EXPECT().ListZones(gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).AnyTimes()
+
+		const (
+			tenantID              = "tenant-id"
+			networkTenantID       = "network-tenant-id"
+			networkSubscriptionID = "network-subscription-id"
+			computeSubscriptionID = "compute-subscription-id"
+		)
+
+		az.ComputeClientFactory = nil
+		az.NetworkClientFactory = nil
+
+		azureconfig := config.Config{}
+		azureconfig.ARMClientConfig.TenantID = tenantID
+		azureconfig.ARMClientConfig.NetworkResourceTenantID = networkTenantID
+		azureconfig.NetworkResourceSubscriptionID = networkSubscriptionID
+		azureconfig.SubscriptionID = computeSubscriptionID
+
+		nCall := 0
+		newARMClientFactory = func(
+			config *azclient.ClientFactoryConfig,
+			armConfig *azclient.ARMClientConfig,
+			cloud cloud.Configuration,
+			cred azcore.TokenCredential,
+			clientOptionsMutFn ...func(option *arm.ClientOptions),
+		) (azclient.ClientFactory, error) {
+			switch nCall {
+			case 0:
+				// It should create network client factory
+				assert.Equal(t, networkSubscriptionID, config.SubscriptionID)
+			case 1:
+				// It should create compute client factory
+				assert.Equal(t, computeSubscriptionID, config.SubscriptionID)
+			default:
+				panic("unexpected call")
+			}
+			nCall++
+			return azclient.NewClientFactory(config, armConfig, cloud, cred, clientOptionsMutFn...)
+		}
+		defer func() {
+			newARMClientFactory = azclient.NewClientFactory
+		}()
+
+		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
+		assert.NoError(t, err)
 	})
 }
 
