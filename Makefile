@@ -131,7 +131,7 @@ $(BIN_DIR)/azure-acr-credential-provider.exe: $(PKG_CONFIG) $(wildcard cmd/acr-c
 ## --------------------------------------
 ##@ Images
 ## --------------------------------------
-
+.PHONY: buildx-setup
 buildx-setup:
 	$(DOCKER_BUILDX) inspect img-builder > /dev/null 2>&1 || $(DOCKER_BUILDX) create --name img-builder --use
 	# enable qemu for arm64 build
@@ -359,7 +359,7 @@ test-check: test-boilerplate test-helm ## Run all static checks.
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint against code.
-	$(LINTER) run -v -E exportloopref
+	$(LINTER) run -v
 
 .PHONY: test-boilerplate
 test-boilerplate: ## Run boilerplate test.
@@ -402,7 +402,10 @@ test-e2e: ## Run k8s e2e tests.
 test-e2e-capz: ## Run k8s e2e tests with capz
 	hack/test_k8s_e2e_capz.sh $(TEST_E2E_ARGS)
 
-test-ccm-e2e: ## Run cloud provider e2e tests.
+ensure-azcli:
+	hack/ensure-azcli.sh
+
+test-ccm-e2e: ensure-azcli ## Run cloud provider e2e tests.
 	hack/test-ccm-e2e.sh
 
 .PHONY: clean
@@ -451,7 +454,7 @@ delete-workload-cluster:
 ##@ Tools
 
 LINTER = $(shell pwd)/bin/golangci-lint
-LINTER_VERSION = v1.60.1
+LINTER_VERSION = v1.64.8
 .PHONY: golangci-lint
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
