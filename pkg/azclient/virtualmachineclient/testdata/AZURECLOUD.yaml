@@ -1,0 +1,1332 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 21
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"location":"eastus"}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "21"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-VirtualMachine?api-version=2021-04-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 241
+        uncompressed: false
+        body: '{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine","name":"aks-cit-VirtualMachine","type":"Microsoft.Resources/resourceGroups","location":"eastus","properties":{"provisioningState":"Succeeded"}}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "241"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 201 Created
+        code: 201
+        duration: 200ms
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 163
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"location":"eastus","properties":{"addressSpace":{"addressPrefixes":["10.1.0.0/16"]},"subnets":[{"name":"subnet1","properties":{"addressPrefix":"10.1.0.0/24"}}]}}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "163"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1?api-version=2024-05-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 1007
+        uncompressed: false
+        body: '{"name":"vnet1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"eastus","properties":{"provisioningState":"Updating","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["10.1.0.0/16"]},"privateEndpointVNetPolicies":"Disabled","subnets":[{"name":"subnet1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","properties":{"provisioningState":"Updating","addressPrefix":"10.1.0.0/24","delegations":[],"privateEndpointNetworkPolicies":"Disabled","privateLinkServiceNetworkPolicies":"Enabled"},"type":"Microsoft.Network/virtualNetworks/subnets"}],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        headers:
+            Azure-Asyncnotification:
+                - Enabled
+            Azure-Asyncoperation:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "1007"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 201 Created
+        code: 201
+        duration: 200ms
+    - id: 2
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 22
+        uncompressed: false
+        body: '{"status":"Succeeded"}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "22"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 3
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1?api-version=2024-05-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 1009
+        uncompressed: false
+        body: '{"name":"vnet1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/virtualNetworks","location":"eastus","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","addressSpace":{"addressPrefixes":["10.1.0.0/16"]},"privateEndpointVNetPolicies":"Disabled","subnets":[{"name":"subnet1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","properties":{"provisioningState":"Succeeded","addressPrefix":"10.1.0.0/24","delegations":[],"privateEndpointNetworkPolicies":"Disabled","privateLinkServiceNetworkPolicies":"Enabled"},"type":"Microsoft.Network/virtualNetworks/subnets"}],"virtualNetworkPeerings":[],"enableDdosProtection":false}}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "1009"
+            Content-Type:
+                - application/json; charset=utf-8
+            Etag:
+                - W/"00000000-0000-0000-0000-000000000000"
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 4
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 609
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"location":"eastus","properties":{"ipConfigurations":[{"name":"ipConfig1","properties":{"privateIPAllocationMethod":"Dynamic","subnet":{"etag":"W/\"00000000-0000-0000-0000-000000000000\"","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1","name":"subnet1","properties":{"addressPrefix":"10.1.0.0/24","delegations":[],"privateEndpointNetworkPolicies":"Disabled","privateLinkServiceNetworkPolicies":"Enabled","provisioningState":"Succeeded"},"type":"Microsoft.Network/virtualNetworks/subnets"}}}]}}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "609"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1?api-version=2024-05-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 1504
+        uncompressed: false
+        body: '{"name":"nic1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","properties":{"provisioningState":"Succeeded","resourceGuid":"00000000-0000-0000-0000-000000000000","ipConfigurations":[{"name":"ipConfig1","id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1/ipConfigurations/ipConfig1","etag":"W/\"00000000-0000-0000-0000-000000000000\"","type":"Microsoft.Network/networkInterfaces/ipConfigurations","properties":{"provisioningState":"Succeeded","privateIPAddress":"10.1.0.4","privateIPAllocationMethod":"Dynamic","subnet":{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1/subnets/subnet1"},"primary":true,"privateIPAddressVersion":"IPv4"}}],"dnsSettings":{"dnsServers":[],"appliedDnsServers":[],"internalDomainNameSuffix":"dbnwjppl2phedkr0o2t5b31pga.bx.internal.cloudapp.net"},"enableAcceleratedNetworking":false,"vnetEncryptionSupported":false,"enableIPForwarding":false,"disableTcpStateTracking":false,"hostedWorkloads":[],"tapConfigurations":[],"nicType":"Standard","allowPort25Out":true,"defaultOutboundConnectivityEnabled":false,"auxiliaryMode":"None","auxiliarySku":"None"},"type":"Microsoft.Network/networkInterfaces","location":"eastus","kind":"Regular"}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "1504"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 201 Created
+        code: 201
+        duration: 200ms
+    - id: 5
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource/instanceView?api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 240
+        uncompressed: false
+        body: '{"error":{"code":"ResourceNotFound","message":"The Resource ''Microsoft.Compute/virtualMachines/testResource'' under resource group ''aks-cit-VirtualMachine'' was not found. For more details please go to https://aka.ms/ARMResourceNotFoundFix"}}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "240"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Failure-Cause:
+                - gateway
+        status: 404 Not Found
+        code: 404
+        duration: 200ms
+    - id: 6
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines?%24expand=instanceView&api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 12
+        uncompressed: false
+        body: '{"value":[]}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "12"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16498"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 7
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines?%24expand=instanceView&%24filter=%27virtualMachineScaleSet%2Fid%27+eq+%27notexists%27&api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 12
+        uncompressed: false
+        body: '{"value":[]}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "12"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 8
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines?%24filter=%27virtualMachineScaleSet%2Fid%27+eq+%27notexists%27&api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 12
+        uncompressed: false
+        body: '{"value":[]}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "12"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16497"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 9
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 678
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"identity":{"type":"None"},"location":"eastus","properties":{"hardwareProfile":{"vmSize":"Standard_D2s_v3"},"networkProfile":{"networkInterfaces":[{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1"}]},"osProfile":{"adminPassword":"{PASSWORD}","adminUsername":"sample-user","computerName":"sample-compute"},"storageProfile":{"imageReference":{"offer":"WindowsServer","publisher":"MicrosoftWindowsServer","sku":"2019-Datacenter","version":"latest"},"osDisk":{"caching":"ReadWrite","createOption":"FromImage","managedDisk":{"storageAccountType":"Standard_LRS"},"name":"disk1"}}}}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "678"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 2121
+        uncompressed: false
+        body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource\",\r\n  \"type\": \"Microsoft.Compute/virtualMachines\",\r\n  \"location\": \"eastus\",\r\n  \"tags\": {\r\n    \"azsecpack\": \"nonprod\",\r\n    \"platformsettings.host_environment.service.platform_optedin_for_rootcerts\": \"true\"\r\n  },\r\n  \"identity\": {\r\n    \"type\": \"SystemAssigned\",\r\n    \"principalId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"tenantId\": \"tenantid\"\r\n  },\r\n  \"properties\": {\r\n    \"hardwareProfile\": {\r\n      \"vmSize\": \"Standard_D2s_v3\"\r\n    },\r\n    \"provisioningState\": \"Creating\",\r\n    \"vmId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"storageProfile\": {\r\n      \"imageReference\": {\r\n        \"publisher\": \"MicrosoftWindowsServer\",\r\n        \"offer\": \"WindowsServer\",\r\n        \"sku\": \"2019-Datacenter\",\r\n        \"version\": \"latest\",\r\n        \"exactVersion\": \"17763.6775.250109\"\r\n      },\r\n      \"osDisk\": {\r\n        \"osType\": \"Windows\",\r\n        \"name\": \"disk1\",\r\n        \"createOption\": \"FromImage\",\r\n        \"caching\": \"ReadWrite\",\r\n        \"managedDisk\": {\r\n          \"storageAccountType\": \"Standard_LRS\"\r\n        },\r\n        \"deleteOption\": \"Detach\",\r\n        \"diskSizeGB\": 127\r\n      },\r\n      \"dataDisks\": []\r\n    },\r\n    \"osProfile\": {\r\n      \"computerName\": \"sample-compute\",\r\n      \"adminUsername\": \"sample-user\",\r\n      \"windowsConfiguration\": {\r\n        \"provisionVMAgent\": true,\r\n        \"enableAutomaticUpdates\": true,\r\n        \"patchSettings\": {\r\n          \"patchMode\": \"AutomaticByOS\",\r\n          \"assessmentMode\": \"ImageDefault\"\r\n        },\r\n        \"enableVMAgentPlatformUpdates\": true\r\n      },\r\n      \"secrets\": [],\r\n      \"allowExtensionOperations\": true,\r\n      \"requireGuestProvisionSignal\": true\r\n    },\r\n    \"networkProfile\": {\"networkInterfaces\":[{\"id\":\"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1\"}]},\r\n    \"timeCreated\": \"2001-02-03T04:05:06Z\"\r\n  },\r\n  \"etag\": \"\\\"1\\\"\"\r\n}"
+        headers:
+            Azure-Asyncnotification:
+                - Enabled
+            Azure-Asyncoperation:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-11-01&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "2121"
+            Content-Type:
+                - application/json; charset=utf-8
+            Etag:
+                - '"1"'
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 201 Created
+        code: 201
+        duration: 200ms
+    - id: 10
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-11-01&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 184
+        uncompressed: false
+        body: "{\r\n  \"startTime\": \"2001-02-03T04:05:06Z\",\r\n  \"endTime\": \"2001-02-03T04:05:06Z\",\r\n  \"status\": \"Succeeded\",\r\n  \"name\": \"00000000-0000-0000-0000-000000000000\"\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "184"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 11
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 2272
+        uncompressed: false
+        body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource\",\r\n  \"type\": \"Microsoft.Compute/virtualMachines\",\r\n  \"location\": \"eastus\",\r\n  \"tags\": {\r\n    \"azsecpack\": \"nonprod\",\r\n    \"platformsettings.host_environment.service.platform_optedin_for_rootcerts\": \"true\"\r\n  },\r\n  \"identity\": {\r\n    \"type\": \"SystemAssigned\",\r\n    \"principalId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"tenantId\": \"tenantid\"\r\n  },\r\n  \"properties\": {\r\n    \"hardwareProfile\": {\r\n      \"vmSize\": \"Standard_D2s_v3\"\r\n    },\r\n    \"provisioningState\": \"Succeeded\",\r\n    \"vmId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"storageProfile\": {\r\n      \"imageReference\": {\r\n        \"publisher\": \"MicrosoftWindowsServer\",\r\n        \"offer\": \"WindowsServer\",\r\n        \"sku\": \"2019-Datacenter\",\r\n        \"version\": \"latest\",\r\n        \"exactVersion\": \"17763.6775.250109\"\r\n      },\r\n      \"osDisk\": {\r\n        \"osType\": \"Windows\",\r\n        \"name\": \"disk1\",\r\n        \"createOption\": \"FromImage\",\r\n        \"caching\": \"ReadWrite\",\r\n        \"managedDisk\": {\r\n          \"storageAccountType\": \"Standard_LRS\",\r\n          \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/disks/disk1\"\r\n        },\r\n        \"deleteOption\": \"Detach\",\r\n        \"diskSizeGB\": 127\r\n      },\r\n      \"dataDisks\": []\r\n    },\r\n    \"osProfile\": {\r\n      \"computerName\": \"sample-compute\",\r\n      \"adminUsername\": \"sample-user\",\r\n      \"windowsConfiguration\": {\r\n        \"provisionVMAgent\": true,\r\n        \"enableAutomaticUpdates\": true,\r\n        \"patchSettings\": {\r\n          \"patchMode\": \"AutomaticByOS\",\r\n          \"assessmentMode\": \"ImageDefault\"\r\n        },\r\n        \"enableVMAgentPlatformUpdates\": true\r\n      },\r\n      \"secrets\": [],\r\n      \"allowExtensionOperations\": true,\r\n      \"requireGuestProvisionSignal\": true\r\n    },\r\n    \"networkProfile\": {\"networkInterfaces\":[{\"id\":\"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1\"}]},\r\n    \"timeCreated\": \"2001-02-03T04:05:06Z\"\r\n  },\r\n  \"etag\": \"\\\"2\\\"\"\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "2272"
+            Content-Type:
+                - application/json; charset=utf-8
+            Etag:
+                - '"2"'
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16498"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 12
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 678
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"identity":{"type":"None"},"location":"eastus","properties":{"hardwareProfile":{"vmSize":"Standard_D2s_v3"},"networkProfile":{"networkInterfaces":[{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1"}]},"osProfile":{"adminPassword":"{PASSWORD}","adminUsername":"sample-user","computerName":"sample-compute"},"storageProfile":{"imageReference":{"offer":"WindowsServer","publisher":"MicrosoftWindowsServer","sku":"2019-Datacenter","version":"latest"},"osDisk":{"caching":"ReadWrite","createOption":"FromImage","managedDisk":{"storageAccountType":"Standard_LRS"},"name":"disk1"}}}}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "678"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 2271
+        uncompressed: false
+        body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource\",\r\n  \"type\": \"Microsoft.Compute/virtualMachines\",\r\n  \"location\": \"eastus\",\r\n  \"tags\": {\r\n    \"azsecpack\": \"nonprod\",\r\n    \"platformsettings.host_environment.service.platform_optedin_for_rootcerts\": \"true\"\r\n  },\r\n  \"identity\": {\r\n    \"type\": \"SystemAssigned\",\r\n    \"principalId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"tenantId\": \"tenantid\"\r\n  },\r\n  \"properties\": {\r\n    \"hardwareProfile\": {\r\n      \"vmSize\": \"Standard_D2s_v3\"\r\n    },\r\n    \"provisioningState\": \"Updating\",\r\n    \"vmId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"storageProfile\": {\r\n      \"imageReference\": {\r\n        \"publisher\": \"MicrosoftWindowsServer\",\r\n        \"offer\": \"WindowsServer\",\r\n        \"sku\": \"2019-Datacenter\",\r\n        \"version\": \"latest\",\r\n        \"exactVersion\": \"17763.6775.250109\"\r\n      },\r\n      \"osDisk\": {\r\n        \"osType\": \"Windows\",\r\n        \"name\": \"disk1\",\r\n        \"createOption\": \"FromImage\",\r\n        \"caching\": \"ReadWrite\",\r\n        \"managedDisk\": {\r\n          \"storageAccountType\": \"Standard_LRS\",\r\n          \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/disks/disk1\"\r\n        },\r\n        \"deleteOption\": \"Detach\",\r\n        \"diskSizeGB\": 127\r\n      },\r\n      \"dataDisks\": []\r\n    },\r\n    \"osProfile\": {\r\n      \"computerName\": \"sample-compute\",\r\n      \"adminUsername\": \"sample-user\",\r\n      \"windowsConfiguration\": {\r\n        \"provisionVMAgent\": true,\r\n        \"enableAutomaticUpdates\": true,\r\n        \"patchSettings\": {\r\n          \"patchMode\": \"AutomaticByOS\",\r\n          \"assessmentMode\": \"ImageDefault\"\r\n        },\r\n        \"enableVMAgentPlatformUpdates\": true\r\n      },\r\n      \"secrets\": [],\r\n      \"allowExtensionOperations\": true,\r\n      \"requireGuestProvisionSignal\": true\r\n    },\r\n    \"networkProfile\": {\"networkInterfaces\":[{\"id\":\"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1\"}]},\r\n    \"timeCreated\": \"2001-02-03T04:05:06Z\"\r\n  },\r\n  \"etag\": \"\\\"3\\\"\"\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "2271"
+            Content-Type:
+                - application/json; charset=utf-8
+            Etag:
+                - '"3"'
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 13
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 2272
+        uncompressed: false
+        body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource\",\r\n  \"type\": \"Microsoft.Compute/virtualMachines\",\r\n  \"location\": \"eastus\",\r\n  \"tags\": {\r\n    \"azsecpack\": \"nonprod\",\r\n    \"platformsettings.host_environment.service.platform_optedin_for_rootcerts\": \"true\"\r\n  },\r\n  \"identity\": {\r\n    \"type\": \"SystemAssigned\",\r\n    \"principalId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"tenantId\": \"tenantid\"\r\n  },\r\n  \"properties\": {\r\n    \"hardwareProfile\": {\r\n      \"vmSize\": \"Standard_D2s_v3\"\r\n    },\r\n    \"provisioningState\": \"Succeeded\",\r\n    \"vmId\": \"00000000-0000-0000-0000-000000000000\",\r\n    \"storageProfile\": {\r\n      \"imageReference\": {\r\n        \"publisher\": \"MicrosoftWindowsServer\",\r\n        \"offer\": \"WindowsServer\",\r\n        \"sku\": \"2019-Datacenter\",\r\n        \"version\": \"latest\",\r\n        \"exactVersion\": \"17763.6775.250109\"\r\n      },\r\n      \"osDisk\": {\r\n        \"osType\": \"Windows\",\r\n        \"name\": \"disk1\",\r\n        \"createOption\": \"FromImage\",\r\n        \"caching\": \"ReadWrite\",\r\n        \"managedDisk\": {\r\n          \"storageAccountType\": \"Standard_LRS\",\r\n          \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/disks/disk1\"\r\n        },\r\n        \"deleteOption\": \"Detach\",\r\n        \"diskSizeGB\": 127\r\n      },\r\n      \"dataDisks\": []\r\n    },\r\n    \"osProfile\": {\r\n      \"computerName\": \"sample-compute\",\r\n      \"adminUsername\": \"sample-user\",\r\n      \"windowsConfiguration\": {\r\n        \"provisionVMAgent\": true,\r\n        \"enableAutomaticUpdates\": true,\r\n        \"patchSettings\": {\r\n          \"patchMode\": \"AutomaticByOS\",\r\n          \"assessmentMode\": \"ImageDefault\"\r\n        },\r\n        \"enableVMAgentPlatformUpdates\": true\r\n      },\r\n      \"secrets\": [],\r\n      \"allowExtensionOperations\": true,\r\n      \"requireGuestProvisionSignal\": true\r\n    },\r\n    \"networkProfile\": {\"networkInterfaces\":[{\"id\":\"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1\"}]},\r\n    \"timeCreated\": \"2001-02-03T04:05:06Z\"\r\n  },\r\n  \"etag\": \"\\\"3\\\"\"\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "2272"
+            Content-Type:
+                - application/json; charset=utf-8
+            Etag:
+                - '"3"'
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 14
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 695
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: '{"etag":"invalid","identity":{"type":"None"},"location":"eastus","properties":{"hardwareProfile":{"vmSize":"Standard_D2s_v3"},"networkProfile":{"networkInterfaces":[{"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1"}]},"osProfile":{"adminPassword":"{PASSWORD}","adminUsername":"sample-user","computerName":"sample-compute"},"storageProfile":{"imageReference":{"offer":"WindowsServer","publisher":"MicrosoftWindowsServer","sku":"2019-Datacenter","version":"latest"},"osDisk":{"caching":"ReadWrite","createOption":"FromImage","managedDisk":{"storageAccountType":"Standard_LRS"},"name":"disk1"}}}}'
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            Content-Length:
+                - "695"
+            Content-Type:
+                - application/json
+            If-Match:
+                - invalid
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: PUT
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 160
+        uncompressed: false
+        body: "{\r\n  \"error\": {\r\n    \"code\": \"PreconditionFailed\",\r\n    \"message\": \"Etag provided in if-match header \\\"invalid\\\" does not match etag \\\"3\\\" of resource.\"\r\n  }\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "160"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Writes:
+                - "11999"
+        status: 412 Precondition Failed
+        code: 412
+        duration: 200ms
+    - id: 15
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines?api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 2549
+        uncompressed: false
+        body: "{\r\n  \"value\": [\r\n    {\r\n      \"name\": \"testResource\",\r\n      \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource\",\r\n      \"type\": \"Microsoft.Compute/virtualMachines\",\r\n      \"location\": \"eastus\",\r\n      \"tags\": {\r\n        \"azsecpack\": \"nonprod\",\r\n        \"platformsettings.host_environment.service.platform_optedin_for_rootcerts\": \"true\"\r\n      },\r\n      \"identity\": {\r\n        \"type\": \"SystemAssigned\",\r\n        \"principalId\": \"00000000-0000-0000-0000-000000000000\",\r\n        \"tenantId\": \"tenantid\"\r\n      },\r\n      \"properties\": {\r\n        \"hardwareProfile\": {\r\n          \"vmSize\": \"Standard_D2s_v3\"\r\n        },\r\n        \"provisioningState\": \"Succeeded\",\r\n        \"vmId\": \"00000000-0000-0000-0000-000000000000\",\r\n        \"storageProfile\": {\r\n          \"imageReference\": {\r\n            \"publisher\": \"MicrosoftWindowsServer\",\r\n            \"offer\": \"WindowsServer\",\r\n            \"sku\": \"2019-Datacenter\",\r\n            \"version\": \"latest\",\r\n            \"exactVersion\": \"17763.6775.250109\"\r\n          },\r\n          \"osDisk\": {\r\n            \"osType\": \"Windows\",\r\n            \"name\": \"disk1\",\r\n            \"createOption\": \"FromImage\",\r\n            \"caching\": \"ReadWrite\",\r\n            \"managedDisk\": {\r\n              \"storageAccountType\": \"Standard_LRS\",\r\n              \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/disks/disk1\"\r\n            },\r\n            \"deleteOption\": \"Detach\",\r\n            \"diskSizeGB\": 127\r\n          },\r\n          \"dataDisks\": []\r\n        },\r\n        \"osProfile\": {\r\n          \"computerName\": \"sample-compute\",\r\n          \"adminUsername\": \"sample-user\",\r\n          \"windowsConfiguration\": {\r\n            \"provisionVMAgent\": true,\r\n            \"enableAutomaticUpdates\": true,\r\n            \"patchSettings\": {\r\n              \"patchMode\": \"AutomaticByOS\",\r\n              \"assessmentMode\": \"ImageDefault\"\r\n            },\r\n            \"enableVMAgentPlatformUpdates\": true\r\n          },\r\n          \"secrets\": [],\r\n          \"allowExtensionOperations\": true,\r\n          \"requireGuestProvisionSignal\": true\r\n        },\r\n        \"networkProfile\": {\"networkInterfaces\":[{\"id\":\"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1\"}]},\r\n        \"timeCreated\": \"2001-02-03T04:05:06Z\"\r\n      },\r\n      \"etag\": \"\\\"3\\\"\"\r\n    }\r\n  ]\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "2549"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 16
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachinenotfound/providers/Microsoft.Compute/virtualMachines?api-version=2024-11-01
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 122
+        uncompressed: false
+        body: '{"error":{"code":"ResourceGroupNotFound","message":"Resource group ''aks-cit-VirtualMachinenotfound'' could not be found."}}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "122"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Failure-Cause:
+                - gateway
+        status: 404 Not Found
+        code: 404
+        duration: 200ms
+    - id: 17
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Compute/virtualMachines/testResource?api-version=2024-11-01
+        method: DELETE
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 0
+        uncompressed: false
+        body: ""
+        headers:
+            Azure-Asyncnotification:
+                - Enabled
+            Azure-Asyncoperation:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-11-01&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "0"
+            Expires:
+                - "-1"
+            Location:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-11-01&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "11999"
+        status: 202 Accepted
+        code: 202
+        duration: 200ms
+    - id: 18
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - ccm-VirtualMachine-clien azsdk-go-armcompute/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-11-01&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 184
+        uncompressed: false
+        body: "{\r\n  \"startTime\": \"2001-02-03T04:05:06Z\",\r\n  \"endTime\": \"2001-02-03T04:05:06Z\",\r\n  \"status\": \"Succeeded\",\r\n  \"name\": \"00000000-0000-0000-0000-000000000000\"\r\n}"
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "184"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Need-To-Refresh-Epl-Cache:
+                - "False"
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 19
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/networkInterfaces/nic1?api-version=2024-05-01
+        method: DELETE
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 0
+        uncompressed: false
+        body: ""
+        headers:
+            Azure-Asyncnotification:
+                - Enabled
+            Azure-Asyncoperation:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "0"
+            Expires:
+                - "-1"
+            Location:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "11999"
+        status: 202 Accepted
+        code: 202
+        duration: 200ms
+    - id: 20
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 22
+        uncompressed: false
+        body: '{"status":"Succeeded"}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "22"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 21
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-VirtualMachine/providers/Microsoft.Network/virtualNetworks/vnet1?api-version=2024-05-01
+        method: DELETE
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 0
+        uncompressed: false
+        body: ""
+        headers:
+            Azure-Asyncnotification:
+                - Enabled
+            Azure-Asyncoperation:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "0"
+            Expires:
+                - "-1"
+            Location:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operationResults/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "11999"
+        status: 202 Accepted
+        code: 202
+        duration: 200ms
+    - id: 22
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - azsdk-go-armnetwork/v6.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Network/locations/eastus/operations/00000000-0000-0000-0000-000000000000?api-version=2024-05-01&c=c&h=h&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 22
+        uncompressed: false
+        body: '{"status":"Succeeded"}'
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "22"
+            Content-Type:
+                - application/json; charset=utf-8
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
+    - id: 23
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            Accept:
+                - application/json
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/aks-cit-VirtualMachine?api-version=2021-04-01
+        method: DELETE
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 0
+        uncompressed: false
+        body: ""
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "0"
+            Expires:
+                - "-1"
+            Location:
+                - https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/operationresults/eyJqb2JJZCI6IlJFU09VUkNFR1JPVVBERUxFVElPTkpPQi1BS1M6MkRDSVQ6MkRWSVJUVUFMTUFDSElORS1FQVNUVVMiLCJqb2JMb2NhdGlvbiI6ImVhc3R1cyJ9?api-version=2021-04-01&c=c&h=h&s=s&t=t
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Deletes:
+                - "11999"
+        status: 202 Accepted
+        code: 202
+        duration: 200ms
+    - id: 24
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        transfer_encoding: []
+        trailer: {}
+        host: management.azure.com
+        remote_addr: ""
+        request_uri: ""
+        body: ""
+        form: {}
+        headers:
+            User-Agent:
+                - ccm-resource-group-clien azsdk-go-armresources/v1.2.0 (go1.23.2; linux)
+        url: https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000000/operationresults/eyJqb2JJZCI6IlJFU09VUkNFR1JPVVBERUxFVElPTkpPQi1BS1M6MkRDSVQ6MkRWSVJUVUFMTUFDSElORS1FQVNUVVMiLCJqb2JMb2NhdGlvbiI6ImVhc3R1cyJ9?api-version=2021-04-01&c=c&h=h&s=s&t=t
+        method: GET
+      response:
+        proto: HTTP/2.0
+        proto_major: 2
+        proto_minor: 0
+        transfer_encoding: []
+        trailer: {}
+        content_length: 0
+        uncompressed: false
+        body: ""
+        headers:
+            Cache-Control:
+                - no-cache
+            Content-Length:
+                - "0"
+            Expires:
+                - "-1"
+            Pragma:
+                - no-cache
+            Strict-Transport-Security:
+                - max-age=31536000; includeSubDomains
+            X-Cache:
+                - CONFIG_NOCACHE
+            X-Content-Type-Options:
+                - nosniff
+            X-Ms-Ratelimit-Remaining-Subscription-Global-Reads:
+                - "16499"
+        status: 200 OK
+        code: 200
+        duration: 200ms
