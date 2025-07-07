@@ -9,19 +9,33 @@
 # the `language` matrix defined below to confirm you have the correct set of
 # supported CodeQL languages.
 #
-name: "CodeQL-azclient"
+name: "CodeQL"
 
 on:
   workflow_dispatch:
   push:
-    branches: [ master ]
+    branches: [ master, 'release-**' ]
     paths:
-      - 'pkg/azclient/**'
+      - 'pkg/**.go'
+      - 'cmd/**.go'
+      - 'tests/**.go'
+      - 'go.*'
+      - 'hack/verify-updates.sh'
+      - '!vendor/**'
+      - '!pkg/azclient/**'
   pull_request:
     # The branches below must be a subset of the branches above
-    branches: [ master ]
+    branches: [ master, 'release-**' ]
     paths:
-      - 'pkg/azclient/**'
+      - 'pkg/**.go'
+      - 'cmd/**.go'
+      - 'tests/**.go'
+      - 'go.*'
+      - 'hack/verify-updates.sh'
+      - '!vendor/**'
+      - '!pkg/azclient/**'
+  schedule:
+    - cron: '0 */4 * * *'
 permissions:
   contents: read
 
@@ -52,10 +66,10 @@ jobs:
     - name: Set up Go 1.x
       uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
-        go-version-file: 'pkg/azclient/go.mod'
+        go-version-file: 'go.mod'
         check-latest: true
         cache-dependency-path: |
-          pkg/azclient/go.sum
+          go.sum
       id: go
 
     # Initializes the CodeQL tools for scanning.
@@ -72,9 +86,15 @@ jobs:
     # If this step fails, then you should remove it and run the build manually (see below)
     - name: Autobuild
       run: |
-        cd pkg/azclient
-        make generate test
-        echo "fail if files changed"
-        git add . && git diff --quiet && git diff --cached --quiet 
+        make all
+        go test -covermode=count -coverprofile=profile.cov.tmp ./pkg/...
+        grep -v mock profile.cov.tmp > profile.cov
+
+    - name: Coveralls
+      uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2.3.6
+      with:
+        file: profile.cov
+        format: golang
+
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@181d5eefc20863364f96762470ba6f862bdef56b # v3.29.2
