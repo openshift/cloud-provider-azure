@@ -190,9 +190,9 @@ func TestMapLoadBalancerNameToVMSet(t *testing.T) {
 
 	for _, c := range cases {
 		if c.useStandardLB {
-			az.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+			az.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 		} else {
-			az.Config.LoadBalancerSKU = consts.LoadBalancerSKUBasic
+			az.LoadBalancerSKU = consts.LoadBalancerSKUBasic
 		}
 		vmset := az.mapLoadBalancerNameToVMSet(c.lbName, c.clusterName)
 		assert.Equal(t, c.expectedVMSet, vmset, c.description)
@@ -325,9 +325,9 @@ func TestGetLoadBalancingRuleName(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
 			if c.useStandardLB {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+				az.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 			} else {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUBasic
+				az.LoadBalancerSKU = consts.LoadBalancerSKUBasic
 			}
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternalSubnet] = c.subnetName
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternal] = strconv.FormatBool(c.isInternal)
@@ -1452,7 +1452,7 @@ func TestStandardEnsureHostInPool(t *testing.T) {
 			defer ctrl.Finish()
 			cloud := GetTestCloud(ctrl)
 			if test.isStandardLB {
-				cloud.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+				cloud.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 			}
 
 			testVM := buildDefaultTestVirtualMachine(availabilitySetID, []string{test.nicID})
@@ -1465,7 +1465,7 @@ func TestStandardEnsureHostInPool(t *testing.T) {
 			mockVMClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 			mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, string(test.nodeName), gomock.Any()).Return(testVM, nil).AnyTimes()
 
-			mockInterfaceClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
+			mockInterfaceClient := cloud.ComputeClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 			mockInterfaceClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nicName, gomock.Any()).Return(testNIC, nil).AnyTimes()
 			mockInterfaceClient.EXPECT().CreateOrUpdate(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
@@ -1569,8 +1569,8 @@ func TestStandardEnsureHostsInPool(t *testing.T) {
 
 	for _, test := range testCases {
 		t.Run(test.name, func(t *testing.T) {
-			cloud.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
-			cloud.Config.ExcludeMasterFromStandardLB = ptr.To(true)
+			cloud.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+			cloud.ExcludeMasterFromStandardLB = ptr.To(true)
 			cloud.excludeLoadBalancerNodes = utilsets.NewString(test.excludeLBNodes...)
 
 			testVM := buildDefaultTestVirtualMachine(availabilitySetID, []string{test.nicID})
@@ -1581,7 +1581,7 @@ func TestStandardEnsureHostsInPool(t *testing.T) {
 			mockVMClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 			mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nodeName, gomock.Any()).Return(testVM, nil).AnyTimes()
 
-			mockInterfaceClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
+			mockInterfaceClient := cloud.ComputeClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 			mockInterfaceClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, test.nicName, gomock.Any()).Return(testNIC, nil).AnyTimes()
 			mockInterfaceClient.EXPECT().CreateOrUpdate(gomock.Any(), cloud.ResourceGroup, gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
@@ -1635,7 +1635,7 @@ func TestStandardEnsureBackendPoolDeleted(t *testing.T) {
 		cloud.LoadBalancerSKU = test.loadBalancerSKU
 		mockVMClient := cloud.ComputeClientFactory.GetVirtualMachineClient().(*mock_virtualmachineclient.MockInterface)
 		mockVMClient.EXPECT().Get(gomock.Any(), cloud.ResourceGroup, "k8s-agentpool1-00000000-1", gomock.Any()).Return(test.existingVM, nil)
-		mockNICClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
+		mockNICClient := cloud.ComputeClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 		test.existingNIC.Properties.VirtualMachine = &armnetwork.SubResource{
 			ID: ptr.To("/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/k8s-agentpool1-00000000-1"),
 		}
@@ -1702,7 +1702,7 @@ func TestStandardGetNodeNameByIPConfigurationID(t *testing.T) {
 	expectedNIC.Properties.VirtualMachine = &armnetwork.SubResource{
 		ID: ptr.To("/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/k8s-agentpool1-00000000-0"),
 	}
-	mockNICClient := cloud.NetworkClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
+	mockNICClient := cloud.ComputeClientFactory.GetInterfaceClient().(*mock_interfaceclient.MockInterface)
 	mockNICClient.EXPECT().Get(gomock.Any(), "rg", "k8s-agentpool1-00000000-nic-0", gomock.Any()).Return(expectedNIC, nil)
 	ipConfigurationID := `/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/k8s-agentpool1-00000000-nic-0/ipConfigurations/ipconfig1`
 	nodeName, asName, err := cloud.VMSet.GetNodeNameByIPConfigurationID(context.TODO(), ipConfigurationID)

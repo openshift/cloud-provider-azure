@@ -130,13 +130,13 @@ func TestPerformTokenExchange(t *testing.T) {
 				w.WriteHeader(tt.httpStatusCode)
 
 				if tt.token != "" {
-					_, err := w.Write([]byte(fmt.Sprintf(`{"refresh_token": "%s"}`, tt.token)))
+					_, err := fmt.Fprintf(w, `{"refresh_token": "%s"}`, tt.token)
 					assert.NoError(t, err)
 				}
 			}))
 			defer server.Close()
 
-			got, err := performTokenExchange(server.URL, &authDirective{realm: server.URL}, "tenant", "token")
+			got, err := performTokenExchange(&authDirective{realm: server.URL}, "tenant", "token")
 			assert.Equal(t, tt.want, got, tt.name)
 			if tt.wantErr != nil {
 				assert.Contains(t, err.Error(), tt.wantErr.Error(), tt.name)

@@ -1,0 +1,100 @@
+# For most projects, this workflow file will not need changing; you simply need
+# to commit it to your repository.
+#
+# You may wish to alter this file to override the set of languages analyzed,
+# or to provide custom queries or build logic.
+#
+# ******** NOTE ********
+# We have attempted to detect the languages in your repository. Please check
+# the `language` matrix defined below to confirm you have the correct set of
+# supported CodeQL languages.
+#
+name: "CodeQL"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master, 'release-**' ]
+    paths:
+      - 'pkg/**.go'
+      - 'cmd/**.go'
+      - 'tests/**.go'
+      - 'go.*'
+      - 'hack/verify-updates.sh'
+      - '!vendor/**'
+      - '!pkg/azclient/**'
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ master, 'release-**' ]
+    paths:
+      - 'pkg/**.go'
+      - 'cmd/**.go'
+      - 'tests/**.go'
+      - 'go.*'
+      - 'hack/verify-updates.sh'
+      - '!vendor/**'
+      - '!pkg/azclient/**'
+  schedule:
+    - cron: '0 */4 * * *'
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go' ]
+        # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'ruby' ]
+        # Learn more about CodeQL language support at https://git.io/codeql-language-support
+
+    steps:
+    - name: Harden Runner
+      uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+      with:
+        egress-policy: audit
+
+    - name: Checkout repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+    - name: Set up Go 1.x
+      uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+      with:
+        go-version-file: 'go.mod'
+        check-latest: true
+        cache-dependency-path: |
+          go.sum
+      id: go
+
+    # Initializes the CodeQL tools for scanning.
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.29.5
+      with:
+        languages: ${{ matrix.language }}
+        # If you wish to specify custom queries, you can do so here or in a config file.
+        # By default, queries listed here will override any specified in a config file.
+        # Prefix the list here with "+" to use these queries and those in the config file.
+        # queries: ./path/to/local/query, your-org/your-repo/queries@main
+
+    # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
+    # If this step fails, then you should remove it and run the build manually (see below)
+    - name: Autobuild
+      run: |
+        make all
+        go test -covermode=count -coverprofile=profile.cov.tmp ./pkg/...
+        grep -v mock profile.cov.tmp > profile.cov
+
+    - name: Coveralls
+      uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2.3.6
+      with:
+        file: profile.cov
+        format: golang
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.29.5
