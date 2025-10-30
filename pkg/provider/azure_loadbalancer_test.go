@@ -770,7 +770,7 @@ func TestEnsureLoadBalancerDeleted(t *testing.T) {
 			} else {
 				assert.Nil(t, err, "TestCase[%d]: %s", i, c.desc)
 				assert.NotNil(t, lbStatus, "TestCase[%d]: %s", i, c.desc)
-				result, rerr := az.NetworkClientFactory.GetLoadBalancerClient().List(context.TODO(), az.Config.ResourceGroup)
+				result, rerr := az.NetworkClientFactory.GetLoadBalancerClient().List(context.TODO(), az.ResourceGroup)
 				assert.Nil(t, rerr, "TestCase[%d]: %s", i, c.desc)
 				assert.Equal(t, 1, len(result), "TestCase[%d]: %s", i, c.desc)
 				assert.Equal(t, 1, len(result[0].Properties.LoadBalancingRules), "TestCase[%d]: %s", i, c.desc)
@@ -1128,6 +1128,66 @@ func TestServiceOwnsPublicIP(t *testing.T) {
 			serviceLBName: "pip1",
 			expectedOwns:  true,
 		},
+		{
+			desc: "should return true for failed PIPs with empty IP but matching service tags",
+			pip: &armnetwork.PublicIPAddress{
+				Name: ptr.To("failed-pip"),
+				Tags: map[string]*string{
+					consts.ServiceTagKey:  ptr.To("default/nginx"),
+					consts.ClusterNameKey: ptr.To("kubernetes"),
+				},
+				Properties: &armnetwork.PublicIPAddressPropertiesFormat{
+					IPAddress: ptr.To(""), // Empty IP address like failed PIPs
+				},
+			},
+			clusterName:  "kubernetes",
+			serviceName:  "nginx",
+			expectedOwns: true, // Should be true for cleanup, but currently returns false
+		},
+		{
+			desc: "should return false for failed PIPs with empty IP and non-matching service tags",
+			pip: &armnetwork.PublicIPAddress{
+				Name: ptr.To("failed-pip"),
+				Tags: map[string]*string{
+					consts.ServiceTagKey:  ptr.To("default/other-service"),
+					consts.ClusterNameKey: ptr.To("kubernetes"),
+				},
+				Properties: &armnetwork.PublicIPAddressPropertiesFormat{
+					IPAddress: ptr.To(""), // Empty IP address like failed PIPs
+				},
+			},
+			clusterName:  "kubernetes",
+			serviceName:  "nginx",
+			expectedOwns: false,
+		},
+		{
+			desc: "should return false for user-assigned PIPs with empty IP address and no service tags",
+			pip: &armnetwork.PublicIPAddress{
+				Name: ptr.To("user-pip"),
+				Tags: map[string]*string{}, // No service tags, indicating user-created
+				Properties: &armnetwork.PublicIPAddressPropertiesFormat{
+					IPAddress: ptr.To(""), // Empty IP address
+				},
+			},
+			clusterName:             "kubernetes",
+			serviceName:             "nginx",
+			expectedOwns:            false, // Can't match without IP
+			expectedUserAssignedPIP: true,  // Should still be identified as user-assigned
+		},
+		{
+			desc: "should return true for system PIPs with nil Properties but matching service tags",
+			pip: &armnetwork.PublicIPAddress{
+				Name: ptr.To("system-pip"),
+				Tags: map[string]*string{
+					consts.ServiceTagKey:  ptr.To("default/nginx"),
+					consts.ClusterNameKey: ptr.To("kubernetes"),
+				},
+				Properties: nil, // Nil properties like some failed PIPs
+			},
+			clusterName:  "kubernetes",
+			serviceName:  "nginx",
+			expectedOwns: true, // Should be owned based on tags
+		},
 	}
 
 	for i, c := range tests {
@@ -1137,10 +1197,10 @@ func TestServiceOwnsPublicIP(t *testing.T) {
 				setServiceLoadBalancerIP(&service, c.serviceLBIP)
 			}
 			if c.serviceLBName != "" {
-				if service.ObjectMeta.Annotations == nil {
-					service.ObjectMeta.Annotations = map[string]string{consts.ServiceAnnotationPIPNameDualStack[false]: "pip1"}
+				if service.Annotations == nil {
+					service.Annotations = map[string]string{consts.ServiceAnnotationPIPNameDualStack[false]: "pip1"}
 				} else {
-					service.ObjectMeta.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]] = "pip1"
+					service.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]] = "pip1"
 				}
 			}
 			owns, isUserAssignedPIP := serviceOwnsPublicIP(&service, c.pip, c.clusterName)
@@ -3069,7 +3129,7 @@ func TestReconcileLoadBalancerRuleCommon(t *testing.T) {
 	for _, test := range testCases {
 		t.Run(test.desc, func(t *testing.T) {
 			az := GetTestCloud(ctrl)
-			az.Config.LoadBalancerSKU = test.loadBalancerSKU
+			az.LoadBalancerSKU = test.loadBalancerSKU
 			service := test.service
 			firstPort := service.Spec.Ports[0]
 			probeProtocol := test.probeProtocol
@@ -3988,10 +4048,10 @@ func TestReconcileLoadBalancerCommon(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 			az := GetTestCloud(ctrl)
-			az.Config.LoadBalancerSKU = test.loadBalancerSKU
-			az.Config.DisableOutboundSNAT = test.disableOutboundSnat
+			az.LoadBalancerSKU = test.loadBalancerSKU
+			az.DisableOutboundSNAT = test.disableOutboundSnat
 			if test.preConfigLBType != "" {
-				az.Config.PreConfiguredBackendPoolLoadBalancerTypes = test.preConfigLBType
+				az.PreConfiguredBackendPoolLoadBalancerTypes = test.preConfigLBType
 			}
 			az.LoadBalancerResourceGroup = test.loadBalancerResourceGroup
 
@@ -5064,9 +5124,14 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 		expectedError           bool
 	}{
 		{
-			desc:         "shall return existed IPv4 PIP if there is any",
-			pipName:      "pip1",
-			existingPIPs: []*armnetwork.PublicIPAddress{{Name: ptr.To("pip1")}},
+			desc:    "shall return existed IPv4 PIP if there is any",
+			pipName: "pip1",
+			existingPIPs: []*armnetwork.PublicIPAddress{{
+				Name: ptr.To("pip1"),
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
+			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
 				ID:   ptr.To(expectedPIPID),
@@ -5074,14 +5139,21 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv4),
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 				},
-				Tags: map[string]*string{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			},
 			shouldPutPIP: true,
 		},
 		{
-			desc:         "shall return existed IPv6 PIP if there is any",
-			pipName:      "pip1-IPv6",
-			existingPIPs: []*armnetwork.PublicIPAddress{{Name: ptr.To("pip1-IPv6")}},
+			desc:    "shall return existed IPv6 PIP if there is any",
+			pipName: "pip1-IPv6",
+			existingPIPs: []*armnetwork.PublicIPAddress{{
+				Name: ptr.To("pip1-IPv6"),
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
+			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1-IPv6"),
 				ID: ptr.To(rgprefix +
@@ -5090,7 +5162,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv6),
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodDynamic),
 				},
-				Tags: map[string]*string{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			},
 			isIPv6:       true,
 			shouldPutPIP: true,
@@ -5110,6 +5184,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			existingPIPs: []*armnetwork.PublicIPAddress{{
 				Name:       ptr.To("pip1"),
 				Properties: &armnetwork.PublicIPAddressPropertiesFormat{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5120,7 +5197,10 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					},
 					PublicIPAddressVersion: to.Ptr(armnetwork.IPVersionIPv4),
 				},
-				Tags: map[string]*string{consts.ServiceUsingDNSKey: ptr.To("default/test1")},
+				Tags: map[string]*string{
+					consts.ServiceUsingDNSKey: ptr.To("default/test1"),
+					consts.ServiceTagKey:      ptr.To("default/test1"),
+				},
 			},
 			shouldPutPIP: true,
 		},
@@ -5135,6 +5215,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 						DomainNameLabel: ptr.To("previousdns"),
 					},
 				},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5143,7 +5226,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					DNSSettings:            nil,
 					PublicIPAddressVersion: to.Ptr(armnetwork.IPVersionIPv4),
 				},
-				Tags: map[string]*string{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			},
 			shouldPutPIP: true,
 		},
@@ -5158,6 +5243,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 						DomainNameLabel: ptr.To("previousdns"),
 					},
 				},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5168,10 +5256,13 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					},
 					PublicIPAddressVersion: to.Ptr(armnetwork.IPVersionIPv4),
 				},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			},
 		},
 		{
-			desc:                    "shall update existed PIP's dns label for IPv6",
+			desc:                    "shall create existed PIP's dns label for IPv6",
 			pipName:                 "pip1",
 			inputDNSLabel:           "newdns",
 			foundDNSLabelAnnotation: true,
@@ -5179,6 +5270,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			existingPIPs: []*armnetwork.PublicIPAddress{{
 				Name:       ptr.To("pip1"),
 				Properties: &armnetwork.PublicIPAddressPropertiesFormat{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5190,7 +5284,10 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodDynamic),
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv6),
 				},
-				Tags: map[string]*string{consts.ServiceUsingDNSKey: ptr.To("default/test1")},
+				Tags: map[string]*string{
+					consts.ServiceUsingDNSKey: ptr.To("default/test1"),
+					consts.ServiceTagKey:      ptr.To("default/test1"),
+				},
 			},
 			shouldPutPIP: true,
 		},
@@ -5207,6 +5304,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 						DomainNameLabel: ptr.To("previousdns"),
 					},
 				},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5220,6 +5320,7 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 				},
 				Tags: map[string]*string{
 					"k8s-azure-dns-label-service": ptr.To("default/test1"),
+					consts.ServiceTagKey:          ptr.To("default/test1"),
 				},
 			},
 			shouldPutPIP: true,
@@ -5239,6 +5340,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodDynamic),
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv4),
 				},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5252,6 +5356,7 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 				},
 				Tags: map[string]*string{
 					"k8s-azure-dns-label-service": ptr.To("default/test1"),
+					consts.ServiceTagKey:          ptr.To("default/test1"),
 				},
 			},
 			shouldPutPIP: true,
@@ -5313,7 +5418,12 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			desc:    "shall tag the service name to the pip correctly",
 			pipName: "pip1",
 			existingPIPs: []*armnetwork.PublicIPAddress{
-				{Name: ptr.To("pip1")},
+				{
+					Name: ptr.To("pip1"),
+					Tags: map[string]*string{
+						consts.ServiceTagKey: ptr.To("default/test1"),
+					},
+				},
 			},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
@@ -5322,7 +5432,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv4),
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 				},
-				Tags: map[string]*string{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 			},
 			shouldPutPIP: true,
 		},
@@ -5338,6 +5450,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 						PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv6),
 						PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 					},
+					Tags: map[string]*string{
+						consts.ServiceTagKey: ptr.To("default/test1"),
+					},
 				},
 			},
 			expectedPIP: &armnetwork.PublicIPAddress{
@@ -5347,7 +5462,9 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv6),
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
 				},
-				Tags: map[string]*string{},
+				Tags: map[string]*string{
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
 				SKU: &armnetwork.PublicIPAddressSKU{
 					Name: to.Ptr(armnetwork.PublicIPAddressSKUNameStandard),
 				},
@@ -5355,13 +5472,22 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			shouldPutPIP: true,
 		},
 		{
-			desc:         "shall update pip tags if there is any change",
-			pipName:      "pip1",
-			existingPIPs: []*armnetwork.PublicIPAddress{{Name: ptr.To("pip1"), Tags: map[string]*string{"a": ptr.To("b")}}},
+			desc:    "shall update pip tags if there is any change",
+			pipName: "pip1",
+			existingPIPs: []*armnetwork.PublicIPAddress{{
+				Name: ptr.To("pip1"),
+				Tags: map[string]*string{
+					"a":                  ptr.To("b"),
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
+			}},
 			expectedPIP: &armnetwork.PublicIPAddress{
 				Name: ptr.To("pip1"),
-				Tags: map[string]*string{"a": ptr.To("c")},
-				ID:   ptr.To(expectedPIPID),
+				Tags: map[string]*string{
+					"a":                  ptr.To("c"),
+					consts.ServiceTagKey: ptr.To("default/test1"),
+				},
+				ID: ptr.To(expectedPIPID),
 				Properties: &armnetwork.PublicIPAddressPropertiesFormat{
 					PublicIPAddressVersion:   to.Ptr(armnetwork.IPVersionIPv4),
 					PublicIPAllocationMethod: to.Ptr(armnetwork.IPAllocationMethodStatic),
@@ -5408,7 +5534,7 @@ func TestEnsurePublicIPExistsCommon(t *testing.T) {
 			}
 
 			service := getTestService("test1", v1.ProtocolTCP, nil, test.isIPv6, 80)
-			service.ObjectMeta.Annotations = test.additionalAnnotations
+			service.Annotations = test.additionalAnnotations
 			mockPIPsClient := az.NetworkClientFactory.GetPublicIPAddressClient().(*mock_publicipaddressclient.MockInterface)
 			if test.shouldPutPIP {
 				mockPIPsClient.EXPECT().CreateOrUpdate(gomock.Any(), "rg", gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ string, _ string, parameters armnetwork.PublicIPAddress) (*armnetwork.PublicIPAddress, error) {
@@ -5608,7 +5734,7 @@ func TestShouldUpdateLoadBalancer(t *testing.T) {
 				mockLBsClient.EXPECT().CreateOrUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 			}
 			if test.lbHasDeletionTimestamp {
-				service.ObjectMeta.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				service.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 			}
 			if test.existsLb {
 				lb := &armnetwork.LoadBalancer{
@@ -5718,7 +5844,7 @@ func TestIsBackendPoolPreConfigured(t *testing.T) {
 	for _, test := range testCases {
 		t.Run(test.desc, func(t *testing.T) {
 			az := GetTestCloud(ctrl)
-			az.Config.PreConfiguredBackendPoolLoadBalancerTypes = test.preConfiguredBackendPoolLoadBalancerTypes
+			az.PreConfiguredBackendPoolLoadBalancerTypes = test.preConfiguredBackendPoolLoadBalancerTypes
 			var service v1.Service
 			if test.isInternalService {
 				service = getInternalTestService("test", 80)
@@ -7473,7 +7599,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 			},
 			expectedLBs: []string{},
-			expectedErr: errors.New("values: Invalid value: []string(nil): for 'in', 'notin' operators, values set can't be empty"),
+			expectedErr: errors.New("values: Invalid value: null: for 'in', 'notin' operators, values set can't be empty"),
 		},
 		{
 			description: "should report an error if failed to convert namespace selector as a selector",
@@ -7495,7 +7621,7 @@ func TestGetEligibleLoadBalancers(t *testing.T) {
 				},
 			},
 			expectedLBs: []string{},
-			expectedErr: errors.New("values: Invalid value: []string(nil): for 'in', 'notin' operators, values set can't be empty"),
+			expectedErr: errors.New("values: Invalid value: null: for 'in', 'notin' operators, values set can't be empty"),
 		},
 		{
 			description: "should respect allowServicePlacement flag",
@@ -7693,16 +7819,16 @@ func TestGetAzureLoadBalancerName(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
 			if c.useStandardLB {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+				az.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 			} else {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUBasic
+				az.LoadBalancerSKU = consts.LoadBalancerSKUBasic
 			}
 
 			if len(c.multiSLBConfigs) > 0 {
 				az.MultipleStandardLoadBalancerConfigurations = c.multiSLBConfigs
 			}
 
-			az.Config.LoadBalancerName = c.lbName
+			az.LoadBalancerName = c.lbName
 			svc := getTestService("test", v1.ProtocolTCP, c.serviceAnnotation, false)
 			if c.serviceLabel != nil {
 				svc.Labels = c.serviceLabel
@@ -8016,9 +8142,9 @@ func TestGetFrontendIPConfigName(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.description, func(t *testing.T) {
 			if c.useStandardLB {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+				az.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 			} else {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUBasic
+				az.LoadBalancerSKU = consts.LoadBalancerSKUBasic
 			}
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternalSubnet] = c.subnetName
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternal] = strconv.FormatBool(c.isInternal)
@@ -8070,9 +8196,9 @@ func TestGetFrontendIPConfigNames(t *testing.T) {
 		c := c
 		t.Run(c.description, func(t *testing.T) {
 			if c.useStandardLB {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUStandard
+				az.LoadBalancerSKU = consts.LoadBalancerSKUStandard
 			} else {
-				az.Config.LoadBalancerSKU = consts.LoadBalancerSKUBasic
+				az.LoadBalancerSKU = consts.LoadBalancerSKUBasic
 			}
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternalSubnet] = c.subnetName
 			svc.Annotations[consts.ServiceAnnotationLoadBalancerInternal] = strconv.FormatBool(c.isInternal)

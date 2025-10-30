@@ -28,7 +28,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	privatedns "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+	armstorage "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage/v2"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
@@ -423,6 +423,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 		accessTier                      string
 		storageType                     Type
 		requireInfrastructureEncryption *bool
+		isSmbOAuthEnabled               *bool
 		keyVaultURL                     *string
 		sourceAccountName               string
 		accountName                     string
@@ -441,6 +442,7 @@ func TestEnsureStorageAccount(t *testing.T) {
 			storageType:                     StorageTypeBlob,
 			requireInfrastructureEncryption: ptr.To(true),
 			keyVaultURL:                     ptr.To("keyVaultURL"),
+			isSmbOAuthEnabled:               ptr.To(true),
 			resourceGroup:                   "rg",
 			accessTier:                      "AccessTierHot",
 			accountName:                     "",
@@ -565,20 +567,23 @@ func TestEnsureStorageAccount(t *testing.T) {
 			var testAccountOptions *AccountOptions
 			if test.setAccountOptions {
 				testAccountOptions = &AccountOptions{
-					ResourceGroup:             test.resourceGroup,
-					CreatePrivateEndpoint:     test.createPrivateEndpoint,
-					VNetLinkName:              test.vNetLinkName,
-					PublicNetworkAccess:       test.publicNetworkAccess,
-					Name:                      test.accountName,
-					CreateAccount:             test.createAccount,
-					SubscriptionID:            test.subscriptionID,
-					AccessTier:                test.accessTier,
-					StorageType:               test.storageType,
-					EnableBlobVersioning:      ptr.To(true),
-					SoftDeleteBlobs:           7,
-					SoftDeleteContainers:      7,
-					PickRandomMatchingAccount: test.pickRandomMatchingAccount,
-					SourceAccountName:         test.sourceAccountName,
+					ResourceGroup:                   test.resourceGroup,
+					CreatePrivateEndpoint:           test.createPrivateEndpoint,
+					VNetLinkName:                    test.vNetLinkName,
+					PublicNetworkAccess:             test.publicNetworkAccess,
+					Name:                            test.accountName,
+					CreateAccount:                   test.createAccount,
+					SubscriptionID:                  test.subscriptionID,
+					AccessTier:                      test.accessTier,
+					StorageType:                     test.storageType,
+					EnableBlobVersioning:            ptr.To(true),
+					IsSmbOAuthEnabled:               test.isSmbOAuthEnabled,
+					KeyVaultURI:                     test.keyVaultURL,
+					RequireInfrastructureEncryption: test.requireInfrastructureEncryption,
+					SoftDeleteBlobs:                 7,
+					SoftDeleteContainers:            7,
+					PickRandomMatchingAccount:       test.pickRandomMatchingAccount,
+					SourceAccountName:               test.sourceAccountName,
 				}
 			}
 

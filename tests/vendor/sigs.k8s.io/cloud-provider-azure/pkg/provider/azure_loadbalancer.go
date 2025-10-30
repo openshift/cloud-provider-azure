@@ -1001,7 +1001,7 @@ func (az *Cloud) selectLoadBalancer(ctx context.Context, clusterName string, ser
 		return nil, false, err
 	}
 	// validate if the selected LB has not exceeded the MaximumLoadBalancerRuleCount
-	if az.Config.MaximumLoadBalancerRuleCount != 0 && selectedLBRuleCount >= az.Config.MaximumLoadBalancerRuleCount {
+	if az.MaximumLoadBalancerRuleCount != 0 && selectedLBRuleCount >= az.MaximumLoadBalancerRuleCount {
 		err = fmt.Errorf("selectLoadBalancer: cluster(%s) service(%s) isInternal(%t) -  all available load balancers have exceeded maximum rule limit %d, vmSetNames (%v)", clusterName, serviceName, isInternal, selectedLBRuleCount, vmSetNames)
 		klog.Error(err)
 		return selectedLB, existsLb, err
@@ -2884,7 +2884,7 @@ func (az *Cloud) getExpectedLBRules(
 	// https://github.com/kubernetes/kubernetes/blob/7c013c3f64db33cf19f38bb2fc8d9182e42b0b7b/pkg/proxy/healthcheck/service_health.go#L236
 	var nodeEndpointHealthprobe *armnetwork.Probe
 	var nodeEndpointHealthprobeAdded bool
-	if servicehelpers.NeedsHealthCheck(service) && !(consts.IsPLSEnabled(service.Annotations) && consts.IsPLSProxyProtocolEnabled(service.Annotations)) {
+	if servicehelpers.NeedsHealthCheck(service) && (!consts.IsPLSEnabled(service.Annotations) || !consts.IsPLSProxyProtocolEnabled(service.Annotations)) {
 		podPresencePath, podPresencePort := servicehelpers.GetServiceHealthCheckPathPort(service)
 		lbRuleName := az.getLoadBalancerRuleName(service, v1.ProtocolTCP, podPresencePort, isIPv6)
 		probeInterval, numberOfProbes, err := az.getHealthProbeConfigProbeIntervalAndNumOfProbe(service, podPresencePort)
@@ -2969,7 +2969,7 @@ func (az *Cloud) getExpectedLBRules(
 				klog.V(2).Infof("getExpectedLBRules lb name (%s) rule name (%s) no lb rule required", lbName, lbRuleName)
 				continue
 			}
-			if port.Protocol == v1.ProtocolSCTP && !(az.UseStandardLoadBalancer() && consts.IsK8sServiceUsingInternalLoadBalancer(service)) {
+			if port.Protocol == v1.ProtocolSCTP && (!az.UseStandardLoadBalancer() || !consts.IsK8sServiceUsingInternalLoadBalancer(service)) {
 				return expectedProbes, expectedRules, fmt.Errorf("SCTP is only supported on standard loadbalancer in internal mode")
 			}
 
@@ -3201,6 +3201,25 @@ func (az *Cloud) reconcileSecurityGroup(
 		}
 	}
 
+	{
+		// Retain all destinations that are managed by cloud-provider.
+		managedDestinations, err := az.listAvailableSecurityGroupDestinations(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to list available security group destinations")
+			return nil, err
+		}
+
+		managedDestinations = append(managedDestinations, lbIPAddresses...)
+		managedDestinations = append(managedDestinations, additionalIPs...)
+		logger.Info("Retaining security group", "managed-destinations", managedDestinations)
+
+		ipv4Addresses, ipv6Addresses := iputil.GroupAddressesByFamily(managedDestinations)
+		if err := accessControl.RetainSecurityGroup(ipv4Addresses, ipv6Addresses); err != nil {
+			logger.Error(err, "Failed to retain security group")
+			return nil, err
+		}
+	}
+
 	rv, updated, err := accessControl.SecurityGroup()
 	if err != nil {
 		err = fmt.Errorf("unable to apply access control configuration to security group: %w", err)
@@ -3231,7 +3250,7 @@ func (az *Cloud) shouldUpdateLoadBalancer(ctx context.Context, clusterName strin
 	}
 
 	_, _, _, _, existsLb, _, _ := az.getServiceLoadBalancer(ctx, service, clusterName, nodes, false, existingManagedLBs)
-	return existsLb && service.ObjectMeta.DeletionTimestamp == nil && service.Spec.Type == v1.ServiceTypeLoadBalancer, nil
+	return existsLb && service.DeletionTimestamp == nil && service.Spec.Type == v1.ServiceTypeLoadBalancer, nil
 }
 
 // Determine if we should release existing owned public IPs
@@ -3802,20 +3821,23 @@ func serviceOwnsPublicIP(service *v1.Service, pip *armnetwork.PublicIPAddress, c
 		return false, false
 	}
 
-	if pip.Properties == nil || ptr.Deref(pip.Properties.IPAddress, "") == "" {
-		klog.Warningf("serviceOwnsPublicIP: empty pip.Properties.IPAddress")
-		return false, false
-	}
-
 	serviceName := getServiceName(service)
 
-	isIPv6 := ptr.Deref(pip.Properties.PublicIPAddressVersion, "") == armnetwork.IPVersionIPv6
+	var isIPv6 bool
+	if pip.Properties != nil {
+		isIPv6 = ptr.Deref(pip.Properties.PublicIPAddressVersion, "") == armnetwork.IPVersionIPv6
+	}
 	if pip.Tags != nil {
 		serviceTag := getServiceFromPIPServiceTags(pip.Tags)
 		clusterTag := getClusterFromPIPClusterTags(pip.Tags)
 
 		// if there is no service tag on the pip, it is user-created pip
 		if serviceTag == "" {
+			// For user-created PIPs, we need a valid IP address to match against
+			if pip.Properties == nil || ptr.Deref(pip.Properties.IPAddress, "") == "" {
+				klog.V(4).Infof("serviceOwnsPublicIP: empty pip.Properties.IPAddress for user-created PIP")
+				return false, true
+			}
 			return isServiceSelectPIP(service, pip, isIPv6), true
 		}
 
@@ -3833,10 +3855,20 @@ func serviceOwnsPublicIP(service *v1.Service, pip *armnetwork.PublicIPAddress, c
 
 		// if the service is not included in the tags of the system-created pip, check the ip address
 		// or pip name, this could happen for secondary services
+		// For secondary services, we need a valid IP address to match against
+		if pip.Properties == nil || ptr.Deref(pip.Properties.IPAddress, "") == "" {
+			klog.V(4).Infof("serviceOwnsPublicIP: empty pip.Properties.IPAddress for secondary service check")
+			return false, false
+		}
 		return isServiceSelectPIP(service, pip, isIPv6), false
 	}
 
 	// if the pip has no tags, it should be user-created
+	// For user-created PIPs, we need a valid IP address to match against
+	if pip.Properties == nil || ptr.Deref(pip.Properties.IPAddress, "") == "" {
+		klog.V(4).Infof("serviceOwnsPublicIP: empty pip.Properties.IPAddress for untagged PIP")
+		return false, true
+	}
 	return isServiceSelectPIP(service, pip, isIPv6), true
 }
 
