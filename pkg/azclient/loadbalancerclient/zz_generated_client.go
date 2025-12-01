@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
-const AzureStackCloudAPIVersion = "2024-07-01"
+const AzureStackCloudAPIVersion = "2021-01-01"
 
 type Client struct {
 	*armnetwork.LoadBalancersClient
