@@ -435,93 +435,97 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 		}
 		return v, nil
 	case reflect.Struct:
-		switch t.String() {
-		case "time.Time":
-			ft := time.Now().Add(time.Duration(rand.Int63()))
-			return reflect.ValueOf(ft), nil
-		default:
-			originalDataVal := reflect.ValueOf(item)
-			v := reflect.New(t).Elem()
-			retry := 0 // error if cannot generate unique value after maxRetry tries
-			for i := 0; i < v.NumField(); i++ {
-				if !v.Field(i).CanSet() {
-					continue // to avoid panic to set on unexported field in struct
+		if structTypeProvider, f := opts.StructTypeProviders[t]; f {
+			ft, err := structTypeProvider()
+			return reflect.ValueOf(ft), err
+		}
+		originalDataVal := reflect.ValueOf(item)
+		v := reflect.New(t).Elem()
+		if opts.MaxFieldDepthOption == 0 {
+			return v, nil
+		} else if opts.MaxFieldDepthOption > 0 {
+			opts.MaxFieldDepthOption--
+			defer func() { opts.MaxFieldDepthOption++ }()
+		}
+		retry := 0 // error if cannot generate unique value after maxRetry tries
+		for i := 0; i < v.NumField(); i++ {
+			if !v.Field(i).CanSet() {
+				continue // to avoid panic to set on unexported field in struct
+			}
+
+			if _, ok := opts.IgnoreFields[t.Field(i).Name]; ok {
+				continue
+			}
+
+			if p, ok := opts.FieldProviders[t.Field(i).Name]; ok {
+				val, err := p()
+				if err != nil {
+					return reflect.Value{}, fmt.Errorf("custom provider for field %s: %w", t.Field(i).Name, err)
 				}
+				v.Field(i).Set(reflect.ValueOf(val))
+				continue
+			}
 
-				if _, ok := opts.IgnoreFields[t.Field(i).Name]; ok {
-					continue
+			tags := decodeTags(t, i, opts.TagName)
+			switch {
+			case tags.keepOriginal:
+				zero, err := isZero(reflect.ValueOf(item).Field(i))
+				if err != nil {
+					return reflect.Value{}, err
 				}
-
-				if p, ok := opts.FieldProviders[t.Field(i).Name]; ok {
-					val, err := p()
-					if err != nil {
-						return reflect.Value{}, fmt.Errorf("custom provider for field %s: %w", t.Field(i).Name, err)
-					}
-					v.Field(i).Set(reflect.ValueOf(val))
-					continue
-				}
-
-				tags := decodeTags(t, i, opts.TagName)
-				switch {
-				case tags.keepOriginal:
-					zero, err := isZero(reflect.ValueOf(item).Field(i))
-					if err != nil {
-						return reflect.Value{}, err
-					}
-					if zero {
-						err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
-						if err != nil {
-							return reflect.Value{}, err
-						}
-						continue
-					}
-					v.Field(i).Set(reflect.ValueOf(item).Field(i))
-				case tags.fieldType == "":
-					val, err := getFakedValue(v.Field(i).Interface(), opts)
-					if err != nil {
-						return reflect.Value{}, err
-					}
-
-					if v.Field(i).CanSet() {
-						if !reflect.ValueOf(val).IsZero() && val.CanConvert(v.Field(i).Type()) {
-							val = val.Convert(v.Field(i).Type())
-							v.Field(i).Set(val)
-						}
-
-					}
-				case tags.fieldType == SKIP:
-					data := originalDataVal.Field(i).Interface()
-					if v.CanSet() && data != nil {
-						v.Field(i).Set(reflect.ValueOf(data))
-					}
-				default:
+				if zero {
 					err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
 					if err != nil {
 						return reflect.Value{}, err
 					}
+					continue
+				}
+				v.Field(i).Set(reflect.ValueOf(item).Field(i))
+			case tags.fieldType == "":
+				val, err := getFakedValue(v.Field(i).Interface(), opts)
+				if err != nil {
+					return reflect.Value{}, err
 				}
 
-				if tags.unique {
-					if retry >= maxRetry {
-						return reflect.Value{}, fmt.Errorf(fakerErrors.ErrUniqueFailure, reflect.TypeOf(item).Field(i).Name)
+				if v.Field(i).CanSet() {
+					if !reflect.ValueOf(val).IsZero() && val.CanConvert(v.Field(i).Type()) {
+						val = val.Convert(v.Field(i).Type())
+						v.Field(i).Set(val)
 					}
-					value := v.Field(i).Interface()
-					uniqueVal, _ := uniqueValues.Load(tags.fieldType)
-					uniqueValArr, _ := uniqueVal.([]interface{})
-					if slice.ContainsValue(uniqueValArr, value) { // Retry if unique value already found
-						i--
-						retry++
-						continue
-					}
-					retry = 0
-					uniqueValues.Store(tags.fieldType, append(uniqueValArr, value))
-				} else {
-					retry = 0
-				}
 
+				}
+			case tags.fieldType == SKIP:
+				data := originalDataVal.Field(i).Interface()
+				if v.CanSet() && data != nil {
+					v.Field(i).Set(reflect.ValueOf(data))
+				}
+			default:
+				err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
+				if err != nil {
+					return reflect.Value{}, err
+				}
 			}
-			return v, nil
+
+			if tags.unique {
+				if retry >= maxRetry {
+					return reflect.Value{}, fmt.Errorf(fakerErrors.ErrUniqueFailure, reflect.TypeOf(item).Field(i).Name)
+				}
+				value := v.Field(i).Interface()
+				uniqueVal, _ := uniqueValues.Load(tags.fieldType)
+				uniqueValArr, _ := uniqueVal.([]interface{})
+				if slice.ContainsValue(uniqueValArr, value) { // Retry if unique value already found
+					i--
+					retry++
+					continue
+				}
+				retry = 0
+				uniqueValues.Store(tags.fieldType, append(uniqueValArr, value))
+			} else {
+				retry = 0
+			}
+
 		}
+		return v, nil
 
 	case reflect.String:
 		res, err := randomString(opts.RandomStringLength, *opts)
@@ -973,7 +977,7 @@ func userDefinedNumber(v reflect.Value, tag string) error {
 // extractSliceLengthFromTag checks if the sliceLength tag 'slice_len' is set, if so, returns its value, else return a random length
 func extractSliceLengthFromTag(tag string, opt options.Options) (int, error) {
 	if strings.Contains(tag, SliceLength) {
-		lenParts := strings.SplitN(findSliceLenReg.FindString(tag), Equals, -1)
+		lenParts := strings.Split(findSliceLenReg.FindString(tag), Equals)
 		if len(lenParts) != 2 {
 			return 0, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, tag)
 		}
@@ -999,7 +1003,7 @@ func extractStringFromTag(tag string, opts options.Options) (interface{}, error)
 		return nil, fmt.Errorf(fakerErrors.ErrTagNotSupported, tag)
 	}
 	if strings.Contains(tag, Length) {
-		lenParts := strings.SplitN(findLenReg.FindString(tag), Equals, -1)
+		lenParts := strings.Split(findLenReg.FindString(tag), Equals)
 		if len(lenParts) != 2 {
 			return nil, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, tag)
 		}
@@ -1029,7 +1033,7 @@ func extractStringFromTag(tag string, opts options.Options) (interface{}, error)
 
 func extractLangFromTag(tag string) (*interfaces.LangRuneBoundary, error) {
 	text := findLangReg.FindString(tag)
-	texts := strings.SplitN(text, Equals, -1)
+	texts := strings.Split(text, Equals)
 	if len(texts) != 2 {
 		return nil, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, text)
 	}
@@ -1166,13 +1170,13 @@ func extractNumberFromTag(tag string, t reflect.Type) (interface{}, error) {
 			}
 		default:
 			{
-				return nil, fmt.Errorf(fakerErrors.ErrUnsupportedNumberType)
+				return nil, fmt.Errorf("%s", fakerErrors.ErrUnsupportedNumberType)
 			}
 		}
 	}
 
 	// handling boundary tags
-	valuesStr := strings.SplitN(tag, comma, -1)
+	valuesStr := strings.Split(tag, comma)
 	if len(valuesStr) != 2 {
 		return nil, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, tag)
 	}
@@ -1210,7 +1214,7 @@ func extractNumberFromTag(tag string, t reflect.Type) (interface{}, error) {
 
 func extractIntFromText(text string) (int, error) {
 	text = strings.TrimSpace(text)
-	texts := strings.SplitN(text, Equals, -1)
+	texts := strings.Split(text, Equals)
 	if len(texts) != 2 {
 		return 0, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, text)
 	}
@@ -1219,7 +1223,7 @@ func extractIntFromText(text string) (int, error) {
 
 func extractFloatFromText(text string) (float64, error) {
 	text = strings.TrimSpace(text)
-	texts := strings.SplitN(text, Equals, -1)
+	texts := strings.Split(text, Equals)
 	if len(texts) != 2 {
 		return 0, fmt.Errorf(fakerErrors.ErrWrongFormattedTag, text)
 	}
@@ -1230,17 +1234,17 @@ func fetchOneOfArgsFromTag(tag string) ([]string, error) {
 	items := strings.Split(tag, colon)
 	argsList := items[1:]
 	if len(argsList) != 1 {
-		return nil, fmt.Errorf(fakerErrors.ErrUnsupportedTagArguments)
+		return nil, fmt.Errorf("%s", fakerErrors.ErrUnsupportedTagArguments)
 	}
 	if strings.Contains(argsList[0], ",,") {
-		return nil, fmt.Errorf(fakerErrors.ErrDuplicateSeparator)
+		return nil, fmt.Errorf("%s", fakerErrors.ErrDuplicateSeparator)
 	}
 	if argsList[0] == "" {
-		return nil, fmt.Errorf(fakerErrors.ErrNotEnoughTagArguments)
+		return nil, fmt.Errorf("%s", fakerErrors.ErrNotEnoughTagArguments)
 	}
 	args := strings.Split(argsList[0], comma)
 	if len(args) < 1 {
-		return nil, fmt.Errorf(fakerErrors.ErrNotEnoughTagArguments)
+		return nil, fmt.Errorf("%s", fakerErrors.ErrNotEnoughTagArguments)
 	}
 	return args, nil
 }
@@ -1259,7 +1263,7 @@ func randomString(n int, fakerOpt options.Options) (string, error) {
 		randRune := rune(rand.Intn(int(fakerOpt.StringLanguage.End-fakerOpt.StringLanguage.Start)) + int(fakerOpt.StringLanguage.Start))
 		for slice.ContainsRune(set, randRune) {
 			if counter++; counter >= fakerOpt.MaxGenerateStringRetries {
-				return "", errors.New("Max number of string generation retries exhausted")
+				return "", errors.New("max number of string generation retries exhausted")
 			}
 			randRune = rune(rand.Intn(int(fakerOpt.StringLanguage.End-fakerOpt.StringLanguage.Start)) + int(fakerOpt.StringLanguage.Start))
 			_, ok := set[randRune]
