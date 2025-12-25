@@ -211,10 +211,10 @@ func NewCloudControllerManagerCommand() *cobra.Command {
 
 // RunWrapper adapts the ccm boot logic to the leader elector call back function
 func RunWrapper(s *options.CloudControllerManagerOptions, c *cloudcontrollerconfig.Config, h *controllerhealthz.MutableHealthzHandler) func(ctx context.Context) {
-	logger := log.Background().WithName("RunWrapper")
 	return func(ctx context.Context) {
+		logger := log.FromContextOrBackground(ctx).WithName("RunWrapper")
 		if !c.DynamicReloadingConfig.EnableDynamicReloading {
-			klog.V(1).Infof("using static initialization from config file %s", c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile)
+			logger.V(1).Info("using static initialization from config file", "cloudConfigFile", c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile)
 			if err := Run(ctx, c.Complete(), h); err != nil {
 				klog.Errorf("RunWrapper: failed to start cloud controller manager: %v", err)
 				os.Exit(1)
@@ -224,10 +224,10 @@ func RunWrapper(s *options.CloudControllerManagerOptions, c *cloudcontrollerconf
 
 		cloudConfigFile := c.ComponentConfig.KubeCloudShared.CloudProvider.CloudConfigFile
 		if cloudConfigFile != "" {
-			klog.V(1).Infof("RunWrapper: using dynamic initialization from config file %s, starting the file watcher", cloudConfigFile)
+			logger.V(1).Info("using dynamic initialization from config file, starting the file watcher", "cloudConfigFile", cloudConfigFile)
 			updateCh = dynamic.RunFileWatcherOrDie(cloudConfigFile)
 		} else {
-			klog.V(1).Infof("RunWrapper: using dynamic initialization from secret %s/%s, starting the secret watcher", c.DynamicReloadingConfig.CloudConfigSecretNamespace, c.DynamicReloadingConfig.CloudConfigSecretName)
+			logger.V(1).Info("using dynamic initialization from secret, starting the secret watcher", "namespace", c.DynamicReloadingConfig.CloudConfigSecretNamespace, "name", c.DynamicReloadingConfig.CloudConfigSecretName)
 			updateCh = dynamic.RunSecretWatcherOrDie(c)
 		}
 
@@ -236,7 +236,7 @@ func RunWrapper(s *options.CloudControllerManagerOptions, c *cloudcontrollerconf
 		for {
 			select {
 			case <-updateCh:
-				klog.V(2).Info("RunWrapper: detected the cloud config has been updated, re-constructing the cloud controller manager")
+				logger.V(2).Info("detected the cloud config has been updated, re-constructing the cloud controller manager")
 
 				// stop the previous goroutines
 				cancelFunc()
@@ -290,6 +290,7 @@ func shouldDisableCloudProvider(configFilePath string) (bool, error) {
 
 func runAsync(s *options.CloudControllerManagerOptions, errCh chan error, h *controllerhealthz.MutableHealthzHandler) context.CancelFunc {
 	ctx, cancelFunc := context.WithCancel(context.Background())
+	logger := log.FromContextOrBackground(ctx).WithName("runAsync")
 
 	go func() {
 		c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List(), names.CCMControllerAliases())
@@ -303,7 +304,7 @@ func runAsync(s *options.CloudControllerManagerOptions, errCh chan error, h *con
 			errCh <- err
 		}
 
-		klog.V(1).Infof("RunAsync: stopping")
+		logger.V(1).Info("stopping")
 	}()
 
 	return cancelFunc
@@ -343,7 +344,7 @@ func StartHTTPServer(ctx context.Context, c *cloudcontrollerconfig.CompletedConf
 
 // Run runs the ExternalCMServer.  This should never exit.
 func Run(ctx context.Context, c *cloudcontrollerconfig.CompletedConfig, h *controllerhealthz.MutableHealthzHandler) error {
-	logger := log.Background().WithName("Run")
+	logger := log.FromContextOrBackground(ctx).WithName("Run")
 	// To help debugging, immediately log version
 	logger.Info("Version", "version", version.Get())
 
@@ -400,7 +401,7 @@ func Run(ctx context.Context, c *cloudcontrollerconfig.CompletedConfig, h *contr
 // startControllers starts the cloud specific controller loops.
 func startControllers(ctx context.Context, controllerContext genericcontrollermanager.ControllerContext, completedConfig *cloudcontrollerconfig.CompletedConfig,
 	cloud cloudprovider.Interface, controllers map[string]initFunc, healthzHandler *controllerhealthz.MutableHealthzHandler) error {
-	logger := log.Background().WithName("startControllers")
+	logger := log.FromContextOrBackground(ctx).WithName("startControllers")
 	// Initialize the cloud provider with a reference to the clientBuilder
 	cloud.Initialize(completedConfig.ClientBuilder, ctx.Done())
 	// Set the informer on the user cloud object
@@ -415,7 +416,7 @@ func startControllers(ctx context.Context, controllerContext genericcontrollerma
 			continue
 		}
 
-		klog.V(1).Infof("Starting %q", controllerName)
+		logger.V(1).Info("Starting controller", "controller", controllerName)
 		ctrl, started, err := initFn(ctx, controllerContext, completedConfig, cloud)
 		if err != nil {
 			klog.Errorf("Error starting %q: %s", controllerName, err.Error())
@@ -448,11 +449,11 @@ func startControllers(ctx context.Context, controllerContext genericcontrollerma
 		klog.Fatalf("Failed to wait for apiserver being healthy: %v", err)
 	}
 
-	klog.V(2).Infof("startControllers: starting shared informers")
+	logger.V(2).Info("startControllers: starting shared informers")
 	completedConfig.SharedInformers.Start(ctx.Done())
 	controllerContext.InformerFactory.Start(ctx.Done())
 	<-ctx.Done()
-	klog.V(1).Infof("startControllers: received stopping signal, exiting")
+	logger.V(1).Info("startControllers: received stopping signal, exiting")
 
 	return nil
 }
