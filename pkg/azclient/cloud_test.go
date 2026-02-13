@@ -148,6 +148,66 @@ var _ = ginkgo.Describe("Cloud", func() {
 				gomega.Expect(env.ResourceManagerEndpoint).To(gomega.Equal(server.URL))
 			})
 		})
+
+		ginkgo.When("the cloudName does not match any metadata", func() {
+			ginkgo.It("should use the first metadata entry as fallback", func() {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					_, err := w.Write([]byte(`
+[
+    {
+        "portal":"https://portal.azure.com",
+        "authentication":{
+            "loginEndpoint":"https://login.microsoftonline.com/",
+            "audiences":[
+                "https://management.core.windows.net/",
+                "https://management.azure.com/"
+            ],
+            "tenant":"common",
+            "identityProvider":"AAD"
+        },
+        "media":"https://rest.media.azure.net",
+        "graphAudience":"https://graph.windows.net/",
+        "graph":"https://graph.windows.net/",
+        "name":"AzureCloud",
+        "suffixes":{
+            "azureDataLakeStoreFileSystem":"azuredatalakestore.net",
+            "acrLoginServer":"azurecr.io",
+            "sqlServerHostname":"database.windows.net",
+            "azureDataLakeAnalyticsCatalogAndJob":"azuredatalakeanalytics.net",
+            "keyVaultDns":"vault.azure.net",
+            "storage":"core.windows.net",
+            "azureFrontDoorEndpointSuffix":"azurefd.net"
+        },
+        "batch":"https://batch.core.windows.net/",
+        "resourceManager":"https://management.azure.com/",
+        "vmImageAliasDoc":"https://raw.githubusercontent.com/Azure/azure-rest-api-specs/master/arm-compute/quickstart-templates/aliases.json",
+        "activeDirectoryDataLake":"https://datalake.azure.net/",
+        "sqlManagement":"https://management.core.windows.net:8443/",
+        "gallery":"https://gallery.azure.com/"
+    }
+]
+					`))
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				}))
+				defer server.Close()
+				cloudConfig := cloud.AzurePublic
+				env := &azclient.Environment{}
+				// Use a cloudName that doesn't match "AzureCloud"
+				err := azclient.OverrideAzureCloudConfigAndEnvConfigFromMetadataService(server.URL, "NonMatchingCloudName", &cloudConfig, env)
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(cloudConfig).ToNot(gomega.BeNil())
+				// Should still get the first metadata entry's values
+				gomega.Expect(cloudConfig.ActiveDirectoryAuthorityHost).To(gomega.Equal("https://login.microsoftonline.com/"))
+				gomega.Expect(cloudConfig.Services).NotTo(gomega.BeEmpty())
+				gomega.Expect(cloudConfig.Services[cloud.ResourceManager].Audience).To(gomega.Equal("https://management.core.windows.net/"))
+				gomega.Expect(cloudConfig.Services[cloud.ResourceManager].Endpoint).To(gomega.Equal("https://management.azure.com/"))
+				gomega.Expect(env).ToNot(gomega.BeNil())
+				gomega.Expect(env.ResourceManagerEndpoint).To(gomega.Equal("https://management.azure.com/"))
+				gomega.Expect(env.ContainerRegistryDNSSuffix).To(gomega.Equal("azurecr.io"))
+				gomega.Expect(env.StorageEndpointSuffix).To(gomega.Equal("core.windows.net"))
+			})
+		})
 	})
 	ginkgo.Context("EnvironmentFromName", func() {
 		ginkgo.When("cloud name is empty", func() {
