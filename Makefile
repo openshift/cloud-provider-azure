@@ -20,6 +20,16 @@ PKG_CONFIG=.pkg_config
 
 AKSENGINE_VERSION ?= master
 ENABLE_GIT_COMMAND ?= true
+GOTOOLCHAIN ?= auto
+# Some build environments set GOTOOLCHAIN=local, which prevents Go from
+# auto-downloading the required toolchain when go.mod requires a newer version.
+# Only override that problematic environment default; allow explicit overrides.
+ifeq ($(origin GOTOOLCHAIN),environment)
+ifeq ($(GOTOOLCHAIN),local)
+GOTOOLCHAIN := auto
+endif
+endif
+export GOTOOLCHAIN
 TEST_RESULTS_DIR=testResults
 # manifest name under tests/e2e/k8s-azure/manifest
 TEST_MANIFEST ?= linux
@@ -200,7 +210,17 @@ push-ccm-image: ## Push controller-manager image.
 
 .PHONY: push-node-image-linux
 push-node-image-linux: ## Push node-manager image for Linux.
-	docker push $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH)
+	@RETRY_COUNT=0; \
+	MAX_RETRIES=3; \
+	until docker push $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH) || [ $$RETRY_COUNT -ge $$MAX_RETRIES ]; do \
+		RETRY_COUNT=$$((RETRY_COUNT+1)); \
+		echo "Retrying to push image $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH), attempt #$$RETRY_COUNT"; \
+		sleep 30; \
+	done; \
+	if [ $$? -ne 0 ]; then \
+		echo "docker push failed after $$MAX_RETRIES attempts. Aborting."; \
+		exit 1; \
+	fi; \
 
 push-node-image-linux-push-name-%:
 	$(MAKE) ARCH=$* push-node-image-linux-push-name
@@ -239,8 +259,8 @@ image: build-all-ccm-images build-all-node-images ## Build all images.
 .PHONY: push
 push: push-multi-arch-controller-manager-image push-multi-arch-node-manager-image ## Push all images.
 
-.PHONY: push-multi-arch-controller-manager-image ## Push multi-arch controller-manager image
-push-multi-arch-controller-manager-image: push-all-ccm-images ## Create and push a manifest list containing all the Linux ccm images.
+.PHONY: push-multi-arch-controller-manager-image
+push-multi-arch-controller-manager-image: push-all-ccm-images ## Push multi-arch controller-manager image
 	## Linux amd64 ccm image name has no amd64
 	docker tag $(CONTROLLER_MANAGER_FULL_IMAGE_NAME):$(IMAGE_TAG) $(CONTROLLER_MANAGER_FULL_IMAGE_NAME)-amd64:$(IMAGE_TAG)
 	docker push $(CONTROLLER_MANAGER_FULL_IMAGE_NAME)-amd64:$(IMAGE_TAG)
@@ -251,8 +271,8 @@ push-multi-arch-controller-manager-image: push-all-ccm-images ## Create and push
 	done
 	docker manifest push --purge $(CONTROLLER_MANAGER_IMAGE)
 
-.PHONY: push-multi-arch-node-manager-image ## Push multi-arch node-manager image
-push-multi-arch-node-manager-image: push-all-node-images ## Create and push a manifest list containing all the Windows and Linux images.
+.PHONY: push-multi-arch-node-manager-image
+push-multi-arch-node-manager-image: push-all-node-images ## Push multi-arch node-manager image
 	docker manifest create --amend $(NODE_MANAGER_IMAGE) $(ALL_NODE_MANAGER_IMAGES)
 	for arch in $(ALL_ARCH.linux); do \
 		docker manifest annotate --os linux --arch $${arch} $(NODE_MANAGER_IMAGE)  $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$${arch}; \
@@ -268,17 +288,17 @@ push-multi-arch-node-manager-image: push-all-node-images ## Create and push a ma
 	done
 	docker manifest push --purge $(NODE_MANAGER_IMAGE)
 
-.PHONY: push-all-node-images ## Push node-manager image for os and archs.
-push-all-node-images: push-all-node-images-linux push-all-node-images-windows
+.PHONY: push-all-node-images
+push-all-node-images: push-all-node-images-linux push-all-node-images-windows ## Push node-manager image for os and archs.
 
-.PHONY: push-all-node-images-linux ## Push node-manager image for Linux.
-push-all-node-images-linux: $(addprefix push-node-image-linux-,$(ALL_ARCH.linux))
+.PHONY: push-all-node-images-linux
+push-all-node-images-linux: $(addprefix push-node-image-linux-,$(ALL_ARCH.linux)) ## Push node-manager image for Linux.
 
-.PHONY: push-all-node-images-windows ## Push node-manager image for Windows.
-push-all-node-images-windows: $(addprefix push-node-image-windows-,$(ALL_OS_ARCH.windows))
+.PHONY: push-all-node-images-windows
+push-all-node-images-windows: $(addprefix push-node-image-windows-,$(ALL_OS_ARCH.windows)) ## Push node-manager image for Windows.
 
-.PHONY: push-all-node-images-windows-hpc ## Push node-manager image for Windows.
-push-all-node-images-windows-hpc: $(addprefix push-node-images-windows-hpc-,$(ALL_OS_ARCH.windows))
+.PHONY: push-all-node-images-windows-hpc
+push-all-node-images-windows-hpc: $(addprefix push-node-images-windows-hpc-,$(ALL_OS_ARCH.windows)) ## Push node-manager image for Windows.
 
 # split words on hyphen, access by 1-index
 word-hyphen = $(word $2,$(subst -, ,$1))
@@ -292,14 +312,14 @@ push-node-image-windows-%:
 push-node-image-windows-hpc-%:
 	$(MAKE) ARCH=$(call word-hyphen,$*,1) OUTPUT_TYPE=registry build-node-image-windows-hpc
 
-.PHONY: build-all-node-images ## Build node-manager image for all OS and archs.
-build-all-node-images: build-all-node-images-linux build-all-node-images-windows
+.PHONY: build-all-node-images
+build-all-node-images: build-all-node-images-linux build-all-node-images-windows ## Build node-manager image for all OS and archs.
 
-.PHONY: build-all-node-images-linux ## Build node-manager image for Linux.
-build-all-node-images-linux: $(addprefix build-node-image-linux-,$(ALL_ARCH.linux))
+.PHONY: build-all-node-images-linux
+build-all-node-images-linux: $(addprefix build-node-image-linux-,$(ALL_ARCH.linux)) ## Build node-manager image for Linux.
 
-.PHONY: build-all-node-images-windows ## Build node-manager image for Windows.
-build-all-node-images-windows: $(addprefix build-node-image-windows-,$(ALL_OS_ARCH.windows))
+.PHONY: build-all-node-images-windows
+build-all-node-images-windows: $(addprefix build-node-image-windows-,$(ALL_OS_ARCH.windows)) ## Build node-manager image for Windows.
 
 build-node-image-linux-%:
 	$(MAKE) ARCH=$* build-node-image-linux
@@ -308,13 +328,13 @@ build-node-image-windows-%:
 	$(MAKE) WINDOWS_OSVERSION=$(call word-hyphen,$*,1) ARCH=$(call word-hyphen,$*,2) build-node-image-windows
 
 .PHONY: build-all-ccm-images
-build-all-ccm-images: $(addprefix build-ccm-image-,$(ALL_ARCH.linux))
+build-all-ccm-images: $(addprefix build-ccm-image-,$(ALL_ARCH.linux)) ## Build all CCM images.
 
 build-ccm-image-%:
 	$(MAKE) ARCH=$* build-ccm-image
 
 .PHONY: push-all-ccm-images
-push-all-ccm-images: $(addprefix push-ccm-image-,$(ALL_ARCH.linux))
+push-all-ccm-images: $(addprefix push-ccm-image-,$(ALL_ARCH.linux)) ## Push all CCM images.
 
 push-ccm-image-%:
 	$(MAKE) ARCH=$* push-ccm-image
@@ -326,7 +346,7 @@ manifest-node-manager-image-windows-hpc-%:
 	$(MAKE) ARCH=$(call word-hyphen,$*,1) manifest-node-manager-image-windows-hpc
 
 .PHONY: manifest-node-manager-image-windows
-manifest-node-manager-image-windows:
+manifest-node-manager-image-windows: ## Create and push Windows node-manager manifest.
 	set -x
 	docker manifest create --amend $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-$(WINDOWS_OSVERSION)-$(ARCH)
 	docker manifest annotate --os linux --arch $(ARCH) $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH)
@@ -334,8 +354,8 @@ manifest-node-manager-image-windows:
 	docker manifest annotate --os windows --arch $(ARCH) --os-version $${full_version} $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-$(WINDOWS_OSVERSION)-$(ARCH)
 	docker manifest push --purge $(NODE_MANAGER_IMAGE)
 
-.PHONY: manifest-node-manager-images-windows-hpc
-manifest-node-manager-image-windows-hpc:
+.PHONY: manifest-node-manager-image-windows-hpc
+manifest-node-manager-image-windows-hpc: ## Create and push Windows HPC node-manager manifest.
 	set -x
 	docker manifest create --amend $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH) $(NODE_MANAGER_WINDOWS_FULL_IMAGE_PREFIX)-hpc-$(ARCH)
 	docker manifest annotate --os linux --arch $(ARCH) $(NODE_MANAGER_IMAGE) $(NODE_MANAGER_LINUX_FULL_IMAGE_PREFIX)-$(ARCH)
@@ -402,7 +422,7 @@ test-e2e: ## Run k8s e2e tests.
 test-e2e-capz: ## Run k8s e2e tests with capz
 	hack/test_k8s_e2e_capz.sh $(TEST_E2E_ARGS)
 
-ensure-azcli:
+ensure-azcli: ## Ensure az CLI is installed.
 	hack/ensure-azcli.sh
 
 test-ccm-e2e: ensure-azcli ## Run cloud provider e2e tests.
@@ -428,7 +448,7 @@ deploy: image push ## Build, push and deploy an aks-engine cluster.
 	CCM_IMAGE=$(CONTROLLER_MANAGER_IMAGE) CNM_IMAGE=$(NODE_MANAGER_IMAGE) HYPERKUBE_IMAGE=$(HYPERKUBE_IMAGE) hack/deploy-cluster.sh
 
 .PHONY: cloud-build-prerequisites
-cloud-build-prerequisites:
+cloud-build-prerequisites: ## Install prerequisites for cloud build.
 	apk add --no-cache jq
 
 .PHONY: release-staging
@@ -444,11 +464,11 @@ endif
 ## --------------------------------------
 
 .PHONY: deploy-workload-cluster
-deploy-workload-cluster:
+deploy-workload-cluster: ## Deploy a workload cluster with CAPZ.
 	hack/deploy-workload-cluster.sh
 
 .PHONY: delete-workload-cluster
-delete-workload-cluster:
+delete-workload-cluster: ## Delete a CAPZ workload cluster.
 	hack/delete-workload-cluster.sh
 
 ##@ Tools
@@ -459,9 +479,3 @@ LINTER_VERSION = v2.5.0
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
 	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
-
-## --------------------------------------
-## Openshift specific include
-## --------------------------------------
-
-include openshift.mk

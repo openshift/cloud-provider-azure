@@ -45,6 +45,12 @@ generate() {
     --required-author='' \
     --output=${OUTPUT}
 
+  if [[ ! -s "${OUTPUT}" ]]; then
+    echo "ERROR: release-notes did not produce output at ${OUTPUT}" >&2
+    echo "       verify GITHUB_TOKEN access and release/tag inputs." >&2
+    exit 1
+  fi
+
   read -r -d '' HEAD <<EOF
 Full Changelog: [${FROM_TAG}..${TO_TAG}](https://github.com/kubernetes-sigs/cloud-provider-azure/compare/${FROM_TAG}...${TO_TAG})
 EOF
@@ -52,7 +58,7 @@ EOF
   echo -e "${HEAD}\n\n$(cat ${OUTPUT})" > ${OUTPUT}
 
   if [[ "${UPDATE_SITE}" = "true" ]]; then
-    echo "Generating site content for ${TO_TAG}: site/content/en/blog/releases/${TO_TAG}.md"
+    echo "Generating site content for ${TO_TAG}: content/en/blog/releases/${TO_TAG}.md"
     read -r -d '' SITE_HEAD <<EOF
 ---
 title: ${TO_TAG}
@@ -61,7 +67,7 @@ date: $(date '+%Y-%m-%d')
 description: Cloud Provider Azure ${TO_TAG}
 ---
 EOF
-    echo -e "${SITE_HEAD}\n$(cat ${OUTPUT})" > site/content/en/blog/releases/${TO_TAG}.md
+    echo -e "${SITE_HEAD}\n$(cat ${OUTPUT})" > content/en/blog/releases/${TO_TAG}.md
   fi
 }
 

@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,24 +23,26 @@ import (
 	"strings"
 	"time"
 
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
-	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
-	providerconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 	v1 "k8s.io/kubelet/pkg/apis/credentialprovider/v1"
+
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
+	providerconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 )
 
 // Refer: https://github.com/kubernetes/kubernetes/blob/master/pkg/credentialprovider/azure/azure_credentials.go
 
 const (
-	maxReadLength   = 10 * 1 << 20 // 10MB
-	defaultCacheTTL = 5 * time.Minute
+	maxReadLength = 10 * 1 << 20 // 10MB
+	// Since the ACR Refresh token TTL is around 3 hours, too short TTL may cause frequent token exchange and bring
+	// throttleling risk, so we set the cache TTL to 60 minutes, which is a trade-off between security and performance.
+	defaultCacheTTL = 60 * time.Minute
 
 	AcrAudience = "https://containerregistry.azure.net"
 )
@@ -67,6 +69,7 @@ type acrProvider struct {
 }
 
 func NewAcrProvider(req *v1.CredentialProviderRequest, registryMirrorStr string, configFile string, ibConfig IdentityBindingsConfig) (CredentialProvider, error) {
+	logger := log.Background().WithName("NewAcrProvider")
 	config, err := configloader.Load[providerconfig.AzureClientConfig](context.Background(), nil, &configloader.FileLoaderConfig{FilePath: configFile})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
@@ -81,36 +84,43 @@ func NewAcrProvider(req *v1.CredentialProviderRequest, registryMirrorStr string,
 		return nil, err
 	}
 
+	provider := &acrProvider{
+		config:         config,
+		environment:    env,
+		cloudConfig:    clientOption.Cloud,
+		registryMirror: parseRegistryMirror(registryMirrorStr),
+	}
+
+	_, sourceRegistry := provider.parseACRLoginServerFromImage(req.Image)
+	// Assumption here is mirrored image is only used on NI cluster and for mirrored image,
+	// managed identity authentication is always used.
+	mirrored := sourceRegistry != ""
+
 	var credential azcore.TokenCredential
-	if ibConfig.SNIName != "" {
-		klog.V(2).Infof("Using identity bindings token credential for image %s", req.Image)
+	if !mirrored && ibConfig.SNIName != "" {
+		logger.V(2).Info("Using identity bindings token credential for image", "image", req.Image)
 		credential, err = GetIdentityBindingsTokenCredential(req, config, ibConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get identity bindings token credential for image %s: %w", req.Image, err)
 		}
-	} else if len(req.ServiceAccountToken) != 0 {
+	} else if !mirrored && len(req.ServiceAccountToken) != 0 {
 		// Use service account token credential
-		klog.V(2).Infof("Using service account token credential for image %s", req.Image)
+		logger.V(2).Info("Using service account token credential for image", "image", req.Image)
 		credential, err = getServiceAccountTokenCredential(req, config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get service account token credential for image %s: %w", req.Image, err)
 		}
 	} else {
 		// Use managed identity
-		klog.V(2).Infof("Using managed identity to authenticate ACR for image %s", req.Image)
+		logger.V(2).Info("Using managed identity to authenticate ACR for image", "image", req.Image)
 		credential, err = getManagedIdentityCredential(req, config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token credential for image %s: %w", req.Image, err)
 		}
 	}
+	provider.credential = credential
 
-	return &acrProvider{
-		config:         config,
-		credential:     credential,
-		environment:    env,
-		cloudConfig:    clientOption.Cloud,
-		registryMirror: parseRegistryMirror(registryMirrorStr),
-	}, nil
+	return provider, nil
 }
 
 // getManagedIdentityCredential creates a new instance of the ACR provider.
@@ -143,10 +153,11 @@ func getManagedIdentityCredential(_ *v1.CredentialProviderRequest, config *provi
 }
 
 func getServiceAccountTokenCredential(req *v1.CredentialProviderRequest, config *providerconfig.AzureClientConfig) (azcore.TokenCredential, error) {
+	logger := log.Background().WithName("getServiceAccountTokenCredential")
 	if len(req.ServiceAccountToken) == 0 {
 		return nil, fmt.Errorf("kubernetes Service account token is not provided for image %s", req.Image)
 	}
-	klog.V(2).Infof("Kubernetes Service account token is provided for image %s", req.Image)
+	logger.V(2).Info("Kubernetes Service account token is provided for image", "image", req.Image)
 
 	clientOption, _, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
 	if err != nil {
@@ -181,9 +192,10 @@ func getServiceAccountTokenCredential(req *v1.CredentialProviderRequest, config 
 }
 
 func (a *acrProvider) GetCredentials(ctx context.Context, image string, _ []string) (*v1.CredentialProviderResponse, error) {
+	logger := log.FromContextOrBackground(ctx).WithName("GetCredentials")
 	targetloginServer, sourceloginServer := a.parseACRLoginServerFromImage(image)
 	if targetloginServer == "" {
-		klog.V(2).Infof("image(%s) is not from ACR, return empty authentication", image)
+		logger.V(2).Info("image is not from ACR, return empty authentication", "image", image)
 		return &v1.CredentialProviderResponse{
 			CacheKeyType:  v1.RegistryPluginCacheKeyType,
 			CacheDuration: &metav1.Duration{Duration: 0},
@@ -206,7 +218,7 @@ func (a *acrProvider) GetCredentials(ctx context.Context, image string, _ []stri
 	if a.config.UseManagedIdentityExtension {
 		username, password, err := a.getFromACR(ctx, targetloginServer)
 		if err != nil {
-			klog.Errorf("error getting credentials from ACR for %s: %s", targetloginServer, err)
+			logger.Error(err, "error getting credentials from ACR", "targetLoginServer", targetloginServer)
 			return nil, err
 		}
 
@@ -255,6 +267,7 @@ func (a *acrProvider) GetCredentials(ctx context.Context, image string, _ []stri
 
 // getFromACR gets credentials from ACR.
 func (a *acrProvider) getFromACR(ctx context.Context, loginServer string) (string, string, error) {
+	logger := log.FromContextOrBackground(ctx).WithName("getFromACR")
 	var armAccessToken azcore.AccessToken
 	var err error
 	if armAccessToken, err = a.credential.GetToken(ctx, policy.TokenRequestOptions{
@@ -262,21 +275,21 @@ func (a *acrProvider) getFromACR(ctx context.Context, loginServer string) (strin
 			fmt.Sprintf("%s/%s", AcrAudience, ".default"),
 		},
 	}); err != nil {
-		klog.Errorf("Failed to ensure fresh service principal token: %v", err)
+		logger.Error(err, "Failed to ensure fresh service principal token")
 		return "", "", err
 	}
 
-	klog.V(4).Infof("discovering auth redirects for: %s", loginServer)
+	logger.V(4).Info("discovering auth redirects", "loginServer", loginServer)
 	directive, err := receiveChallengeFromLoginServer(loginServer, "https")
 	if err != nil {
-		klog.Errorf("failed to receive challenge: %s", err)
+		logger.Error(err, "failed to receive challenge")
 		return "", "", err
 	}
 
-	klog.V(4).Infof("exchanging an acr refresh_token")
+	logger.V(4).Info("exchanging an acr refresh_token")
 	registryRefreshToken, err := performTokenExchange(directive, a.config.TenantID, armAccessToken.Token)
 	if err != nil {
-		klog.Errorf("failed to perform token exchange: %s", err)
+		logger.Error(err, "failed to perform token exchange")
 		return "", "", err
 	}
 
@@ -332,6 +345,7 @@ func (a *acrProvider) processImageWithRegistryMirror(image string) (string, stri
 // parseRegistryMirror input format: "--registry-mirror=aaa:bbb,ccc:ddd"
 // output format: map[string]string{"aaa": "bbb", "ccc": "ddd"}
 func parseRegistryMirror(registryMirrorStr string) map[string]string {
+	logger := log.Background().WithName("parseRegistryMirror")
 	registryMirror := map[string]string{}
 
 	registryMirrorStr = strings.TrimSpace(registryMirrorStr)
@@ -343,7 +357,7 @@ func parseRegistryMirror(registryMirrorStr string) map[string]string {
 	for _, mapping := range strings.Split(registryMirrorStr, ",") {
 		parts := strings.Split(mapping, ":")
 		if len(parts) != 2 {
-			klog.Errorf("Invalid registry mirror format: %s", mapping)
+			logger.Error(nil, "Invalid registry mirror format", "mapping", mapping)
 			continue
 		}
 		registryMirror[parts[0]] = parts[1]

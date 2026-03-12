@@ -43,9 +43,11 @@ import (
 
 // NewCloudNodeManagerCommand creates a *cobra.Command object with default parameters
 func NewCloudNodeManagerCommand() *cobra.Command {
+	logger := log.Background().WithName("NewCloudNodeManagerCommand")
 	s, err := options.NewCloudNodeManagerOptions()
 	if err != nil {
-		klog.Fatalf("unable to initialize command options: %v", err)
+		logger.Error(err, "unable to initialize command options")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	cmd := &cobra.Command{
@@ -95,7 +97,7 @@ func NewCloudNodeManagerCommand() *cobra.Command {
 
 // Run runs the ExternalCMServer.  This should never exit.
 func Run(ctx context.Context, c *cloudnodeconfig.Config) error {
-	logger := log.Background().WithName("Run")
+	logger := log.FromContextOrBackground(ctx).WithName("Run")
 	// To help debugging, immediately log version and nodeName
 	logger.Info("Version", "version", version.Get())
 	logger.Info("NodeName", "nodeName", c.NodeName)
@@ -114,7 +116,8 @@ func Run(ctx context.Context, c *cloudnodeconfig.Config) error {
 
 	run := func(ctx context.Context) {
 		if err := startControllers(ctx, c, healthzHandler); err != nil {
-			klog.Fatalf("error running controllers: %v", err)
+			logger.Error(err, "error running controllers")
+			klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 		}
 	}
 
@@ -124,8 +127,8 @@ func Run(ctx context.Context, c *cloudnodeconfig.Config) error {
 
 // startControllers starts the cloud specific controller loops.
 func startControllers(ctx context.Context, c *cloudnodeconfig.Config, healthzHandler *controllerhealthz.MutableHealthzHandler) error {
-	logger := log.Background().WithName("startControllers")
-	klog.V(1).Infof("Starting cloud-node-manager...")
+	logger := log.FromContextOrBackground(ctx).WithName("startControllers")
+	logger.V(1).Info("Starting cloud-node-manager...")
 
 	// Start the CloudNodeController
 	nodeController := nodemanager.NewCloudNodeController(
@@ -148,7 +151,8 @@ func startControllers(ctx context.Context, c *cloudnodeconfig.Config, healthzHan
 	// If apiserver is not running we should wait for some time and fail only then. This is particularly
 	// important when we start node manager before apiserver starts.
 	if err := genericcontrollermanager.WaitForAPIServer(c.VersionedClient, 10*time.Second); err != nil {
-		klog.Fatalf("Failed to wait for apiserver being healthy: %v", err)
+		logger.Error(err, "Failed to wait for apiserver being healthy")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	c.SharedInformers.Start(ctx.Done())

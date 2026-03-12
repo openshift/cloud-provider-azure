@@ -84,6 +84,7 @@ func startCloudNodeLifecycleController(ctx context.Context, controllerContext ge
 }
 
 func startServiceController(ctx context.Context, controllerContext genericcontrollermanager.ControllerContext, completedConfig *cloudcontrollerconfig.CompletedConfig, cloud cloudprovider.Interface) (http.Handler, bool, error) {
+	logger := log.FromContextOrBackground(ctx).WithName("startServiceController")
 	// Start the service controller
 	serviceController, err := servicecontroller.New(
 		cloud,
@@ -95,7 +96,7 @@ func startServiceController(ctx context.Context, controllerContext genericcontro
 	)
 	if err != nil {
 		// This error shouldn't fail. It lives like this as a legacy.
-		klog.Errorf("Failed to start service controller: %v", err)
+		logger.Error(err, "Failed to start service controller")
 		return nil, false, nil
 	}
 
@@ -105,7 +106,7 @@ func startServiceController(ctx context.Context, controllerContext genericcontro
 }
 
 func startRouteController(ctx context.Context, controllerContext genericcontrollermanager.ControllerContext, completedConfig *cloudcontrollerconfig.CompletedConfig, cloud cloudprovider.Interface) (http.Handler, bool, error) {
-	logger := log.Background().WithName("startRouteController")
+	logger := log.FromContextOrBackground(ctx).WithName("startRouteController")
 	if !completedConfig.ComponentConfig.KubeCloudShared.ConfigureCloudRoutes {
 		logger.Info("Will not configure cloud provider routes", "--configure-cloud-routes", completedConfig.ComponentConfig.KubeCloudShared.ConfigureCloudRoutes)
 		return nil, false, nil
@@ -134,13 +135,16 @@ func startRouteController(ctx context.Context, controllerContext genericcontroll
 		return nil, false, fmt.Errorf("length of clusterCIDRs is:%v more than max allowed of 2", len(clusterCIDRs))
 	}
 
-	routeController := routecontroller.New(
+	routeController, err := routecontroller.New(
 		routes,
 		completedConfig.ClientBuilder.ClientOrDie("route-controller"),
 		completedConfig.SharedInformers.Core().V1().Nodes(),
 		completedConfig.ComponentConfig.KubeCloudShared.ClusterName,
 		clusterCIDRs,
 	)
+	if err != nil {
+		return nil, false, err
+	}
 	go routeController.Run(ctx, completedConfig.ComponentConfig.KubeCloudShared.RouteReconciliationPeriod.Duration, controllerContext.ControllerManagerMetrics)
 
 	return nil, true, nil

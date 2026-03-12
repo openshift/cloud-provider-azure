@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"net"
 	"strings"
 	"testing"
 
@@ -102,18 +103,18 @@ func TestParseIdentityBindingsConfig(t *testing.T) {
 			errContains:     "ib-sni-name must be set",
 		},
 		{
-			name:        "invalid API server IP - hostname",
+			name:        "invalid API server IP - unresolvable hostname",
 			sniName:     "api.example.com",
-			apiServerIP: "invalid-hostname",
+			apiServerIP: "invalid-hostname.invalid",
 			wantErr:     true,
-			errContains: "must be a valid IP address",
+			errContains: "must be a valid IP address or resolvable FQDN",
 		},
 		{
 			name:        "invalid API server IP - malformed",
 			sniName:     "api.example.com",
 			apiServerIP: "999.999.999.999",
 			wantErr:     true,
-			errContains: "must be a valid IP address",
+			errContains: "must be a valid IP address or resolvable FQDN",
 		},
 		{
 			name:        "valid IPv6 address",
@@ -155,5 +156,24 @@ func TestParseIdentityBindingsConfig(t *testing.T) {
 				t.Errorf("ParseIdentityBindingsConfig() APIServerIP = %v, want %v", gotConfig.APIServerIP, tt.wantConfig.APIServerIP)
 			}
 		})
+	}
+}
+
+func TestParseIdentityBindingsConfig_ResolvableFQDN(t *testing.T) {
+	// "localhost" should be universally resolvable to an IP (127.0.0.1 or ::1)
+	gotConfig, err := ParseIdentityBindingsConfig("api.example.com", "", "", "localhost")
+	if err != nil {
+		t.Fatalf("ParseIdentityBindingsConfig() unexpected error for resolvable FQDN: %v", err)
+	}
+
+	// The resolved value should be a valid IP, not the original hostname
+	if net.ParseIP(gotConfig.APIServerIP) == nil {
+		t.Errorf("ParseIdentityBindingsConfig() APIServerIP = %q, expected a resolved IP address", gotConfig.APIServerIP)
+	}
+	if gotConfig.APIServerIP == "localhost" {
+		t.Errorf("ParseIdentityBindingsConfig() APIServerIP should be a resolved IP, not the original FQDN")
+	}
+	if gotConfig.SNIName != "api.example.com" {
+		t.Errorf("ParseIdentityBindingsConfig() SNIName = %v, want %v", gotConfig.SNIName, "api.example.com")
 	}
 }

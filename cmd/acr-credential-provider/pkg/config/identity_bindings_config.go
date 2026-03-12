@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,11 @@ limitations under the License.
 package config
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/credentialprovider"
 )
@@ -59,8 +61,15 @@ func ParseIdentityBindingsConfig(sniName, defaultClientID, defaultTenantID, apiS
 	// Validate API server IP
 	if apiServerIP != "" {
 		if net.ParseIP(apiServerIP) == nil {
-			return credentialprovider.IdentityBindingsConfig{}, fmt.Errorf("--%s must be a valid IP address, got: %s",
-				FlagIBAPIIP, apiServerIP)
+			// Not a valid IP, try resolving as FQDN
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			ips, err := net.DefaultResolver.LookupHost(ctx, apiServerIP)
+			if err != nil || len(ips) == 0 {
+				return credentialprovider.IdentityBindingsConfig{}, fmt.Errorf("--%s must be a valid IP address or resolvable FQDN, got: %s",
+					FlagIBAPIIP, apiServerIP)
+			}
+			apiServerIP = ips[0]
 		}
 		if sniName == "" {
 			return credentialprovider.IdentityBindingsConfig{}, fmt.Errorf("--%s must be set when --%s is provided", FlagIBSNIName, FlagIBAPIIP)

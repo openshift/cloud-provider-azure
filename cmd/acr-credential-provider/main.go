@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,13 +29,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/component-base/logs"
-	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cloud-provider-azure/cmd/acr-credential-provider/pkg/config"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
 	"sigs.k8s.io/cloud-provider-azure/pkg/version"
 )
 
 func main() {
+	logger := log.Background().WithName("main")
 	rand.Seed(time.Now().UnixNano())
 
 	var (
@@ -60,14 +61,14 @@ func main() {
 			return nil
 		},
 		Version: version.Get().GitVersion,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ibConfig, err := config.ParseIdentityBindingsConfig(IBSNIName, IBDefaultClient, IBDefaultTenant, IBAPIIP)
 			if err != nil {
-				klog.Errorf("Error parsing identity bindings config: %v", err)
+				logger.Error(err, "Error parsing identity bindings config")
 				return err
 			}
-			if err := NewCredentialProvider(args[0], RegistryMirrorStr, ibConfig).Run(context.TODO()); err != nil {
-				klog.Errorf("Error running acr credential provider: %v", err)
+			if err := NewCredentialProvider(args[0], RegistryMirrorStr, ibConfig).Run(cmd.Context()); err != nil {
+				logger.Error(err, "Error running acr credential provider")
 				return err
 			}
 			return nil

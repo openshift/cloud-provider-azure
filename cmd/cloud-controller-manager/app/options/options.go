@@ -48,6 +48,7 @@ import (
 
 	cloudcontrollerconfig "sigs.k8s.io/cloud-provider-azure/cmd/cloud-controller-manager/app/config"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
 
 	// add the kubernetes feature gates
 	_ "k8s.io/controller-manager/pkg/features/register"
@@ -264,6 +265,10 @@ func (o *CloudControllerManagerOptions) Validate(allControllers, disabledByDefau
 		errors = append(errors, fmt.Errorf("--cloud-provider cannot be empty"))
 	}
 
+	if o.ServiceController.ConcurrentServiceSyncs != 1 {
+		errors = append(errors, fmt.Errorf("--concurrent-service-syncs is limited to 1 only"))
+	}
+
 	if !o.DynamicReloading.EnableDynamicReloading && o.KubeCloudShared.CloudProvider.CloudConfigFile == "" {
 		errors = append(errors, fmt.Errorf("--cloud-config cannot be empty when --enable-dynamic-reloading is not set to true"))
 	}
@@ -310,11 +315,12 @@ func createRecorder(kubeClient clientset.Interface, userAgent string) record.Eve
 
 // CreateFilteredInformerFactory creates a filtered informer factory with node filtering
 func CreateFilteredInformerFactory(client clientset.Interface, resyncPeriod time.Duration, nodeFilterRequirements string) (informers.SharedInformerFactory, error) {
+	logger := log.Background().WithName("CreateFilteredInformerFactory")
 	// Parse node label selector
 	if nodeFilterRequirements != "" {
 		selector, err := labels.Parse(nodeFilterRequirements)
 		if err != nil {
-			klog.Errorf("Invalid label filter requirement %s, error: %v", nodeFilterRequirements, err)
+			logger.Error(err, "Invalid label filter requirement", "requirement", nodeFilterRequirements)
 			return nil, err
 		}
 		// Create filtered informer factory
