@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2026 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,8 +34,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
-	"k8s.io/klog/v2"
 	v1 "k8s.io/kubelet/pkg/apis/credentialprovider/v1"
+
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
 )
 
 const (
@@ -65,6 +66,7 @@ type tokenResponse struct {
 // createTransport creates an HTTP transport with custom CA
 // The transport uses a custom dialer that resolves the SNI name to the configured API server IP
 func createTransport(sniName string, apiServerIP string, caPool *x509.CertPool) *http.Transport {
+	logger := log.Background().WithName("createTransport")
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// reset Proxy to avoid using environment proxy settings
 	transport.Proxy = nil
@@ -79,7 +81,7 @@ func createTransport(sniName string, apiServerIP string, caPool *x509.CertPool) 
 
 		// Always connect to the configured API server IP
 		fixedAddr := net.JoinHostPort(apiServerIP, port)
-		klog.V(5).Infof("Identity bindings: resolving %s to %s", addr, fixedAddr)
+		logger.V(5).Info("Identity bindings: resolving address", "from", addr, "to", fixedAddr)
 
 		dialer := &net.Dialer{
 			Timeout:   30 * time.Second,
@@ -135,6 +137,7 @@ func (c *identityBindingsTokenCredential) getTransport() (*http.Transport, error
 
 // GetToken retrieves an access token using identity bindings token exchange
 func (c *identityBindingsTokenCredential) GetToken(ctx context.Context, opts policy.TokenRequestOptions) (azcore.AccessToken, error) {
+	logger := log.Background().WithName("GetToken")
 	// The scope should be exactly one value in format "https://management.azure.com/.default"
 	// or "https://containerregistry.azure.net/.default"
 	if len(opts.Scopes) != 1 {
@@ -170,7 +173,7 @@ func (c *identityBindingsTokenCredential) GetToken(ctx context.Context, opts pol
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	klog.V(4).Infof("Requesting token from identity bindings endpoint: %s with scope: %s", c.endpoint, scope)
+	logger.V(4).Info("Requesting token from identity bindings endpoint", "endpoint", c.endpoint, "scope", scope)
 
 	// Get transport (handles CA rotation)
 	transport, err := c.getTransport()
@@ -193,7 +196,7 @@ func (c *identityBindingsTokenCredential) GetToken(ctx context.Context, opts pol
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return azcore.AccessToken{}, fmt.Errorf("token request failed with status %d", resp.StatusCode)
+		return azcore.AccessToken{}, fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
@@ -204,7 +207,7 @@ func (c *identityBindingsTokenCredential) GetToken(ctx context.Context, opts pol
 
 	expiresOn := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 
-	klog.V(4).Infof("Successfully obtained token from identity bindings, expires at: %s", expiresOn)
+	logger.V(4).Info("Successfully obtained token from identity bindings", "expiresAt", expiresOn)
 
 	return azcore.AccessToken{
 		Token:     tokenResp.AccessToken,
@@ -213,7 +216,8 @@ func (c *identityBindingsTokenCredential) GetToken(ctx context.Context, opts pol
 }
 
 func GetIdentityBindingsTokenCredential(req *v1.CredentialProviderRequest, config *providerconfig.AzureClientConfig, ibConfig IdentityBindingsConfig) (azcore.TokenCredential, error) {
-	klog.V(2).Infof("Using identity bindings token credential for image %s", req.Image)
+	logger := log.Background().WithName("GetIdentityBindingsTokenCredential")
+	logger.V(2).Info("Using identity bindings token credential for image", "image", req.Image)
 
 	// Get SNI name from config
 	sniName := ibConfig.SNIName
