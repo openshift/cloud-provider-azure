@@ -73,7 +73,7 @@ interactions:
             Content-Type:
                 - application/json
             User-Agent:
-                - ccm-compute-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
+                - ccm-compute-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
         url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-AvailabilitySet/providers/Microsoft.Compute/availabilitySets/testResource?api-version=2024-11-01
         method: PUT
       response:
@@ -125,7 +125,7 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
+                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
         url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-AvailabilitySet/providers/Microsoft.Compute/availabilitySets/testResource?api-version=2024-11-01
         method: GET
       response:
@@ -177,7 +177,7 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
+                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
         url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-AvailabilitySet/providers/Microsoft.Compute/availabilitySets/testResourcenotfound?api-version=2024-11-01
         method: GET
       response:
@@ -226,7 +226,7 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
+                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
         url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-AvailabilitySet/providers/Microsoft.Compute/availabilitySets?api-version=2024-11-01
         method: GET
       response:
@@ -278,7 +278,7 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
+                - ccm-AvailabilitySet-clie azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
         url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-AvailabilitySetnotfound/providers/Microsoft.Compute/availabilitySets?api-version=2024-11-01
         method: GET
       response:

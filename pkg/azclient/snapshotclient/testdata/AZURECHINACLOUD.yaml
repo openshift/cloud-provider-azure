@@ -73,8 +73,8 @@ interactions:
             Content-Type:
                 - application/json
             User-Agent:
-                - ccm-storage-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2024-03-02
+                - ccm-storage-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2025-01-02
         method: PUT
       response:
         proto: HTTP/2.0
@@ -87,7 +87,7 @@ interactions:
         body: "{\r\n  \"name\": \"test-disk\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk\",\r\n  \"type\": \"Microsoft.Compute/disks\",\r\n  \"location\": \"chinaeast2\",\r\n  \"sku\": {\r\n    \"name\": \"Standard_LRS\"\r\n  },\r\n  \"properties\": {\r\n    \"creationData\": {\r\n      \"createOption\": \"Empty\"\r\n    },\r\n    \"diskSizeGB\": 64,\r\n    \"provisioningState\": \"Updating\"\r\n  }\r\n}"
         headers:
             Azure-Asyncoperation:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -97,7 +97,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Pragma:
                 - no-cache
             Server:
@@ -125,8 +125,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-storage-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - ccm-storage-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -173,8 +173,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-storage-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2024-03-02
+                - ccm-storage-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2025-01-02
         method: GET
       response:
         proto: HTTP/2.0
@@ -227,8 +227,8 @@ interactions:
             Content-Type:
                 - application/json
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: PUT
       response:
         proto: HTTP/2.0
@@ -241,7 +241,7 @@ interactions:
         body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource\",\r\n  \"type\": \"Microsoft.Compute/snapshots\",\r\n  \"location\": \"chinaeast2\",\r\n  \"properties\": {\r\n    \"creationData\": {\r\n      \"createOption\": \"Copy\",\r\n      \"sourceResourceId\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk\"\r\n    },\r\n    \"provisioningState\": \"Updating\"\r\n  }\r\n}"
         headers:
             Azure-Asyncoperation:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -251,7 +251,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Pragma:
                 - no-cache
             Server:
@@ -279,8 +279,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -327,8 +327,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: GET
       response:
         proto: HTTP/2.0
@@ -377,8 +377,8 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: GET
       response:
         proto: HTTP/2.0
@@ -427,8 +427,8 @@ interactions:
             Accept:
                 - application/json
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResourcenotfound?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResourcenotfound?api-version=2025-01-02
         method: GET
       response:
         proto: HTTP/2.0
@@ -480,8 +480,8 @@ interactions:
             Content-Type:
                 - application/json
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: PUT
       response:
         proto: HTTP/2.0
@@ -494,7 +494,7 @@ interactions:
         body: "{\r\n  \"name\": \"testResource\",\r\n  \"id\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource\",\r\n  \"type\": \"Microsoft.Compute/snapshots\",\r\n  \"location\": \"chinaeast2\",\r\n  \"sku\": {\r\n    \"name\": \"Standard_LRS\",\r\n    \"tier\": \"Standard\"\r\n  },\r\n  \"properties\": {\r\n    \"creationData\": {\r\n      \"createOption\": \"Copy\",\r\n      \"sourceResourceId\": \"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk\"\r\n    },\r\n    \"diskSizeGB\": 64,\r\n    \"provisioningState\": \"Updating\"\r\n  }\r\n}"
         headers:
             Azure-Asyncoperation:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -504,7 +504,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Pragma:
                 - no-cache
             Server:
@@ -532,8 +532,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -580,8 +580,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: GET
       response:
         proto: HTTP/2.0
@@ -628,8 +628,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2024-03-02
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/snapshots/testResource?api-version=2025-01-02
         method: DELETE
       response:
         proto: HTTP/2.0
@@ -642,7 +642,7 @@ interactions:
         body: ""
         headers:
             Azure-Asyncoperation:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -650,7 +650,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Pragma:
                 - no-cache
             Server:
@@ -678,8 +678,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-Snapshot-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - ccm-Snapshot-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
@@ -726,8 +726,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-storage-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2024-03-02
+                - ccm-storage-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/aks-cit-Snapshot/providers/Microsoft.Compute/disks/test-disk?api-version=2025-01-02
         method: DELETE
       response:
         proto: HTTP/2.0
@@ -740,7 +740,7 @@ interactions:
         body: ""
         headers:
             Azure-Asyncoperation:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Cache-Control:
                 - no-cache
             Content-Length:
@@ -748,7 +748,7 @@ interactions:
             Expires:
                 - "-1"
             Location:
-                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&monitor=true&p=00000000-0000-0000-0000-000000000000&s=s&t=t
             Pragma:
                 - no-cache
             Server:
@@ -776,8 +776,8 @@ interactions:
         form: {}
         headers:
             User-Agent:
-                - ccm-storage-client azsdk-go-armcompute/v6.3.0 (go1.24.0; linux)
-        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2024-03-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
+                - ccm-storage-client azsdk-go-armcompute/v7.0.0 (go1.24.0; linux)
+        url: https://management.chinacloudapi.cn/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Compute/locations/chinaeast2/DiskOperations/00000000-0000-0000-0000-000000000000?api-version=2025-01-02&c=c&h=h&p=00000000-0000-0000-0000-000000000000&s=s&t=t
         method: GET
       response:
         proto: HTTP/2.0
