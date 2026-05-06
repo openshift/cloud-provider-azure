@@ -143,7 +143,7 @@ func (vm *VirtualMachine) IsVirtualMachineScaleSetVM() bool {
 }
 
 func (vm *VirtualMachine) ManagedByVMSS() bool {
-	return vm.Manage == VMSS
+	return vm != nil && vm.Manage == VMSS
 }
 
 func (vm *VirtualMachine) AsVirtualMachine() *compute.VirtualMachine {

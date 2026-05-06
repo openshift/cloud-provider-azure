@@ -1036,9 +1036,11 @@ func (ss *ScaleSet) EnsureHostInPool(_ *v1.Service, nodeName types.NodeName, bac
 		}
 
 		logger.Error(err, "failed to get vmss vm", "vmName", vmName)
-		if !errors.Is(err, ErrorNotVmssInstance) {
-			return "", "", "", nil, err
+		if errors.Is(err, ErrorNotVmssInstance) {
+			klog.Infof("EnsureHostInPool: skipping node %s because it is not a VMSS instance", vmName)
+			return "", "", "", nil, nil
 		}
+		return "", "", "", nil, err
 	}
 	statuses := vm.GetInstanceViewStatus()
 	vmPowerState := vmutil.GetVMPowerState(vm.Name, statuses)
