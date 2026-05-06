@@ -129,10 +129,16 @@ func FromVirtualMachineScaleSetVM(vm *compute.VirtualMachineScaleSetVM, opt Mana
 }
 
 func (vm *VirtualMachine) IsVirtualMachine() bool {
+	if vm == nil {
+		return false
+	}
 	return vm.Variant == VariantVirtualMachine
 }
 
 func (vm *VirtualMachine) IsVirtualMachineScaleSetVM() bool {
+	if vm == nil {
+		return false
+	}
 	return vm.Variant == VariantVirtualMachineScaleSetVM
 }
 
