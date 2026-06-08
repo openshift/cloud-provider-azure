@@ -225,3 +225,4 @@ gopkg.in/yaml.v3
 # k8s.io/utils v0.0.0-20230505201702-9f6742963106
 ## explicit; go 1.18
 k8s.io/utils/clock
+# google.golang.org/grpc => github.com/openshift-sustaining/grpc-go v1.67.3-sec.1
