@@ -324,7 +324,7 @@ func (az *Cloud) InitializeCloudFromConfig(ctx context.Context, config *config.C
 		config.ClusterServiceSharedLoadBalancerHealthProbePath = consts.ClusterServiceLoadBalancerHealthProbeDefaultPath
 	}
 
-	clientOps, env, err := azclient.GetAzCoreClientOption(&az.ARMClientConfig)
+	clientOps, env, err := azclient.GetAzCoreClientOption(&config.ARMClientConfig)
 	if err != nil {
 		return err
 	}
