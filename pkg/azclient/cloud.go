@@ -35,6 +35,48 @@ const (
 	EnvironmentFilepathName = "AZURE_ENVIRONMENT_FILEPATH"
 )
 
+// metadataEndpoint represents the structure of the metadata endpoint response
+type metadataEndpoint struct {
+	Name            string `json:"name"`
+	ResourceManager string `json:"resourceManager,omitempty"`
+	Authentication  struct {
+		Audiences     []string `json:"audiences"`
+		LoginEndpoint string   `json:"loginEndpoint,omitempty"`
+	} `json:"authentication"`
+	Suffixes struct {
+		AcrLoginServer *string `json:"acrLoginServer,omitempty"`
+		Storage        *string `json:"storage,omitempty"`
+	} `json:"suffixes,omitempty"`
+}
+
+// applyMetadataToConfig applies metadata endpoint configuration to cloud config and environment
+func applyMetadataToConfig(item metadataEndpoint, endpoint string, cloudConfig *cloud.Configuration, env *Environment) {
+	// We use the endpoint to build our config, but on ASH the config returned
+	// does not contain the endpoint, and this is not accounted for. This
+	// ultimately unsets it for the returned config, causing the bootstrap of
+	// the provider to fail. Instead, check if the endpoint is returned, and if
+	// It is not then set it.
+	if item.ResourceManager == "" {
+		item.ResourceManager = endpoint
+	}
+	cloudConfig.Services[cloud.ResourceManager] = cloud.ServiceConfiguration{
+		Endpoint: item.ResourceManager,
+		Audience: item.Authentication.Audiences[0],
+	}
+	env.ResourceManagerEndpoint = item.ResourceManager
+	env.TokenAudience = item.Authentication.Audiences[0]
+	if item.Authentication.LoginEndpoint != "" {
+		cloudConfig.ActiveDirectoryAuthorityHost = item.Authentication.LoginEndpoint
+		env.ActiveDirectoryEndpoint = item.Authentication.LoginEndpoint
+	}
+	if item.Suffixes.Storage != nil {
+		env.StorageEndpointSuffix = *item.Suffixes.Storage
+	}
+	if item.Suffixes.AcrLoginServer != nil {
+		env.ContainerRegistryDNSSuffix = *item.Suffixes.AcrLoginServer
+	}
+}
+
 // OverrideAzureCloudConfigAndEnvConfigFromMetadataService returns cloud config and environment config from url
 // track2 sdk will add this one in the near future https://github.com/Azure/azure-sdk-for-go/issues/20959
 // cloud and env should not be empty
@@ -54,18 +96,7 @@ func OverrideAzureCloudConfigAndEnvConfigFromMetadataService(endpoint, cloudName
 	if err != nil {
 		return err
 	}
-	metadata := []struct {
-		Name            string `json:"name"`
-		ResourceManager string `json:"resourceManager,omitempty"`
-		Authentication  struct {
-			Audiences     []string `json:"audiences"`
-			LoginEndpoint string   `json:"loginEndpoint,omitempty"`
-		} `json:"authentication"`
-		Suffixes struct {
-			AcrLoginServer *string `json:"acrLoginServer,omitempty"`
-			Storage        *string `json:"storage,omitempty"`
-		} `json:"suffixes,omitempty"`
-	}{}
+	var metadata []metadataEndpoint
 	err = json.Unmarshal(body, &metadata)
 	if err != nil {
 		return err
@@ -73,33 +104,17 @@ func OverrideAzureCloudConfigAndEnvConfigFromMetadataService(endpoint, cloudName
 
 	for _, item := range metadata {
 		if cloudName == "" || strings.EqualFold(item.Name, cloudName) {
-			// We use the endpoint to build our config, but on ASH the config returned
-			// does not contain the endpoint, and this is not accounted for. This
-			// ultimately unsets it for the returned config, causing the bootstrap of
-			// the provider to fail. Instead, check if the endpoint is returned, and if
-			// It is not then set it.
-			if item.ResourceManager == "" {
-				item.ResourceManager = endpoint
-			}
-			cloudConfig.Services[cloud.ResourceManager] = cloud.ServiceConfiguration{
-				Endpoint: item.ResourceManager,
-				Audience: item.Authentication.Audiences[0],
-			}
-			env.ResourceManagerEndpoint = item.ResourceManager
-			env.TokenAudience = item.Authentication.Audiences[0]
-			if item.Authentication.LoginEndpoint != "" {
-				cloudConfig.ActiveDirectoryAuthorityHost = item.Authentication.LoginEndpoint
-				env.ActiveDirectoryEndpoint = item.Authentication.LoginEndpoint
-			}
-			if item.Suffixes.Storage != nil {
-				env.StorageEndpointSuffix = *item.Suffixes.Storage
-			}
-			if item.Suffixes.AcrLoginServer != nil {
-				env.ContainerRegistryDNSSuffix = *item.Suffixes.AcrLoginServer
-			}
+			applyMetadataToConfig(item, endpoint, cloudConfig, env)
 			return nil
 		}
 	}
+
+	// Always return the first metadata if no name match and metadata is not empty
+	if len(metadata) > 0 {
+		applyMetadataToConfig(metadata[0], endpoint, cloudConfig, env)
+		return nil
+	}
+
 	return nil
 }
 
