@@ -27,76 +27,78 @@ var (
 
 // Supported tags
 const (
-	letterIdxBits             = 6                    // 6 bits to represent a letter index
-	letterIdxMask             = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
-	letterIdxMax              = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
-	maxRetry                  = 10000                // max number of retry for unique values
-	keep                      = "keep"
-	unique                    = "unique"
-	ID                        = "uuid_digit"
-	HyphenatedID              = "uuid_hyphenated"
-	EmailTag                  = "email"
-	MacAddressTag             = "mac_address"
-	DomainNameTag             = "domain_name"
-	UserNameTag               = "username"
-	URLTag                    = "url"
-	IPV4Tag                   = "ipv4"
-	IPV6Tag                   = "ipv6"
-	PASSWORD                  = "password"
-	JWT                       = "jwt"
-	LATITUDE                  = "lat"
-	LONGITUDE                 = "long"
-	RealAddressTag            = "real_address"
-	CreditCardNumber          = "cc_number"
-	CreditCardType            = "cc_type"
-	PhoneNumber               = "phone_number"
-	TollFreeNumber            = "toll_free_number"
-	E164PhoneNumberTag        = "e_164_phone_number"
-	TitleMaleTag              = "title_male"
-	TitleFemaleTag            = "title_female"
-	FirstNameTag              = "first_name"
-	FirstNameMaleTag          = "first_name_male"
-	FirstNameFemaleTag        = "first_name_female"
-	LastNameTag               = "last_name"
-	NAME                      = "name"
-	ChineseFirstNameTag       = "chinese_first_name"
-	ChineseLastNameTag        = "chinese_last_name"
-	ChineseNameTag            = "chinese_name"
-	GENDER                    = "gender"
-	UnixTimeTag               = "unix_time"
-	DATE                      = "date"
-	TIME                      = "time"
-	MonthNameTag              = "month_name"
-	YEAR                      = "year"
-	DayOfWeekTag              = "day_of_week"
-	DayOfMonthTag             = "day_of_month"
-	TIMESTAMP                 = "timestamp"
-	CENTURY                   = "century"
-	TIMEZONE                  = "timezone"
-	TimePeriodTag             = "time_period"
-	WORD                      = "word"
-	SENTENCE                  = "sentence"
-	PARAGRAPH                 = "paragraph"
-	CurrencyTag               = "currency"
-	AmountTag                 = "amount"
-	AmountWithCurrencyTag     = "amount_with_currency"
-	SKIP                      = "-"
-	Length                    = "len"
-	SliceLength               = "slice_len"
-	Language                  = "lang"
-	BoundaryStart             = "boundary_start"
-	BoundaryEnd               = "boundary_end"
-	Equals                    = "="
-	comma                     = ","
-	colon                     = ":"
-	ONEOF                     = "oneof"
-	RussianFirstNameMaleTag   = "russian_first_name_male"
-	RussianLastNameMaleTag    = "russian_last_name_male"
-	RussianFirstNameFemaleTag = "russian_first_name_female"
-	RussianLastNameFemaleTag  = "russian_last_name_female"
-	BloodTypeTag              = "blood_type"
-	CountryInfoTag            = "country_info"
-	UserAgentTag              = "user_agent"
+	letterIdxBits              = 6                    // 6 bits to represent a letter index
+	letterIdxMask              = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax               = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+	maxRetry                   = 10000                // max number of retry for unique values
+	keep                       = "keep"
+	unique                     = "unique"
+	ID                         = "uuid_digit"
+	HyphenatedID               = "uuid_hyphenated"
+	EmailTag                   = "email"
+	MacAddressTag              = "mac_address"
+	DomainNameTag              = "domain_name"
+	UserNameTag                = "username"
+	URLTag                     = "url"
+	IPV4Tag                    = "ipv4"
+	IPV6Tag                    = "ipv6"
+	PASSWORD                   = "password"
+	JWT                        = "jwt"
+	LATITUDE                   = "lat"
+	LONGITUDE                  = "long"
+	RealAddressTag             = "real_address"
+	CreditCardNumber           = "cc_number"
+	CreditCardType             = "cc_type"
+	PhoneNumber                = "phone_number"
+	TollFreeNumber             = "toll_free_number"
+	E164PhoneNumberTag         = "e_164_phone_number"
+	TitleMaleTag               = "title_male"
+	TitleFemaleTag             = "title_female"
+	FirstNameTag               = "first_name"
+	FirstNameMaleTag           = "first_name_male"
+	FirstNameFemaleTag         = "first_name_female"
+	LastNameTag                = "last_name"
+	NAME                       = "name"
+	ChineseFirstNameTag        = "chinese_first_name"
+	ChineseLastNameTag         = "chinese_last_name"
+	ChineseNameTag             = "chinese_name"
+	GENDER                     = "gender"
+	UnixTimeTag                = "unix_time"
+	DATE                       = "date"
+	TIME                       = "time"
+	MonthNameTag               = "month_name"
+	YEAR                       = "year"
+	DayOfWeekTag               = "day_of_week"
+	DayOfMonthTag              = "day_of_month"
+	TIMESTAMP                  = "timestamp"
+	CENTURY                    = "century"
+	TIMEZONE                   = "timezone"
+	TimePeriodTag              = "time_period"
+	WORD                       = "word"
+	SENTENCE                   = "sentence"
+	PARAGRAPH                  = "paragraph"
+	CurrencyTag                = "currency"
+	AmountTag                  = "amount"
+	AmountWithCurrencyTag      = "amount_with_currency"
+	SKIP                       = "-"
+	Length                     = "len"
+	SliceLength                = "slice_len"
+	Language                   = "lang"
+	BoundaryStart              = "boundary_start"
+	BoundaryEnd                = "boundary_end"
+	Equals                     = "="
+	comma                      = ","
+	colon                      = ":"
+	ONEOF                      = "oneof"
+	RussianFirstNameMaleTag    = "russian_first_name_male"
+	RussianMiddleNameMaleTag   = "russian_middle_name_male"
+	RussianLastNameMaleTag     = "russian_last_name_male"
+	RussianFirstNameFemaleTag  = "russian_first_name_female"
+	RussianMiddleNameFemaleTag = "russian_middle_name_female"
+	RussianLastNameFemaleTag   = "russian_last_name_female"
+	BloodTypeTag               = "blood_type"
+	CountryInfoTag             = "country_info"
+	UserAgentTag               = "user_agent"
 )
 
 // PriorityTags define the priority order of the tag
@@ -122,7 +124,7 @@ func (m *mapperTagCustom) Load(key string) (interfaces.TaggedFunction, bool) {
 	if ok {
 		return tagFunc, ok
 	}
-	tagPureFunc, ok := mappedTagFunc.(func(v reflect.Value) (interface{}, error))
+	tagPureFunc, ok := mappedTagFunc.(func(v reflect.Value) (any, error))
 	if ok {
 		return tagPureFunc, ok
 	}
@@ -186,8 +188,10 @@ func initDefaultTag() {
 	defaultTag.Store(ID, ID)
 	defaultTag.Store(HyphenatedID, HyphenatedID)
 	defaultTag.Store(RussianFirstNameMaleTag, RussianFirstNameMaleTag)
+	defaultTag.Store(RussianMiddleNameMaleTag, RussianMiddleNameMaleTag)
 	defaultTag.Store(RussianLastNameMaleTag, RussianLastNameMaleTag)
 	defaultTag.Store(RussianFirstNameFemaleTag, RussianFirstNameFemaleTag)
+	defaultTag.Store(RussianMiddleNameFemaleTag, RussianMiddleNameFemaleTag)
 	defaultTag.Store(RussianLastNameFemaleTag, RussianLastNameFemaleTag)
 	defaultTag.Store(UserAgentTag, UserAgentTag)
 }
@@ -235,8 +239,10 @@ func initMapperTagDefault() {
 	mapperTag.Store(ID, GetIdentifier().Digit)
 	mapperTag.Store(HyphenatedID, GetIdentifier().Hyphenated)
 	mapperTag.Store(RussianFirstNameMaleTag, GetPerson().RussianFirstNameMale)
-	mapperTag.Store(RussianFirstNameFemaleTag, GetPerson().RussianFirstNameFemale)
+	mapperTag.Store(RussianMiddleNameMaleTag, GetPerson().RussianMiddleNameMale)
 	mapperTag.Store(RussianLastNameMaleTag, GetPerson().RussianLastNameMale)
+	mapperTag.Store(RussianFirstNameFemaleTag, GetPerson().RussianFirstNameFemale)
+	mapperTag.Store(RussianMiddleNameFemaleTag, GetPerson().RussianMiddleNameFemale)
 	mapperTag.Store(RussianLastNameFemaleTag, GetPerson().RussianLastNameFemale)
 	mapperTag.Store(BloodTypeTag, GetBlood().BloodGroup)
 	mapperTag.Store(UserAgentTag, GetUserAgent().UserAgent)
@@ -304,11 +310,11 @@ func initOption(opt ...options.OptionFunc) *options.Options {
 
 // FakeData is the main function. Will generate a fake data based on your struct.  You can use this for automation testing, or anything that need automated data.
 // You don't need to Create your own data for your testing.
-func FakeData(a interface{}, opt ...options.OptionFunc) error {
+func FakeData(a any, opt ...options.OptionFunc) error {
 	opts := initOption(opt...)
 	reflectType := reflect.TypeOf(a)
 
-	if reflectType.Kind() != reflect.Ptr {
+	if reflectType.Kind() != reflect.Pointer {
 		return errors.New(fakerErrors.ErrValueNotPtr)
 	}
 
@@ -395,7 +401,7 @@ func RemoveProvider(tag string) error {
 	return nil
 }
 
-func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, error) {
+func getFakedValue(item any, opts *options.Options) (reflect.Value, error) {
 	t := reflect.TypeOf(item)
 	if t == nil {
 		if opts.IgnoreInterface {
@@ -412,7 +418,7 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 	}()
 	k := t.Kind()
 	switch k {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		v := reflect.New(t.Elem())
 		var val reflect.Value
 		var err error
@@ -435,97 +441,7 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 		}
 		return v, nil
 	case reflect.Struct:
-		if structTypeProvider, f := opts.StructTypeProviders[t]; f {
-			ft, err := structTypeProvider()
-			return reflect.ValueOf(ft), err
-		}
-		originalDataVal := reflect.ValueOf(item)
-		v := reflect.New(t).Elem()
-		if opts.MaxFieldDepthOption == 0 {
-			return v, nil
-		} else if opts.MaxFieldDepthOption > 0 {
-			opts.MaxFieldDepthOption--
-			defer func() { opts.MaxFieldDepthOption++ }()
-		}
-		retry := 0 // error if cannot generate unique value after maxRetry tries
-		for i := 0; i < v.NumField(); i++ {
-			if !v.Field(i).CanSet() {
-				continue // to avoid panic to set on unexported field in struct
-			}
-
-			if _, ok := opts.IgnoreFields[t.Field(i).Name]; ok {
-				continue
-			}
-
-			if p, ok := opts.FieldProviders[t.Field(i).Name]; ok {
-				val, err := p()
-				if err != nil {
-					return reflect.Value{}, fmt.Errorf("custom provider for field %s: %w", t.Field(i).Name, err)
-				}
-				v.Field(i).Set(reflect.ValueOf(val))
-				continue
-			}
-
-			tags := decodeTags(t, i, opts.TagName)
-			switch {
-			case tags.keepOriginal:
-				zero, err := isZero(reflect.ValueOf(item).Field(i))
-				if err != nil {
-					return reflect.Value{}, err
-				}
-				if zero {
-					err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
-					if err != nil {
-						return reflect.Value{}, err
-					}
-					continue
-				}
-				v.Field(i).Set(reflect.ValueOf(item).Field(i))
-			case tags.fieldType == "":
-				val, err := getFakedValue(v.Field(i).Interface(), opts)
-				if err != nil {
-					return reflect.Value{}, err
-				}
-
-				if v.Field(i).CanSet() {
-					if !reflect.ValueOf(val).IsZero() && val.CanConvert(v.Field(i).Type()) {
-						val = val.Convert(v.Field(i).Type())
-						v.Field(i).Set(val)
-					}
-
-				}
-			case tags.fieldType == SKIP:
-				data := originalDataVal.Field(i).Interface()
-				if v.CanSet() && data != nil {
-					v.Field(i).Set(reflect.ValueOf(data))
-				}
-			default:
-				err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
-				if err != nil {
-					return reflect.Value{}, err
-				}
-			}
-
-			if tags.unique {
-				if retry >= maxRetry {
-					return reflect.Value{}, fmt.Errorf(fakerErrors.ErrUniqueFailure, reflect.TypeOf(item).Field(i).Name)
-				}
-				value := v.Field(i).Interface()
-				uniqueVal, _ := uniqueValues.Load(tags.fieldType)
-				uniqueValArr, _ := uniqueVal.([]interface{})
-				if slice.ContainsValue(uniqueValArr, value) { // Retry if unique value already found
-					i--
-					retry++
-					continue
-				}
-				retry = 0
-				uniqueValues.Store(tags.fieldType, append(uniqueValArr, value))
-			} else {
-				retry = 0
-			}
-
-		}
-		return v, nil
+		return getFakedValueForStruct(item, t, opts)
 
 	case reflect.String:
 		res, err := randomString(opts.RandomStringLength, *opts)
@@ -537,8 +453,9 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 			return reflect.Zero(t), nil
 		}
 		v := reflect.MakeSlice(t, length, length)
-		for i := 0; i < length; i++ {
-			val, err := getFakedValue(v.Index(i).Interface(), opts)
+		innerOpts := opts.Nested()
+		for i := range length {
+			val, err := getFakedValue(v.Index(i).Interface(), &innerOpts)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -555,8 +472,9 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 		return v, nil
 	case reflect.Array:
 		v := reflect.New(t).Elem()
+		innerOpts := opts.Nested()
 		for i := 0; i < v.Len(); i++ {
-			val, err := getFakedValue(v.Index(i).Interface(), opts)
+			val, err := getFakedValue(v.Index(i).Interface(), &innerOpts)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -608,15 +526,16 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 			return reflect.Zero(t), nil
 		}
 		v := reflect.MakeMap(t)
-		for i := 0; i < length; i++ {
+		innerOpts := opts.Nested()
+		for range length {
 			keyInstance := reflect.New(t.Key()).Elem().Interface()
-			key, err := getFakedValue(keyInstance, opts)
+			key, err := getFakedValue(keyInstance, &innerOpts)
 			if err != nil {
 				return reflect.Value{}, err
 			}
 
 			valueInstance := reflect.New(t.Elem()).Elem().Interface()
-			val, err := getFakedValue(valueInstance, opts)
+			val, err := getFakedValue(valueInstance, &innerOpts)
 			if err != nil {
 				return reflect.Value{}, err
 			}
@@ -637,6 +556,105 @@ func getFakedValue(item interface{}, opts *options.Options) (reflect.Value, erro
 		return reflect.Value{}, err
 	}
 
+}
+
+func getFakedValueForStruct(item any, t reflect.Type, opts *options.Options) (reflect.Value, error) {
+	if structTypeProvider, f := opts.StructTypeProviders[t]; f {
+		ft, err := structTypeProvider()
+		return reflect.ValueOf(ft), err
+	}
+	originalDataVal := reflect.ValueOf(item)
+	v := reflect.New(t).Elem()
+	if opts.MaxFieldDepthOption == 0 {
+		return v, nil
+	} else if opts.MaxFieldDepthOption > 0 {
+		opts.MaxFieldDepthOption--
+		defer func() { opts.MaxFieldDepthOption++ }()
+	}
+	retry := 0 // error if cannot generate unique value after maxRetry tries
+	for i := 0; i < v.NumField(); i++ {
+		if !v.Field(i).CanSet() {
+			continue // to avoid panic to set on unexported field in struct
+		}
+
+		if _, ok := opts.IgnoreFields[t.Field(i).Name]; ok {
+			continue
+		}
+
+		if opts.OnlyZeroFields && !originalDataVal.Field(i).IsZero() {
+			v.Field(i).Set(originalDataVal.Field(i))
+			continue
+		}
+
+		if p, ok := opts.FieldProviders[t.Field(i).Name]; ok {
+			val, err := p()
+			if err != nil {
+				return reflect.Value{}, fmt.Errorf("custom provider for field %s: %w", t.Field(i).Name, err)
+			}
+			v.Field(i).Set(reflect.ValueOf(val))
+			continue
+		}
+
+		tags := decodeTags(t, i, opts.TagName)
+		switch {
+		case tags.keepOriginal:
+			zero, err := isZero(reflect.ValueOf(item).Field(i))
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			if zero {
+				err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				continue
+			}
+			v.Field(i).Set(reflect.ValueOf(item).Field(i))
+		case tags.fieldType == "":
+			val, err := getFakedValue(v.Field(i).Interface(), opts)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+
+			if v.Field(i).CanSet() {
+				if !reflect.ValueOf(val).IsZero() && val.CanConvert(v.Field(i).Type()) {
+					val = val.Convert(v.Field(i).Type())
+					v.Field(i).Set(val)
+				}
+
+			}
+		case tags.fieldType == SKIP:
+			data := originalDataVal.Field(i).Interface()
+			if v.CanSet() && data != nil {
+				v.Field(i).Set(reflect.ValueOf(data))
+			}
+		default:
+			err := setDataWithTag(v.Field(i).Addr(), tags.fieldType, *opts)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+		}
+
+		if tags.unique {
+			if retry >= maxRetry {
+				return reflect.Value{}, fmt.Errorf(fakerErrors.ErrUniqueFailure, reflect.TypeOf(item).Field(i).Name)
+			}
+			value := v.Field(i).Interface()
+			uniqueVal, _ := uniqueValues.Load(tags.fieldType)
+			uniqueValArr, _ := uniqueVal.([]any)
+			if slice.ContainsValue(uniqueValArr, value) { // Retry if unique value already found
+				i--
+				retry++
+				continue
+			}
+			retry = 0
+			uniqueValues.Store(tags.fieldType, append(uniqueValArr, value))
+		} else {
+			retry = 0
+		}
+
+	}
+	return v, nil
 }
 
 func isZero(field reflect.Value) (bool, error) {
@@ -706,12 +724,12 @@ type structTag struct {
 }
 
 func setDataWithTag(v reflect.Value, tag string, opt options.Options) error {
-	if v.Kind() != reflect.Ptr {
+	if v.Kind() != reflect.Pointer {
 		return errors.New(fakerErrors.ErrValueNotPtr)
 	}
 	v = reflect.Indirect(v)
 	switch v.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if _, exist := mapperTag.Load(tag); !exist {
 			newv := reflect.New(v.Type().Elem())
 			if err := setDataWithTag(newv, tag, opt); err != nil {
@@ -786,13 +804,14 @@ func userDefinedMap(v reflect.Value, tag string, opt options.Options) error {
 		v.Set(reflect.Zero(v.Type()))
 		return nil
 	}
+	innerOpt := opt.Nested()
 	definedMap := reflect.MakeMap(v.Type())
-	for i := 0; i < length; i++ {
-		key, err := getValueWithTag(v.Type().Key(), tag, opt)
+	for range length {
+		key, err := getValueWithTag(v.Type().Key(), tag, innerOpt)
 		if err != nil {
 			return err
 		}
-		val, err := getValueWithTag(v.Type().Elem(), tag, opt)
+		val, err := getValueWithTag(v.Type().Elem(), tag, innerOpt)
 		if err != nil {
 			return err
 		}
@@ -802,7 +821,7 @@ func userDefinedMap(v reflect.Value, tag string, opt options.Options) error {
 	return nil
 }
 
-func getValueWithTag(t reflect.Type, tag string, opt options.Options) (interface{}, error) {
+func getValueWithTag(t reflect.Type, tag string, opt options.Options) (any, error) {
 	switch t.Kind() {
 	case reflect.Int, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Int16, reflect.Uint, reflect.Uint8,
 		reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
@@ -822,7 +841,7 @@ func getValueWithTag(t reflect.Type, tag string, opt options.Options) (interface
 	}
 }
 
-func getNumberWithBoundary(t reflect.Type, boundary interfaces.RandomIntegerBoundary) (interface{}, error) {
+func getNumberWithBoundary(t reflect.Type, boundary interfaces.RandomIntegerBoundary) (any, error) {
 	switch t.Kind() {
 	case reflect.Uint:
 		return uint(randomIntegerWithBoundary(boundary)), nil
@@ -849,7 +868,7 @@ func getNumberWithBoundary(t reflect.Type, boundary interfaces.RandomIntegerBoun
 	}
 }
 
-func getValueWithNoTag(t reflect.Type, opt options.Options) (interface{}, error) {
+func getValueWithNoTag(t reflect.Type, opt options.Options) (any, error) {
 	switch t.Kind() {
 	case reflect.Int, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Int16, reflect.Uint, reflect.Uint8,
 		reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
@@ -894,10 +913,11 @@ func userDefinedArray(v reflect.Value, tag string, opt options.Options) error {
 	//remove slice_len from tag string to avoid extra logic in downstream function
 	tag = findSliceLenReg.ReplaceAllString(tag, "")
 	array := reflect.MakeSlice(v.Type(), sliceLen, sliceLen)
+	innerOpt := opt.Nested()
 	for i := 0; i < array.Len(); i++ {
 		k := v.Type().Elem().Kind()
 		if k == reflect.Pointer || k == reflect.Struct {
-			res, err := getFakedValue(array.Index(i).Interface(), &opt)
+			res, err := getFakedValue(array.Index(i).Interface(), &innerOpt)
 			if err != nil {
 				return err
 			}
@@ -908,7 +928,7 @@ func userDefinedArray(v reflect.Value, tag string, opt options.Options) error {
 			continue
 		}
 		if tag == "" {
-			res, err := getValueWithNoTag(v.Type().Elem(), opt)
+			res, err := getValueWithNoTag(v.Type().Elem(), innerOpt)
 			if err != nil {
 				return err
 			}
@@ -916,7 +936,7 @@ func userDefinedArray(v reflect.Value, tag string, opt options.Options) error {
 			continue
 		}
 
-		res, err := getValueWithTag(v.Type().Elem(), tag, opt)
+		res, err := getValueWithTag(v.Type().Elem(), tag, innerOpt)
 		if err != nil {
 			return err
 		}
@@ -927,7 +947,7 @@ func userDefinedArray(v reflect.Value, tag string, opt options.Options) error {
 }
 
 func userDefinedString(v reflect.Value, tag string, opt options.Options) error {
-	var res interface{}
+	var res any
 	var err error
 
 	if tagFunc, ok := mapperTag.Load(tag); ok {
@@ -950,7 +970,7 @@ func userDefinedString(v reflect.Value, tag string, opt options.Options) error {
 }
 
 func userDefinedNumber(v reflect.Value, tag string) error {
-	var res interface{}
+	var res any
 	var err error
 
 	if tagFunc, ok := mapperTag.Load(tag); ok {
@@ -994,7 +1014,7 @@ func extractSliceLengthFromTag(tag string, opt options.Options) (int, error) {
 	return randomSliceAndMapSize(opt), nil //Returns random slice length if the sliceLength tag isn't set
 }
 
-func extractStringFromTag(tag string, opts options.Options) (interface{}, error) {
+func extractStringFromTag(tag string, opts options.Options) (any, error) {
 	var err error
 	strlen := opts.RandomStringLength
 	strlng := opts.StringLanguage
@@ -1055,7 +1075,7 @@ func extractLangFromTag(tag string) (*interfaces.LangRuneBoundary, error) {
 	}
 }
 
-func extractNumberFromTag(tag string, t reflect.Type) (interface{}, error) {
+func extractNumberFromTag(tag string, t reflect.Type) (any, error) {
 	hasOneOf := strings.Contains(tag, ONEOF)
 	hasBoundaryStart := strings.Contains(tag, BoundaryStart)
 	hasBoundaryEnd := strings.Contains(tag, BoundaryEnd)
@@ -1315,17 +1335,21 @@ func randomFloat(opt *options.Options) float64 {
 	return randomFloatWithBoundary(*opt.RandomFloatBoundary)
 }
 
-// randomSliceAndMapSize returns a random integer between [0,randomSliceAndMapSize). If the testRandZero is set, returns 0
-// Written for test purposes for shouldSetNil
+// randomSliceAndMapSize returns a random integer between [min,max). If testRandZero is set, returns 0.
+// When SliceDepth > 0 and RandomNestedMaxSliceSize is configured, the nested sizes are used instead
+// to prevent exponential memory growth from large outer sizes propagating to all nested slices.
 func randomSliceAndMapSize(opt options.Options) int {
 	if opt.SetSliceMapRandomToZero {
 		return 0
 	}
-	r := opt.RandomMaxSliceSize - opt.RandomMinSliceSize
-	if r < 1 {
-		r = 1
+	maxSize := opt.RandomMaxSliceSize
+	minSize := opt.RandomMinSliceSize
+	if opt.IsNested() && opt.RandomNestedMaxSliceSize > 0 {
+		maxSize = opt.RandomNestedMaxSliceSize
+		minSize = opt.RandomNestedMinSliceSize
 	}
-	return opt.RandomMinSliceSize + rand.Intn(r)
+	r := max(maxSize-minSize, 1)
+	return minSize + rand.Intn(r)
 }
 
 func randomElementFromSliceString(s []string) string {
@@ -1386,11 +1410,11 @@ func RandomInt(parameters ...int) (p []int, err error) {
 	return p, err
 }
 
-func generateUnique(dataType string, fn func() interface{}) (interface{}, error) {
-	for i := 0; i < maxRetry; i++ {
+func generateUnique(dataType string, fn func() any) (any, error) {
+	for range maxRetry {
 		value := fn()
 		uniqueVal, _ := uniqueValues.Load(dataType)
-		uniqueValArr, _ := uniqueVal.([]interface{})
+		uniqueValArr, _ := uniqueVal.([]any)
 		if !slice.ContainsValue(uniqueValArr, value) { // Retry if unique value already found
 			uniqueValues.Store(dataType, append(uniqueValArr, value))
 			return value, nil
@@ -1399,7 +1423,7 @@ func generateUnique(dataType string, fn func() interface{}) (interface{}, error)
 	return reflect.Value{}, fmt.Errorf(fakerErrors.ErrUniqueFailure, dataType)
 }
 
-func singleFakeData(dataType string, fn func() interface{}, opts ...options.OptionFunc) interface{} {
+func singleFakeData(dataType string, fn func() any, opts ...options.OptionFunc) any {
 	ops := initOption(opts...)
 	if ops.GenerateUniqueValues {
 		v, err := generateUnique(dataType, fn)
