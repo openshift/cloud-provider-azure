@@ -1265,6 +1265,34 @@ func TestIsEnableHTTPSTrafficOnly(t *testing.T) {
 			},
 			expectedResult: false,
 		},
+		{
+			// SkipHTTPSTrafficOnlyMatch=true → accept any account regardless of
+			// its EnableHTTPSTrafficOnly value, even when options require true.
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{
+					EnableHTTPSTrafficOnly: ptr.To(false),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly:    true,
+				SkipHTTPSTrafficOnlyMatch: true,
+			},
+			expectedResult: true,
+		},
+		{
+			// SkipHTTPSTrafficOnlyMatch=true with the same value on both sides
+			// also matches (skip supersedes equality check).
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{
+					EnableHTTPSTrafficOnly: ptr.To(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly:    true,
+				SkipHTTPSTrafficOnlyMatch: true,
+			},
+			expectedResult: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -1917,6 +1945,150 @@ func TestIsMultichannelEnabledEqual(t *testing.T) {
 		}
 
 		result, _ := StorageAccountRepo.isMultichannelEnabledEqual(ctx, test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result, test.desc)
+	}
+}
+
+func TestIsNFSEncryptionInTransitEnabledEqual(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	accountName := "account2"
+
+	StorageAccountRepo := &AccountRepo{
+		fileServiceRepo: mock_fileservice.NewMockRepository(ctrl),
+	}
+
+	nfsEiTRequired := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{
+				Nfs: &armstorage.NfsSetting{EncryptionInTransit: &armstorage.EncryptionInTransit{Required: ptr.To(true)}},
+			},
+		},
+	}
+
+	nfsEiTNotRequired := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{
+				Nfs: &armstorage.NfsSetting{EncryptionInTransit: &armstorage.EncryptionInTransit{Required: ptr.To(false)}},
+			},
+		},
+	}
+
+	incompleteServiceProperties := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{},
+		},
+	}
+
+	tests := []struct {
+		desc                      string
+		account                   *armstorage.Account
+		accountOptions            *AccountOptions
+		serviceProperties         *armstorage.FileServiceProperties
+		servicePropertiesRetError error
+		expectedResult            bool
+	}{
+		{
+			desc: "IsNFSEncryptionInTransitEnabled is nil",
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			desc: "account.Name is nil",
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			expectedResult: false,
+		},
+		{
+			desc: "IsNFSEncryptionInTransitEnabled not equal #1",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &nfsEiTRequired,
+			expectedResult:    false,
+		},
+		{
+			desc: "GetServiceProperties return error",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties:         &nfsEiTRequired,
+			servicePropertiesRetError: fmt.Errorf("GetServiceProperties return error"),
+			expectedResult:            false,
+		},
+		{
+			desc: "EiT request matches a non-EiT account without a file-service Get (one-directional)",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(true),
+			},
+			expectedResult: true,
+		},
+		{
+			desc: "EiT request matches an EiT-required account without a file-service Get (one-directional)",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(true),
+			},
+			expectedResult: true,
+		},
+		{
+			desc: "IsNFSEncryptionInTransitEnabled is equal #2",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &nfsEiTNotRequired,
+			expectedResult:    true,
+		},
+		{
+			desc: "incompleteServiceProperties should be regarded as NFS EncryptionInTransit not required",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &incompleteServiceProperties,
+			expectedResult:    true,
+		},
+	}
+
+	for _, test := range tests {
+		if test.serviceProperties != nil {
+			StorageAccountRepo.fileServiceRepo.(*mock_fileservice.MockRepository).EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(test.serviceProperties, test.servicePropertiesRetError).Times(1)
+		}
+
+		result, _ := StorageAccountRepo.isNFSEncryptionInTransitEnabledEqual(ctx, test.account, test.accountOptions)
 		assert.Equal(t, test.expectedResult, result, test.desc)
 	}
 }
