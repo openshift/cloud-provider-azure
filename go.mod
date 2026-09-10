@@ -19,10 +19,10 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/crypto v0.24.0
-	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.21.0
-	golang.org/x/text v0.16.0
+	golang.org/x/crypto v0.33.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
+	golang.org/x/text v0.22.0
 	k8s.io/api v0.27.3
 	k8s.io/apimachinery v0.27.3
 	k8s.io/apiserver v0.27.3
@@ -117,7 +117,7 @@ require (
 	go.uber.org/zap v1.19.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/oauth2 v0.18.0 // indirect
-	golang.org/x/term v0.21.0 // indirect
+	golang.org/x/term v0.29.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/appengine v1.6.8 // indirect
@@ -140,3 +140,5 @@ require (
 // No Go 1.20-specific sustaining tag; use v1.64.1-sec.1 (Go 1.19 backport).
 // https://github.com/openshift-sustaining/grpc-go/releases/tag/v1.64.1-sec.1
 replace google.golang.org/grpc => github.com/openshift-sustaining/grpc-go v1.64.1-sec.1
+
+replace golang.org/x/net => github.com/openshift-sustaining/net v0.35.0-sec.3
