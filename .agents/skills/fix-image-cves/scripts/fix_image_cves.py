@@ -23,6 +23,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -97,23 +98,54 @@ def run_result(
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, env=env)
 
 
+def read_only_git_env() -> dict[str, str]:
+    """Disable optional index refresh locks for read-only Git commands."""
+    return {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+
+
+def read_only_git(repo_root: Path, args: list[str], *, capture: bool = True) -> str:
+    return run(
+        ["git", "-C", str(repo_root), *args],
+        cwd=repo_root,
+        capture=capture,
+        env=read_only_git_env(),
+    )
+
+
 def _go_env() -> dict[str, str]:
     """Return env dict with GOTOOLCHAIN=local to match CI (actions/setup-go)."""
     return {**os.environ, "GOTOOLCHAIN": "local"}
 
 
-def _check_local_go_version(repo_root: Path, go_env: dict[str, str]) -> None:
-    """Raise CommandError if the local Go is older than the repo requires."""
+def read_go_directive(go_mod: Path) -> str:
+    """Return the Go language version declared by a go.mod file."""
+    if not go_mod.is_file():
+        raise CommandError(f"Go module file does not exist: {go_mod}")
+    for line in go_mod.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] == "go":
+            return parts[1]
+    return ""
+
+
+def _check_local_go_version(
+    repo_root: Path,
+    go_env: dict[str, str],
+    go_directive_actions: list[dict[str, Any]] | None = None,
+) -> None:
+    """Raise CommandError if local Go is older than current or planned directives."""
     max_required = "0"
     for module in discover_go_modules(repo_root):
         mod_file = repo_root / module / "go.mod"
         if not mod_file.is_file():
             continue
-        for line in mod_file.read_text(encoding="utf-8").splitlines():
-            parts = line.split()
-            if len(parts) == 2 and parts[0] == "go":
-                if _version_tuple(parts[1]) > _version_tuple(max_required):
-                    max_required = parts[1]
+        current = read_go_directive(mod_file)
+        if current and compare_fixed_versions(current, max_required) > 0:
+            max_required = current
+    for action in go_directive_actions or []:
+        target = str(action.get("target_version") or "")
+        if target and compare_fixed_versions(target, max_required) > 0:
+            max_required = target
     if max_required == "0":
         return
     proc = subprocess.run(
@@ -128,23 +160,12 @@ def _check_local_go_version(repo_root: Path, go_env: dict[str, str]) -> None:
         if part.startswith("go") and part != "go":
             local_ver = part[2:]
             break
-    if _version_tuple(local_ver) < _version_tuple(max_required):
+    if not version_at_least(local_ver, max_required):
         raise CommandError(
-            f"Local Go version {local_ver} is older than the repo requires "
-            f"({max_required}). Install Go >= {max_required} or set "
-            f"GOTOOLCHAIN=auto to allow automatic toolchain download."
+            f"Local Go version {local_ver} is older than the current or planned "
+            f"repository Go requirement ({max_required}). Select or install a local "
+            f"Go version >= {max_required} before apply; GOTOOLCHAIN remains local."
         )
-
-
-def _version_tuple(version: str) -> tuple[int, ...]:
-    """Parse a version string like '1.25.0' into a comparable tuple."""
-    parts = []
-    for segment in version.split("."):
-        try:
-            parts.append(int(segment))
-        except ValueError:
-            break
-    return tuple(parts)
 
 
 def ensure_command(name: str) -> None:
@@ -154,21 +175,21 @@ def ensure_command(name: str) -> None:
 
 def ensure_repo_root(repo_arg: str) -> Path:
     repo = Path(repo_arg).resolve()
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
-        text=True,
-        capture_output=True,
-    )
-    if proc.returncode != 0 or not proc.stdout.strip():
+    if not repo.is_dir():
         raise CommandError(f"{repo} is not a git checkout")
-    return Path(proc.stdout.strip())
+    try:
+        root = read_only_git(repo, ["rev-parse", "--show-toplevel"])
+    except CommandError as exc:
+        raise CommandError(f"{repo} is not a git checkout") from exc
+    if not root:
+        raise CommandError(f"{repo} is not a git checkout")
+    return Path(root)
 
 
 def git_path(repo_root: Path) -> Path:
-    raw_path = run(
-        ["git", "rev-parse", "--git-path", STATE_FILE_NAME],
-        cwd=repo_root,
-        capture=True,
+    raw_path = read_only_git(
+        repo_root,
+        ["rev-parse", "--git-path", STATE_FILE_NAME],
     ).strip()
     if not raw_path:
         raise CommandError("git rev-parse returned an empty CVE state path")
@@ -390,6 +411,103 @@ def build_go_requirement_commands(
     return commands
 
 
+def target_module_go_directive(module: str, version: str) -> str:
+    """Resolve the Go directive for an explicit module version without a repo mutation."""
+    query = f"{module}@{normalize_go_version(version)}"
+    env = {
+        **_go_env(),
+        "GO111MODULE": "on",
+        "GOWORK": "off",
+    }
+    with tempfile.TemporaryDirectory(prefix="fix-image-cves-go-module-") as temp_dir:
+        output = run(
+            ["go", "list", "-m", "-json", query],
+            cwd=Path(temp_dir),
+            capture=True,
+            env=env,
+        )
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError as exc:
+            raise CommandError(
+                f"go list returned invalid JSON for module {query}: {exc}"
+            ) from exc
+        go_mod_value = str(payload.get("GoMod") or "")
+        if not go_mod_value:
+            raise CommandError(f"go list did not return a GoMod path for module {query}")
+        go_mod = Path(go_mod_value)
+        if not go_mod.is_absolute():
+            go_mod = Path(temp_dir) / go_mod
+        return read_go_directive(go_mod)
+
+
+def build_go_directive_actions(
+    repo_root: Path,
+    go_actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Plan go.mod language-version bumps required by target dependencies."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for action in go_actions:
+        module_root = action["module_root"]
+        module = action["module"]
+        version = normalize_go_version(action["fixed_version"])
+        required = target_module_go_directive(module, version)
+        if not required:
+            continue
+        if module_root not in grouped:
+            grouped[module_root] = {
+                "module_root": module_root,
+                "current_version": read_go_directive(
+                    abs_from_repo(repo_root, module_root) / "go.mod"
+                ),
+                "requirements": [],
+            }
+        group = grouped[module_root]
+        if not version_at_least(group["current_version"], required):
+            group["requirements"].append(
+                {
+                    "module": module,
+                    "version": version,
+                    "required_go_version": required,
+                }
+            )
+
+    actions: list[dict[str, Any]] = []
+    for module_root, group in sorted(grouped.items()):
+        requirements = group["requirements"]
+        if not requirements:
+            continue
+        target = requirements[0]["required_go_version"]
+        for requirement in requirements[1:]:
+            candidate = requirement["required_go_version"]
+            if compare_fixed_versions(candidate, target) > 0:
+                target = candidate
+        actions.append(
+            {
+                "module_root": module_root,
+                "current_version": group["current_version"],
+                "target_version": target,
+                "required_by": sorted(
+                    f"{requirement['module']}@{requirement['version']}"
+                    for requirement in requirements
+                ),
+            }
+        )
+    return actions
+
+
+def build_go_directive_commands(
+    actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "cwd": action["module_root"],
+            "cmd": ["go", "mod", "edit", f"-go={action['target_version']}"],
+        }
+        for action in sorted(actions, key=lambda item: item["module_root"])
+    ]
+
+
 def sanitize_dockerfile_stage(result: dict[str, Any]) -> str:
     return "runtime" if result.get("Class") == "os-pkgs" else "unknown"
 
@@ -609,6 +727,7 @@ def unsupported_fixable_findings(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 def summarize_plan(plan: dict[str, Any]) -> None:
     go_actions = plan.get("go_module_actions") or []
+    go_directive_actions = plan.get("go_directive_actions") or []
     base_actions = plan.get("base_image_actions") or []
     other_findings = plan.get("other_findings") or []
     toolchain_findings = [
@@ -620,6 +739,7 @@ def summarize_plan(plan: dict[str, Any]) -> None:
     print("Plan Summary")
     print("============")
     print(f"Go module actions: {len(go_actions)}")
+    print(f"Go directive actions: {len(go_directive_actions)}")
     print(f"Base image actions: {len(base_actions)}")
     print(f"Go toolchain findings: {len(toolchain_findings)}")
     print(f"Unsupported fixable findings: {len(unsupported_findings)}")
@@ -632,6 +752,16 @@ def summarize_plan(plan: dict[str, Any]) -> None:
             print(
                 f"{action['module']} -> {action['fixed_version']} "
                 f"(module root: {action['module_root']})"
+            )
+    if go_directive_actions:
+        print("")
+        print("Go Directive Bumps")
+        print("------------------")
+        for action in go_directive_actions:
+            required_by = ", ".join(action["required_by"])
+            print(
+                f"{action['module_root']}/go.mod {action['current_version']} -> "
+                f"{action['target_version']} (required by: {required_by})"
             )
     if base_actions:
         print("")
@@ -677,7 +807,7 @@ def summarize_plan(plan: dict[str, Any]) -> None:
 
 
 def git_status_paths(repo_root: Path) -> set[str]:
-    output = run(["git", "-C", str(repo_root), "status", "--porcelain"], cwd=repo_root, capture=True)
+    output = read_only_git(repo_root, ["status", "--porcelain"])
     paths: set[str] = set()
     for line in output.splitlines():
         if len(line) < 4:
@@ -696,7 +826,7 @@ def path_is_under(path: str, prefix: str) -> bool:
 
 
 def discover_go_modules(repo_root: Path) -> list[str]:
-    output = run(["git", "-C", str(repo_root), "ls-files", "go.mod", "**/go.mod"], cwd=repo_root, capture=True)
+    output = read_only_git(repo_root, ["ls-files", "go.mod", "**/go.mod"])
     modules = []
     for mod_path in output.splitlines():
         directory = str(Path(mod_path).parent)
@@ -909,6 +1039,30 @@ def verify_go_module_actions(repo_root: Path, plan: dict[str, Any], results: dic
     return ok
 
 
+def verify_go_directive_actions(
+    repo_root: Path,
+    plan: dict[str, Any],
+    results: dict[str, Any],
+) -> bool:
+    ok = True
+    for action in plan.get("go_directive_actions") or []:
+        module_root = action["module_root"]
+        expected = action["target_version"]
+        actual = read_go_directive(abs_from_repo(repo_root, module_root) / "go.mod")
+        passed = version_at_least(actual, expected)
+        results.setdefault("go_directive_checks", []).append(
+            {
+                "module_root": module_root,
+                "expected_version": expected,
+                "actual_version": actual,
+                "passed": passed,
+            }
+        )
+        if not passed:
+            ok = False
+    return ok
+
+
 def verify_dockerfile_actions(repo_root: Path, apply_state: dict[str, Any], results: dict[str, Any]) -> bool:
     ok = True
     for applied in apply_state.get("base_image_updates") or []:
@@ -1014,6 +1168,12 @@ def command_plan(args: argparse.Namespace) -> int:
     if not scan:
         raise CommandError("State file has no scan results. Run scan first.")
     plan = build_plan(scan)
+    go_actions = actionable_go_module_actions(plan)
+    if go_actions:
+        ensure_command("go")
+        plan["go_directive_actions"] = build_go_directive_actions(repo_root, go_actions)
+    else:
+        plan["go_directive_actions"] = []
     plan["generated_at"] = int(time.time())
     state["plan"] = plan
     state.pop("apply", None)
@@ -1060,10 +1220,36 @@ def command_apply(args: argparse.Namespace) -> int:
         raise CommandError("State file must contain scan and plan results. Run scan and plan first.")
 
     go_actions = actionable_go_module_actions(plan)
-    base_actions = plan.get("base_image_actions") or []
+    go_env: dict[str, str] | None = None
+    if go_actions:
+        ensure_command("go")
+        go_env = _go_env()
+        if "go_directive_actions" not in plan:
+            plan["go_directive_actions"] = build_go_directive_actions(repo_root, go_actions)
+            state["plan"] = plan
+            save_state(repo_root, state)
+    go_directive_actions = plan.get("go_directive_actions") or []
+    base_actions = list(plan.get("base_image_actions") or [])
     targets = parse_base_image_targets(args.base_image_target or [])
+    allow_default_base_target = len(base_actions) <= 1
+    for key, image in targets.items():
+        if not key.endswith(":builder"):
+            continue
+        if not go_directive_actions:
+            raise CommandError("Builder image updates require planned Go directive actions.")
+        dockerfile = key.removesuffix(":builder")
+        stages = [
+            match for line in abs_from_repo(repo_root, dockerfile).read_text(encoding="utf-8").splitlines()
+            if (match := FROM_RE.match(line))
+        ]
+        if len(stages) < 2 or not re.fullmatch(r"\s+AS\s+builder\s*", stages[0]["suffix"], re.IGNORECASE):
+            raise CommandError(f"{dockerfile} must start with a named builder stage.")
+        if not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", image):
+            raise CommandError("Builder image targets must include a sha256 digest.")
+        base_actions.append({"dockerfile": dockerfile, "stage": "builder"})
     preexisting_paths = git_status_paths(repo_root)
     module_roots = {action["module_root"] for action in go_actions}
+    module_roots.update(action["module_root"] for action in go_directive_actions)
     dockerfiles = {action["dockerfile"] for action in base_actions}
     vendor_enabled = bool(go_actions) and has_vendor_tree(repo_root)
     protect_apply_targets(
@@ -1073,11 +1259,8 @@ def command_apply(args: argparse.Namespace) -> int:
         vendor_enabled=vendor_enabled,
     )
 
-    go_env: dict[str, str] | None = None
     if go_actions:
-        ensure_command("go")
-        go_env = _go_env()
-        _check_local_go_version(repo_root, go_env)
+        _check_local_go_version(repo_root, go_env, go_directive_actions)
 
     resolved_versions: dict[tuple[str, str], str] = {}
     for action in go_actions:
@@ -1092,6 +1275,16 @@ def command_apply(args: argparse.Namespace) -> int:
         resolved_versions[key] = module_info["version"]
 
     go_commands: list[dict[str, Any]] = []
+    for command in build_go_directive_commands(go_directive_actions):
+        module_dir = abs_from_repo(repo_root, command["cwd"])
+        cmd = command["cmd"]
+        if args.dry_run:
+            print_cmd(cmd, cwd=module_dir)
+        else:
+            info(f"Running {quote_cmd(cmd)} in {command['cwd']}")
+            run(cmd, cwd=module_dir, env=go_env)
+        go_commands.append(command)
+
     for command in build_go_requirement_commands(go_actions, resolved_versions):
         module_dir = abs_from_repo(repo_root, command["cwd"])
         cmd = command["cmd"]
@@ -1148,7 +1341,6 @@ def command_apply(args: argparse.Namespace) -> int:
                 go_commands.append({"cwd": ".", "cmd": ["go", "mod", "verify"]})
 
     base_image_updates: list[dict[str, Any]] = []
-    allow_default_base_target = len(base_actions) <= 1
     for action in base_actions:
         selected = select_base_image_target(
             action,
@@ -1210,6 +1402,8 @@ def command_verify(args: argparse.Namespace) -> int:
 
     results: dict[str, Any] = {"checked_at": int(time.time())}
     ok = True
+    if not verify_go_directive_actions(repo_root, plan, results):
+        ok = False
     if not verify_go_module_actions(repo_root, plan, results):
         ok = False
     if not verify_dockerfile_actions(repo_root, apply_state, results):
@@ -1249,6 +1443,11 @@ def command_verify(args: argparse.Namespace) -> int:
 
     print("Verify Summary")
     print("==============")
+    for item in results.get("go_directive_checks", []):
+        print(
+            f"{item['module_root']}/go.mod minimum={item['expected_version']} "
+            f"actual={item['actual_version']} passed={item['passed']}"
+        )
     for item in results.get("go_module_checks", []):
         replacement_note = ""
         if item.get("replacement_path"):
