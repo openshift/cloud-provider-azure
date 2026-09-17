@@ -34,7 +34,7 @@ level small:
 - `create-release-note-doc-pr`: generate a documentation-site release note for
   a tag and open a documentation PR
 - `fix-image-cves`: scan a built image with Trivy, plan fixable Go-module and
-  base-image CVE remediation, apply the source changes, and verify the result
+  base-image CVE remediation, update required Go builders, and verify the fixes
 - `remediate-image-cves`: orchestrate builds, repeated CVE remediation and
   verification for CCM, CNM, and health-probe-proxy on `master` or a
   `release-X.Y` branch, then validate, clean up, push, and open the remediation
@@ -48,15 +48,18 @@ level small:
 - `sync-go-modules`: unblock `go-mod-consistency` by tidying and verifying all
   tracked Go modules, then refreshing the main module's `vendor/` tree
 - `unblock-dependabot-pr`: diagnose failed Dependabot PR CI, reuse the Go module
-  sync workflow, close Kubernetes minor-version bumps, retest Azure public-IP
-  quota e2e flakes, add `/lgtm` when only Tide is pending, and escalate
-  dependency/toolchain blockers for discussion
+  sync workflow, close Kubernetes minor-version bumps, refresh conflicting
+  branches with rebase for Dependabot-only commits or recreate when manual
+  edits are present (discarding those edits), retest Azure public-IP
+  quota e2e flakes without consuming the automated retry budget, add `/lgtm`
+  when only Tide is pending, and escalate dependency/toolchain blockers for
+  discussion
 - `debug-e2e-pipeline`: fetch and analyze Prow e2e pipeline failures by
   downloading build logs, JUnit reports, and node artifacts from GCS, then
   matching errors against known failure patterns
 - `build-images`: build cloud-provider-azure CCM, CNM, health-probe-proxy,
   CCM e2e, or root CCM/CNM aggregate images with explicit tag/registry inputs
-  and optional make flag overrides
+  plus optional make flag overrides and bounded Docker or Podman retries
 
 ## How To Use
 
