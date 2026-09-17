@@ -25,6 +25,9 @@ type Config struct {
 	// Azure subscription ID
 	SubscriptionID string
 
+	// Subscription that hosts network resources. Defaults to SubscriptionID.
+	NetworkResourceSubscriptionID string
+
 	// Azure resource group name
 	ResourceGroup string
 
@@ -35,11 +38,31 @@ type Config struct {
 	// Service Gateway resource name
 	ServiceGatewayResourceName string
 
-	// Full Service Gateway resource ID
-	ServiceGatewayID string
-
 	// Virtual Network name (required for backend pool configuration)
 	VNetName string
+
+	// Resource group that contains the Virtual Network. Optional: when empty, the VNet is
+	// assumed to live in ResourceGroup (the common case). Set this for BYO-VNet clusters whose
+	// VNet is in a separate resource group (mirrors the cloud config's vnetResourceGroup).
+	VNetResourceGroup string
+}
+
+func (c *Config) networkResourceSubscriptionID() string {
+	if c.NetworkResourceSubscriptionID != "" {
+		return c.NetworkResourceSubscriptionID
+	}
+	return c.SubscriptionID
+}
+
+// VNetResourceGroupOrDefault returns the resource group that contains the Virtual Network,
+// falling back to ResourceGroup when VNetResourceGroup is unset. This mirrors how the rest of
+// the cloud provider resolves the VNet resource group (see azure_loadbalancer.go), and keeps
+// callers from building resource IDs with an empty resource group segment.
+func (c *Config) VNetResourceGroupOrDefault() string {
+	if c.VNetResourceGroup != "" {
+		return c.VNetResourceGroup
+	}
+	return c.ResourceGroup
 }
 
 // Validate checks if the configuration has all required fields
@@ -56,11 +79,18 @@ func (c *Config) Validate() error {
 	if c.ServiceGatewayResourceName == "" {
 		return fmt.Errorf("config validation failed: ServiceGatewayResourceName is required")
 	}
-	if c.ServiceGatewayID == "" {
-		return fmt.Errorf("config validation failed: ServiceGatewayID is required")
-	}
 	if c.VNetName == "" {
 		return fmt.Errorf("config validation failed: VNetName is required")
 	}
 	return nil
+}
+
+// ServiceGatewayResourceID returns the ARM resource ID of the configured Service Gateway.
+func (c *Config) ServiceGatewayResourceID() string {
+	return fmt.Sprintf(
+		"/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/serviceGateways/%s",
+		c.networkResourceSubscriptionID(),
+		c.ResourceGroup,
+		c.ServiceGatewayResourceName,
+	)
 }
