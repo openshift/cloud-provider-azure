@@ -21,7 +21,10 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/record"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
 )
@@ -42,6 +45,14 @@ func New(logger logr.Logger, k8s K8sState, nrp NRPState, config Config, networkC
 	}
 
 	logger = logger.WithName("difftracker")
+	// The subscription ID and the full ARM resource ID that embeds it are omitted: this line is
+	// routine startup output, and the resource group, location and resource names below identify the
+	// deployment for support purposes without putting tenant identifiers into every log sink.
+	logger.V(2).Info("Initialized DiffTracker",
+		"resourceGroup", config.ResourceGroup,
+		"location", config.Location,
+		"serviceGatewayResourceName", config.ServiceGatewayResourceName,
+		"vnetName", config.VNetName)
 
 	// The caller is expected to pass fully initialized state structs. A nil
 	// field is unexpected and indicates a programming error, so error out.
@@ -65,8 +76,9 @@ func New(logger logr.Logger, k8s K8sState, nrp NRPState, config Config, networkC
 	}
 
 	diffTracker := &DiffTracker{
-		K8sResources: k8s,
-		NRPResources: nrp,
+		K8sResources:    k8s,
+		NRPResources:    nrp,
+		InitialSyncDone: false,
 
 		logger: logger,
 
@@ -74,6 +86,19 @@ func New(logger logr.Logger, k8s K8sState, nrp NRPState, config Config, networkC
 		config:               config,
 		networkClientFactory: networkClientFactory,
 		kubeClient:           kubeClient,
+
+		// Initialize Engine state management maps
+		pendingServiceOps:       make(map[string]*ServiceOperationState),
+		pendingEndpoints:        make(map[string][]PendingEndpointUpdate),
+		pendingPods:             make(map[string][]PendingPodUpdate),
+		pendingServiceDeletions: make(map[string]*PendingServiceDeletion),
+		pendingPodDeletions:     make(map[string]*PendingPodDeletion),
+
+		recoveredServiceFinalizers: make(map[string]struct{}),
+
+		// Initialize Engine communication channels
+		serviceUpdaterTrigger:   make(chan bool, 1),
+		locationsUpdaterTrigger: make(chan bool, 1),
 	}
 
 	// Seed the outbound ref-counter from egress pods already in the initial state
@@ -84,15 +109,52 @@ func New(logger logr.Logger, k8s K8sState, nrp NRPState, config Config, networkC
 		}
 	}
 
-	logger.V(2).Info("Initialized DiffTracker",
-		"subscription", config.SubscriptionID,
-		"resourceGroup", config.ResourceGroup,
-		"location", config.Location,
-		"serviceGatewayResourceName", config.ServiceGatewayResourceName,
-		"serviceGatewayID", config.ServiceGatewayID,
-		"vnetName", config.VNetName)
-
 	return diffTracker, nil
+}
+
+// SetServiceLister publishes the provider's shared-informer-backed Service lister to the engine.
+// It is called from SetInformers once the lister exists; getServiceByUID uses it for O(1) cached
+// reads instead of listing every Service. Safe to call from a different goroutine than the engine
+// workers because the write is serialized under mu.
+func (dt *DiffTracker) SetServiceLister(lister corelisters.ServiceLister) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	dt.serviceLister = lister
+}
+
+// SetNodeLister publishes the provider's shared-informer-backed Node lister to the engine.
+func (dt *DiffTracker) SetNodeLister(lister corelisters.NodeLister) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	dt.nodeLister = lister
+}
+
+// SetEventRecorder publishes the recorder used to emit Service Gateway pod events. Set post-init,
+// before the egress pod informer starts.
+func (dt *DiffTracker) SetEventRecorder(recorder record.EventRecorder) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	dt.eventRecorder = recorder
+}
+
+// recordEvent emits a Kubernetes Event for object, if a recorder has been published.
+//
+// It is the only supported way to reach dt.eventRecorder. SetEventRecorder writes the field under
+// dt.mu after construction while informer handlers read it concurrently, so an unsynchronised read
+// is a data race; the field can also still be nil on paths that never publish a recorder, which
+// would panic the informer goroutine that dereferenced it. The recorder is snapshotted and the lock
+// released before Event is called, because Event performs I/O.
+func (dt *DiffTracker) recordEvent(object runtime.Object, eventType, reason, message string) {
+	if dt == nil {
+		return
+	}
+	dt.mu.Lock()
+	recorder := dt.eventRecorder
+	dt.mu.Unlock()
+	if recorder == nil {
+		return
+	}
+	recorder.Event(object, eventType, reason, message)
 }
 
 // lockWithLatency acquires dt.mu and returns a release function that unlocks it and,
@@ -116,4 +178,14 @@ func (dt *DiffTracker) lockWithLatency(method string) func() {
 			"lockWaitMicros", wait.Microseconds(),
 			"lockHoldMicros", hold.Microseconds())
 	}
+}
+
+// GetServiceUpdaterTrigger returns the trigger channel for ServiceUpdater
+func (dt *DiffTracker) GetServiceUpdaterTrigger() <-chan bool {
+	return dt.serviceUpdaterTrigger
+}
+
+// GetLocationsUpdaterTrigger returns the trigger channel for LocationsUpdater
+func (dt *DiffTracker) GetLocationsUpdaterTrigger() <-chan bool {
+	return dt.locationsUpdaterTrigger
 }

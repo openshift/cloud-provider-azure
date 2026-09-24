@@ -1265,6 +1265,34 @@ func TestIsEnableHTTPSTrafficOnly(t *testing.T) {
 			},
 			expectedResult: false,
 		},
+		{
+			// SkipHTTPSTrafficOnlyMatch=true → accept any account regardless of
+			// its EnableHTTPSTrafficOnly value, even when options require true.
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{
+					EnableHTTPSTrafficOnly: ptr.To(false),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly:    true,
+				SkipHTTPSTrafficOnlyMatch: true,
+			},
+			expectedResult: true,
+		},
+		{
+			// SkipHTTPSTrafficOnlyMatch=true with the same value on both sides
+			// also matches (skip supersedes equality check).
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{
+					EnableHTTPSTrafficOnly: ptr.To(true),
+				},
+			},
+			accountOptions: &AccountOptions{
+				EnableHTTPSTrafficOnly:    true,
+				SkipHTTPSTrafficOnlyMatch: true,
+			},
+			expectedResult: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -1921,6 +1949,150 @@ func TestIsMultichannelEnabledEqual(t *testing.T) {
 	}
 }
 
+func TestIsNFSEncryptionInTransitEnabledEqual(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	accountName := "account2"
+
+	StorageAccountRepo := &AccountRepo{
+		fileServiceRepo: mock_fileservice.NewMockRepository(ctrl),
+	}
+
+	nfsEiTRequired := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{
+				Nfs: &armstorage.NfsSetting{EncryptionInTransit: &armstorage.EncryptionInTransit{Required: ptr.To(true)}},
+			},
+		},
+	}
+
+	nfsEiTNotRequired := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{
+				Nfs: &armstorage.NfsSetting{EncryptionInTransit: &armstorage.EncryptionInTransit{Required: ptr.To(false)}},
+			},
+		},
+	}
+
+	incompleteServiceProperties := armstorage.FileServiceProperties{
+		FileServiceProperties: &armstorage.FileServicePropertiesProperties{
+			ProtocolSettings: &armstorage.ProtocolSettings{},
+		},
+	}
+
+	tests := []struct {
+		desc                      string
+		account                   *armstorage.Account
+		accountOptions            *AccountOptions
+		serviceProperties         *armstorage.FileServiceProperties
+		servicePropertiesRetError error
+		expectedResult            bool
+	}{
+		{
+			desc: "IsNFSEncryptionInTransitEnabled is nil",
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{},
+			expectedResult: true,
+		},
+		{
+			desc: "account.Name is nil",
+			account: &armstorage.Account{
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			expectedResult: false,
+		},
+		{
+			desc: "IsNFSEncryptionInTransitEnabled not equal #1",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &nfsEiTRequired,
+			expectedResult:    false,
+		},
+		{
+			desc: "GetServiceProperties return error",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties:         &nfsEiTRequired,
+			servicePropertiesRetError: fmt.Errorf("GetServiceProperties return error"),
+			expectedResult:            false,
+		},
+		{
+			desc: "EiT request matches a non-EiT account without a file-service Get (one-directional)",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(true),
+			},
+			expectedResult: true,
+		},
+		{
+			desc: "EiT request matches an EiT-required account without a file-service Get (one-directional)",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(true),
+			},
+			expectedResult: true,
+		},
+		{
+			desc: "IsNFSEncryptionInTransitEnabled is equal #2",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &nfsEiTNotRequired,
+			expectedResult:    true,
+		},
+		{
+			desc: "incompleteServiceProperties should be regarded as NFS EncryptionInTransit not required",
+			account: &armstorage.Account{
+				Name:       &accountName,
+				Properties: &armstorage.AccountProperties{},
+			},
+			accountOptions: &AccountOptions{
+				IsNFSEncryptionInTransitEnabled: ptr.To(false),
+			},
+			serviceProperties: &incompleteServiceProperties,
+			expectedResult:    true,
+		},
+	}
+
+	for _, test := range tests {
+		if test.serviceProperties != nil {
+			StorageAccountRepo.fileServiceRepo.(*mock_fileservice.MockRepository).EXPECT().Get(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(test.serviceProperties, test.servicePropertiesRetError).Times(1)
+		}
+
+		result, _ := StorageAccountRepo.isNFSEncryptionInTransitEnabledEqual(ctx, test.account, test.accountOptions)
+		assert.Equal(t, test.expectedResult, result, test.desc)
+	}
+}
+
 func TestIsDisableFileServiceDeleteRetentionPolicyEqual(t *testing.T) {
 
 	accountName := "account"
@@ -2282,11 +2454,11 @@ func TestParseServiceAccountTokenError(t *testing.T) {
 			desc:     "invalid serviceaccount tokens",
 			saTokens: "invalid",
 		},
-		{
+		{ // #nosec G101 -- Malformed-token fixture contains placeholders, not credentials.
 			desc:     "token for audience not found",
 			saTokens: `{"aud1":{"token":"eyJhbGciOiJSUzI1NiIsImtpZCI6InRhVDBxbzhQVEZ1ajB1S3BYUUxIclRsR01XakxjemJNOTlzWVMxSlNwbWcifQ.eyJhdWQiOlsiYXBpOi8vQXp1cmVBRGlUb2tlbkV4Y2hhbmdlIl0sImV4cCI6MTY0MzIzNDY0NywiaWF0IjoxNjQzMjMxMDQ3LCJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbCIsImt1YmVybmV0ZXMuaW8iOnsibmFtZXNwYWNlIjoidGVzdC12MWFscGhhMSIsInBvZCI6eyJuYW1lIjoic2VjcmV0cy1zdG9yZS1pbmxpbmUtY3JkIiwidWlkIjoiYjBlYmZjMzUtZjEyNC00ZTEyLWI3N2UtYjM0MjM2N2IyMDNmIn0sInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJkZWZhdWx0IiwidWlkIjoiMjViNGY1NzgtM2U4MC00NTczLWJlOGQtZTdmNDA5ZDI0MmI2In19LCJuYmYiOjE2NDMyMzEwNDcsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZXN0LXYxYWxwaGExOmRlZmF1bHQifQ.ALE46aKmtTV7dsuFOwDZqvEjdHFUTNP-JVjMxexTemmPA78fmPTUZF0P6zANumA03fjX3L-MZNR3PxmEZgKA9qEGIDsljLsUWsVBEquowuBh8yoBYkGkMJmRfmbfS3y7_4Q7AU3D9Drw4iAHcn1GwedjOQC0i589y3dkNNqf8saqHfXkbSSLtSE0f2uzI-PjuTKvR1kuojEVNKlEcA4wsKfoiRpkua17sHkHU0q9zxCMDCr_1f8xbigRnRx0wscU3vy-8KhF3zQtpcWkk3r4C5YSXut9F3xjz5J9DUQn2vNMfZg4tOdcR-9Xv9fbY5iujiSlS58GEktSEa3SE9wrCw\",\"expirationTimestamp\":\"2022-01-26T22:04:07Z\"},\"gcp\":{\"token\":\"eyJhbGciOiJSUzI1NiIsImtpZCI6InRhVDBxbzhQVEZ1ajB1S3BYUUxIclRsR01XakxjemJNOTlzWVMxSlNwbWcifQ.eyJhdWQiOlsiZ2NwIl0sImV4cCI6MTY0MzIzNDY0NywiaWF0IjoxNjQzMjMxMDQ3LCJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbCIsImt1YmVybmV0ZXMuaW8iOnsibmFtZXNwYWNlIjoidGVzdC12MWFscGhhMSIsInBvZCI6eyJuYW1lIjoic2VjcmV0cy1zdG9yZS1pbmxpbmUtY3JkIiwidWlkIjoiYjBlYmZjMzUtZjEyNC00ZTEyLWI3N2UtYjM0MjM2N2IyMDNmIn0sInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJkZWZhdWx0IiwidWlkIjoiMjViNGY1NzgtM2U4MC00NTczLWJlOGQtZTdmNDA5ZDI0MmI2In19LCJuYmYiOjE2NDMyMzEwNDcsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZXN0LXYxYWxwaGExOmRlZmF1bHQifQ.BT0YGI7bGdSNaIBqIEnVL0Ky5t-fynaemSGxjGdKOPl0E22UIVGDpAMUhaS19i20c-Dqs-Kn0N-R5QyDNpZg8vOL5KIFqu2kSYNbKxtQW7TPYIsV0d9wUZjLSr54DKrmyXNMGRoT2bwcF4yyfmO46eMmZSaXN8Y4lgapeabg6CBVVQYHD-GrgXf9jVLeJfCQkTuojK1iXOphyD6NqlGtVCaY1jWxbBMibN0q214vKvQboub8YMuvclGdzn_l_ZQSTjvhBj9I-W1t-JArVjqHoIb8_FlR9BSgzgL7V3Jki55vmiOdEYqMErJWrIZPP3s8qkU5hhO9rSVEd3LJHponvQ","expirationTimestamp":"2022-01-26T22:04:07Z"}}`, //nolint
 		},
-		{
+		{ // #nosec G101 -- Malformed-token fixture contains placeholders, not credentials.
 			desc:     "token incorrect format",
 			saTokens: `{"api://AzureADTokenExchange":{"tokens":"eyJhbGciOiJSUzI1NiIsImtpZCI6InRhVDBxbzhQVEZ1ajB1S3BYUUxIclRsR01XakxjemJNOTlzWVMxSlNwbWcifQ.eyJhdWQiOlsiYXBpOi8vQXp1cmVBRGlUb2tlbkV4Y2hhbmdlIl0sImV4cCI6MTY0MzIzNDY0NywiaWF0IjoxNjQzMjMxMDQ3LCJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbCIsImt1YmVybmV0ZXMuaW8iOnsibmFtZXNwYWNlIjoidGVzdC12MWFscGhhMSIsInBvZCI6eyJuYW1lIjoic2VjcmV0cy1zdG9yZS1pbmxpbmUtY3JkIiwidWlkIjoiYjBlYmZjMzUtZjEyNC00ZTEyLWI3N2UtYjM0MjM2N2IyMDNmIn0sInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJkZWZhdWx0IiwidWlkIjoiMjViNGY1NzgtM2U4MC00NTczLWJlOGQtZTdmNDA5ZDI0MmI2In19LCJuYmYiOjE2NDMyMzEwNDcsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZXN0LXYxYWxwaGExOmRlZmF1bHQifQ.ALE46aKmtTV7dsuFOwDZqvEjdHFUTNP-JVjMxexTemmPA78fmPTUZF0P6zANumA03fjX3L-MZNR3PxmEZgKA9qEGIDsljLsUWsVBEquowuBh8yoBYkGkMJmRfmbfS3y7_4Q7AU3D9Drw4iAHcn1GwedjOQC0i589y3dkNNqf8saqHfXkbSSLtSE0f2uzI-PjuTKvR1kuojEVNKlEcA4wsKfoiRpkua17sHkHU0q9zxCMDCr_1f8xbigRnRx0wscU3vy-8KhF3zQtpcWkk3r4C5YSXut9F3xjz5J9DUQn2vNMfZg4tOdcR-9Xv9fbY5iujiSlS58GEktSEa3SE9wrCw\",\"expirationTimestamp\":\"2022-01-26T22:04:07Z\"},\"gcp\":{\"token\":\"eyJhbGciOiJSUzI1NiIsImtpZCI6InRhVDBxbzhQVEZ1ajB1S3BYUUxIclRsR01XakxjemJNOTlzWVMxSlNwbWcifQ.eyJhdWQiOlsiZ2NwIl0sImV4cCI6MTY0MzIzNDY0NywiaWF0IjoxNjQzMjMxMDQ3LCJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdC5zdmMuY2x1c3Rlci5sb2NhbCIsImt1YmVybmV0ZXMuaW8iOnsibmFtZXNwYWNlIjoidGVzdC12MWFscGhhMSIsInBvZCI6eyJuYW1lIjoic2VjcmV0cy1zdG9yZS1pbmxpbmUtY3JkIiwidWlkIjoiYjBlYmZjMzUtZjEyNC00ZTEyLWI3N2UtYjM0MjM2N2IyMDNmIn0sInNlcnZpY2VhY2NvdW50Ijp7Im5hbWUiOiJkZWZhdWx0IiwidWlkIjoiMjViNGY1NzgtM2U4MC00NTczLWJlOGQtZTdmNDA5ZDI0MmI2In19LCJuYmYiOjE2NDMyMzEwNDcsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZXN0LXYxYWxwaGExOmRlZmF1bHQifQ.BT0YGI7bGdSNaIBqIEnVL0Ky5t-fynaemSGxjGdKOPl0E22UIVGDpAMUhaS19i20c-Dqs-Kn0N-R5QyDNpZg8vOL5KIFqu2kSYNbKxtQW7TPYIsV0d9wUZjLSr54DKrmyXNMGRoT2bwcF4yyfmO46eMmZSaXN8Y4lgapeabg6CBVVQYHD-GrgXf9jVLeJfCQkTuojK1iXOphyD6NqlGtVCaY1jWxbBMibN0q214vKvQboub8YMuvclGdzn_l_ZQSTjvhBj9I-W1t-JArVjqHoIb8_FlR9BSgzgL7V3Jki55vmiOdEYqMErJWrIZPP3s8qkU5hhO9rSVEd3LJHponvQ","expirationTimestamp":"2022-01-26T22:04:07Z"}}`, //nolint
 
