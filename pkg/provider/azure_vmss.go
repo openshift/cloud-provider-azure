@@ -1082,9 +1082,11 @@ func (ss *ScaleSet) EnsureHostInPool(ctx context.Context, _ *v1.Service, nodeNam
 		}
 
 		logger.Error(err, "failed to get vmss vm", "vmName", vmName)
-		if !errors.Is(err, ErrorNotVmssInstance) {
-			return "", "", "", nil, err
+		if errors.Is(err, ErrorNotVmssInstance) {
+			klog.Infof("EnsureHostInPool: skipping node %s because it is not a VMSS instance", vmName)
+			return "", "", "", nil, nil
 		}
+		return "", "", "", nil, err
 	}
 	// In some cases (e.g., BYO nodes), we may get an ErrorNotVmssInstance error,
 	// but it has been ignored above, so a nil check is needed here to prevent panic.
