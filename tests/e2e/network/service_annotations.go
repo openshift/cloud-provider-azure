@@ -322,18 +322,38 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 			}()
 		}
 
+		invalidSubnetName := "invalid/name"
 		annotation := map[string]string{
 			consts.ServiceAnnotationLoadBalancerInternal:       "true",
-			consts.ServiceAnnotationLoadBalancerInternalSubnet: subnetName,
+			consts.ServiceAnnotationLoadBalancerInternalSubnet: invalidSubnetName,
 		}
 
-		// create service with given annotation and wait it to expose
-		ips := createAndExposeDefaultServiceWithAnnotation(cs, tc.IPFamily, serviceName, ns.Name, labels, annotation, ports)
+		By("Creating an internal service with an invalid subnet name")
+		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
+		beforeCreate := time.Now()
+		_, err = cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		utils.PrintCreateSVCSuccessfully(serviceName, ns.Name)
 		defer func() {
 			utils.Logf("cleaning up test service %s", serviceName)
 			err := utils.DeleteService(cs, ns.Name, serviceName)
 			Expect(err).NotTo(HaveOccurred())
 		}()
+
+		By("Verifying the invalid internal subnet name is rejected")
+		expectedMessage := fmt.Sprintf("invalid subnet annotations (%q=%q)", consts.ServiceAnnotationLoadBalancerInternalSubnet, invalidSubnetName)
+		err = utils.WaitForServiceWarningEventAfter(cs, ns.Name, serviceName, "SyncLoadBalancerFailed", expectedMessage, beforeCreate)
+		Expect(err).NotTo(HaveOccurred())
+		service, err = cs.CoreV1().Services(ns.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(service.Status.LoadBalancer.Ingress).To(BeEmpty())
+
+		By("Updating the service to use a valid subnet name with surrounding whitespace")
+		service.Annotations[consts.ServiceAnnotationLoadBalancerInternalSubnet] = " " + subnetName + " "
+		_, err = cs.CoreV1().Services(ns.Name).Update(context.TODO(), service, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		ips, err := utils.WaitServiceExposureAndValidateConnectivity(cs, tc.IPFamily, ns.Name, serviceName, []*string{})
+		Expect(err).NotTo(HaveOccurred())
 		utils.Logf("Get External IPs: %v", utils.StrPtrSliceToStrSlice(ips))
 
 		By("Validating external ip in target subnet")
@@ -437,15 +457,30 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 			}
 		}()
 
+		invalidResourceGroup := "invalid/name"
 		annotation := map[string]string{
-			consts.ServiceAnnotationLoadBalancerResourceGroup: ptr.Deref(rg.Name, ""),
+			consts.ServiceAnnotationLoadBalancerResourceGroup: invalidResourceGroup,
 		}
-		By("Creating service " + serviceName + " in namespace " + ns.Name)
+		By("Creating service " + serviceName + " in namespace " + ns.Name + " with an invalid public IP resource group")
 		service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
 		service = updateServiceLBIPs(service, false, pips)
+		beforeCreate := time.Now()
 		_, err := cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		utils.PrintCreateSVCSuccessfully(serviceName, ns.Name)
+
+		By("Verifying the invalid public IP resource group is rejected")
+		expectedMessage := fmt.Sprintf("invalid resource group annotations (%q=%q)", consts.ServiceAnnotationLoadBalancerResourceGroup, invalidResourceGroup)
+		err = utils.WaitForServiceWarningEventAfter(cs, ns.Name, serviceName, "SyncLoadBalancerFailed", expectedMessage, beforeCreate)
+		Expect(err).NotTo(HaveOccurred())
+		service, err = cs.CoreV1().Services(ns.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(service.Status.LoadBalancer.Ingress).To(BeEmpty())
+
+		By("Updating the service to use the test resource group")
+		service.Annotations[consts.ServiceAnnotationLoadBalancerResourceGroup] = ptr.Deref(rg.Name, "")
+		_, err = cs.CoreV1().Services(ns.Name).Update(context.TODO(), service, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
 		//wait and get service's public IP Address
 		By("Waiting service to expose...")
@@ -486,6 +521,109 @@ var _ = Describe("Service with annotation", Label(utils.TestSuiteLabelServiceAnn
 
 		testPIPTagAnnotationWithTags(cs, tc, ns, serviceName, labels, ports, expectedTags)
 	})
+
+	DescribeTable("should ignore controller-owned tag keys in service annotation `service.beta.kubernetes.io/azure-pip-tags`",
+		func(setOnCreate bool) {
+			const sentinel = "annotation-value"
+			// Alternating case, because Azure resource tag names are case-insensitive.
+			reservedPairs := strings.Join([]string{
+				consts.ClusterNameKey + "=" + sentinel,
+				strings.ToUpper(consts.LegacyClusterNameKey) + "=" + sentinel,
+				consts.ServiceTagKey + "=" + sentinel,
+				strings.ToUpper(consts.LegacyServiceTagKey) + "=" + sentinel,
+				consts.ServiceUsingDNSKey + "=" + sentinel,
+				strings.ToUpper(consts.LegacyServiceUsingDNSKey) + "=" + sentinel,
+			}, ",")
+
+			// The controller does not own this key, so it proves the annotation was applied at all.
+			expectedTagValue := "b"
+			tagsAnnotation := "a=" + expectedTagValue
+			if setOnCreate {
+				tagsAnnotation += "," + reservedPairs
+			}
+
+			since := time.Now()
+			By("Creating a service with the pip tags annotation")
+			annotation := map[string]string{consts.ServiceAnnotationAzurePIPTags: tagsAnnotation}
+			service := utils.CreateLoadBalancerServiceManifest(serviceName, annotation, labels, ns.Name, ports)
+			_, err := cs.CoreV1().Services(ns.Name).Create(context.TODO(), service, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			defer func() {
+				By("Cleaning up test service")
+				err := utils.DeleteService(cs, ns.Name, serviceName)
+				Expect(err).NotTo(HaveOccurred())
+			}()
+
+			By("Waiting for the service to expose")
+			ips, err := utils.WaitServiceExposureAndValidateConnectivity(cs, tc.IPFamily, ns.Name, serviceName, []*string{})
+			Expect(err).NotTo(HaveOccurred())
+
+			pips, err := tc.ListPublicIPs(tc.GetResourceGroup())
+			Expect(err).NotTo(HaveOccurred())
+			var targetPIPNames []string
+			for _, pip := range pips {
+				for _, ip := range ips {
+					if strings.EqualFold(ptr.Deref(pip.Properties.IPAddress, ""), ptr.Deref(ip, "")) {
+						targetPIPNames = append(targetPIPNames, ptr.Deref(pip.Name, ""))
+						break
+					}
+				}
+			}
+			Expect(targetPIPNames).NotTo(BeEmpty())
+
+			if !setOnCreate {
+				By("Adding the controller-owned tag keys to the annotation of the running service")
+				since = time.Now()
+				expectedTagValue = "c"
+				err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					service, err := cs.CoreV1().Services(ns.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					service.Annotations[consts.ServiceAnnotationAzurePIPTags] = "a=" + expectedTagValue + "," + reservedPairs
+					_, err = cs.CoreV1().Services(ns.Name).Update(context.TODO(), service, metav1.UpdateOptions{})
+					return err
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Wait for the new annotation to land, otherwise the checks below pass before it is applied.
+				By("Waiting for the updated annotation to be applied")
+				err = wait.PollImmediate(10*time.Second, 10*time.Minute, func() (bool, error) {
+					for _, pipName := range targetPIPNames {
+						pip, err := utils.WaitGetPIP(tc, pipName)
+						if err != nil {
+							return false, err
+						}
+						if ptr.Deref(pip.Tags["a"], "") != expectedTagValue {
+							return false, nil
+						}
+					}
+					return true, nil
+				})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			By("Checking the tags on the corresponding public IP")
+			for _, pipName := range targetPIPNames {
+				pip, err := utils.WaitGetPIP(tc, pipName)
+				Expect(err).NotTo(HaveOccurred())
+
+				for k, v := range pip.Tags {
+					Expect(ptr.Deref(v, "")).NotTo(Equal(sentinel), "tag %q carries a value supplied by the annotation", k)
+				}
+				Expect(ptr.Deref(pip.Tags[consts.ServiceTagKey], "")).To(Equal(ns.Name + "/" + serviceName))
+				Expect(ptr.Deref(pip.Tags["a"], "")).To(Equal(expectedTagValue))
+			}
+
+			By("Checking the warning event on the service")
+			err = utils.WaitForServiceEventAfter(cs, ns.Name, serviceName, v1.EventTypeWarning,
+				"IgnoredPIPTagKeys", consts.ServiceAnnotationAzurePIPTags, since)
+			Expect(err).NotTo(HaveOccurred())
+		},
+		Entry("when set at service creation", true),
+		Entry("when added to a running service", false),
+	)
 
 	It("should support service annotation `service.beta.kubernetes.io/azure-pip-name`", func() {
 		By("Creating two test pips or more if DualStack")
