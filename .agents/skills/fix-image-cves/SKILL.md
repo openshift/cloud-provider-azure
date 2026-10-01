@@ -5,139 +5,71 @@ description: Scan a built container image with Trivy, classify fixable Go-module
 
 # Fix Image CVEs
 
-## When To Use
+Use `scripts/fix_image_cves.py` for dependency selection, source updates, and
+verification. The helper implements the lowest-fixed-version policy and manages
+module, vendor, and license updates; it does not build or push images.
 
-Use this skill when you need to scan a built container image with Trivy,
-identify fixable CVEs from embedded Go modules or the runtime base image, apply
-the source changes in this repo, and verify that the planned fixes landed.
+Run from the repository root, replacing `<SKILL_DIR>` with this skill directory.
+When running elsewhere, add `--repo <worktree>` to each command.
 
 ## Workflow
 
-Replace `<SKILL_DIR>` with the path to this skill directory.
+1. Scan the built image, specifying the owning module and runtime Dockerfile,
+   then inspect the plan:
 
-1. Scan the built image first. Pass the module root that owns the binary and
-   the Dockerfile that owns the runtime `FROM` line:
+   ```bash
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py scan <image> \
+     --module-root <module-dir> --dockerfile <Dockerfile>
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py plan
+   ```
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py scan \
-  <image> \
-  --module-root <module-dir> \
-  --dockerfile <Dockerfile>
-```
+2. Review the plan before changing files and choose any required image targets:
 
-2. Build the actionable plan from the saved scan state:
+   - Select a locally installed Go version satisfying the repository and planned
+     Go directives; do not rely on automatic toolchain downloads.
+   - For a Go directive bump, update older builders for every affected Dockerfile
+     to a stable Go version at least as new as the target. Preserve the builder's
+     registry, repository, and OS variant. Include both `Dockerfile:builder` and
+     `cloud-node-manager.Dockerfile:builder` when the root module needs new builders.
+   - For runtime CVEs, select a fixed base image. Verify target-platform support
+     and the actual digest for every image target; these are agent decisions.
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py plan
-```
+3. Preview and apply. Append one
+   `--base-image-target <Dockerfile>:<stage>=<image>@sha256:<digest>` per chosen
+   target to both commands; use `builder` or `runtime` for the stage. Omit the
+   option when no image change is needed.
 
-3. Review the plan before changing files. When base-image CVEs are in scope,
-   decide the deterministic replacement image and digest yourself. Then apply
-   the plan:
+   ```bash
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py apply --dry-run
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py apply
+   ```
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py apply \
-  --base-image-target <image>@sha256:<digest>
-```
+4. Verify the source changes:
 
-Preview the apply step without changing files:
+   ```bash
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py verify
+   ```
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py apply --dry-run
-```
+5. Rebuild the image outside this helper, then rescan that rebuilt image:
 
-For multiple Dockerfiles or stages, key each target explicitly:
+   ```bash
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py verify \
+     --rescan --image <rebuilt-image>
+   ```
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py apply \
-  --base-image-target Dockerfile:runtime=<image>@sha256:<digest>
-```
+6. Record results before starting another scan. Clean up after success or an
+   intentional workflow reset:
 
-4. Verify the file-level changes. The script checks the resolved Go module
-   versions, `vendor/modules.txt`, Dockerfile `FROM` lines, multi-module
-   `go mod verify`, and a diff scoped to the files recorded during `apply`:
+   ```bash
+   python3 <SKILL_DIR>/scripts/fix_image_cves.py clean
+   ```
 
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py verify
-```
+## Failures and Reporting
 
-5. After rebuilding the image outside the skill, verify the image-level result
-   with a Trivy rescan:
-
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py verify \
-  --rescan \
-  --image <rebuilt-image>
-```
-
-6. Remove the state file and any temporary artifacts once the task is done or
-   if you want to reset the workflow:
-
-```bash
-python3 <SKILL_DIR>/scripts/fix_image_cves.py clean
-```
-
-## Notes
-
-- The workflow is intentionally split into `scan`, `plan`, `apply`, `verify`,
-  and `clean` so the agent can inspect the planned dependency and base-image
-  changes before mutating files.
-- `scan` runs `trivy image --detection-priority comprehensive --format json`
-  and records both fixable findings and findings without a `FixedVersion`.
-  `plan` preserves findings without a fixed version as residual risks and never
-  turns them into apply actions.
-- Findings are classified as:
-  `GO_MODULE` for `Class="lang-pkgs"` and `Type="gobinary"`, except for the
-  `stdlib` and `toolchain` pseudo-packages,
-  `GO_TOOLCHAIN` for the `stdlib` and `toolchain` Go runtime pseudo-packages,
-  `BASE_IMAGE` for `Class="os-pkgs"`,
-  `OTHER` for everything else.
-- GO_TOOLCHAIN findings are report-only because they require upgrading the Go
-  compiler or pinned builder image and rebuilding the affected image. They are
-  never passed to `go mod edit`, `go list -m`, or module verification.
-  `apply`, `verify`, and rescan also filter these pseudo-packages defensively
-  when reading a plan saved by an older version of the skill.
-- OTHER findings with a non-empty `FixedVersion` are unsupported fixable
-  findings. They require manual remediation and must not be treated as a clean
-  verification result.
-- `plan` groups multiple GO_MODULE CVEs by module path, chooses the highest
-  `FixedVersion` as the minimum required version, and adds Go's required `v`
-  prefix when Trivy reports a digit-leading version. BASE_IMAGE findings are
-  grouped into a recommendation that requires an explicit
-  `--base-image-target`.
-- `apply` stages every unresolved Go module minimum for the same module root in
-  one `go mod edit` command, then lets `go mod tidy` resolve the complete module
-  graph using Minimal Version Selection. This avoids treating command-line
-  versions as conflicting exact `go get` requests. It then mirrors the repo CI
-  behavior by discovering all tracked `go.mod` files and running `go mod tidy`
-  plus `go mod verify` in every module before `go mod vendor`.
-- When vendoring is enabled at the repo root, `apply` also runs
-  `hack/update-azure-vendor-licenses.sh` so `LICENSES/` stays in sync with
-  `vendor/` and the resulting PR is self-contained. The upstream license
-  generator runs `go list -m all`, which can add otherwise-unused checksums to
-  the root `go.sum`, so `apply` reruns root `go mod tidy` and `go mod verify`
-  after license generation. This keeps the recorded changes clean under the
-  repository's `go-mod-consistency` workflow.
-- `verify` accepts resolved and vendored Go module versions that are equal to or
-  higher than each planned minimum. It does not assume a clean worktree and
-  compares the current repo diff against the pre-existing changed files plus
-  the files recorded during `apply` so unrelated user edits do not trigger
-  false failures.
-- `apply` refuses planned Go modules with `replace` directives, and `verify`
-  fails resolved or vendored replacements. A replacement module's version does
-  not prove that the original module meets its CVE fix threshold; update or
-  remove the replacement explicitly before using this workflow.
-- The state file is resolved with
-  `git rev-parse --git-path fix-image-cves.json` so it stays untracked and each
-  linked worktree gets isolated scan, plan, apply, and verification state.
-- `verify --rescan` expects the agent to rebuild the image first. The skill
-  does not build or push images.
-- `clean` removes the state file and cleans up any temporary helper artifacts
-  left behind by vendor-license regeneration.
-- `apply` and `verify` set `GOTOOLCHAIN=local` for all Go subprocess calls to
-  match CI behavior (`actions/setup-go` uses `GOTOOLCHAIN=local`). This
-  prevents toolchain auto-download from producing extra `go.sum` entries that
-  fail the Go Module Consistency check. The skill requires a locally installed
-  Go version that satisfies the repo's `go` directive; `apply` performs a
-  preflight check and fails early with a clear message if the local Go is too
-  old.
+- If the helper stops, preserve its evidence and any partial changes, report the
+  cause, and resolve it before retrying. Do not edit saved state to bypass checks.
+- Report Go toolchain findings (`stdlib`/`toolchain`) and findings without a fixed
+  version as residual risks; the helper does not auto-fix them. Unsupported
+  fixable findings require manual remediation and must not be reported as clean.
+- Distinguish file checks from rebuilt-image verification. A rescan verifies the
+  planned CVEs, not that the entire image is free of vulnerabilities.
