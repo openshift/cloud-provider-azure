@@ -163,7 +163,7 @@ build-ccm-image: buildx-setup ## Build controller-manager image.
 		$(OUTPUT_FLAG) \
 		--platform linux/$(ARCH) \
 		--build-arg ENABLE_GIT_COMMAND="$(ENABLE_GIT_COMMAND)" \
-		--build-arg GOEXPERIMENT="$(GOEXPERIMENT)" \
+		--build-arg MS_GO_NOSYSTEMCRYPTO="$(MS_GO_NOSYSTEMCRYPTO)" \
 		--build-arg ARCH="$(ARCH)" \
 		--build-arg VERSION="$(VERSION)" \
 		--file Dockerfile \
@@ -177,7 +177,7 @@ build-node-image-linux: buildx-setup ## Build node-manager image.
 		$(OUTPUT_FLAG) \
 		--platform linux/$(ARCH) \
 		--build-arg ENABLE_GIT_COMMAND="$(ENABLE_GIT_COMMAND)" \
-		--build-arg GOEXPERIMENT="$(GOEXPERIMENT)" \
+		--build-arg MS_GO_NOSYSTEMCRYPTO="$(MS_GO_NOSYSTEMCRYPTO)" \
 		--build-arg ARCH="$(ARCH)" \
 		--build-arg VERSION="$(VERSION)" \
 		--file cloud-node-manager.Dockerfile \
@@ -489,14 +489,8 @@ delete-workload-cluster: ## Delete a CAPZ workload cluster.
 ##@ Tools
 
 LINTER = $(shell pwd)/bin/golangci-lint
-LINTER_VERSION = v2.9.0
+LINTER_VERSION = v2.13.2
 .PHONY: golangci-lint
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
-	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
-
-## --------------------------------------
-## Openshift specific include
-## --------------------------------------
-
-include openshift.mk
+	@test -s $(LINTER) || GOBIN=$(shell pwd)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINTER_VERSION)
