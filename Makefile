@@ -478,7 +478,9 @@ LINTER_VERSION = v2.5.0
 .PHONY: golangci-lint
 golangci-lint:  ## Download golangci-lint locally if necessary.
 	@echo "Installing golangci-lint"
-	@test -s $(LINTER) || curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell pwd)/bin $(LINTER_VERSION)
+	if [ "$(abspath $(LINTER))" = "$(shell pwd)/bin/golangci-lint" ] || [ ! -s "$(LINTER)" ]; then \
+		GOBIN=$(shell pwd)/bin go install -mod=mod github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINTER_VERSION); \
+	fi
 
 ## --------------------------------------
 ## Openshift specific include
