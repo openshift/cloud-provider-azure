@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	fakerErrors "github.com/go-faker/faker/v4/pkg/errors"
@@ -62,6 +63,7 @@ const (
 	ChineseFirstNameTag        = "chinese_first_name"
 	ChineseLastNameTag         = "chinese_last_name"
 	ChineseNameTag             = "chinese_name"
+	ChinesePhoneNumberTag      = "chinese_phone_number"
 	GENDER                     = "gender"
 	UnixTimeTag                = "unix_time"
 	DATE                       = "date"
@@ -90,6 +92,7 @@ const (
 	comma                      = ","
 	colon                      = ":"
 	ONEOF                      = "oneof"
+	TemplateTag                = "template"
 	RussianFirstNameMaleTag    = "russian_first_name_male"
 	RussianMiddleNameMaleTag   = "russian_middle_name_male"
 	RussianLastNameMaleTag     = "russian_last_name_male"
@@ -105,7 +108,7 @@ const (
 var PriorityTags = []string{ID, HyphenatedID, EmailTag, MacAddressTag, DomainNameTag, UserNameTag, URLTag, IPV4Tag,
 	IPV6Tag, PASSWORD, JWT, CountryInfoTag, LATITUDE, LONGITUDE, CreditCardNumber, CreditCardType, PhoneNumber, TollFreeNumber,
 	E164PhoneNumberTag, TitleMaleTag, TitleFemaleTag, FirstNameTag, FirstNameMaleTag, FirstNameFemaleTag, LastNameTag,
-	NAME, ChineseFirstNameTag, ChineseLastNameTag, ChineseNameTag, GENDER, UnixTimeTag, DATE, TIME, MonthNameTag,
+	NAME, ChineseFirstNameTag, ChineseLastNameTag, ChineseNameTag, ChinesePhoneNumberTag, GENDER, UnixTimeTag, DATE, TIME, MonthNameTag,
 	YEAR, DayOfWeekTag, DayOfMonthTag, TIMESTAMP, CENTURY, TIMEZONE, TimePeriodTag, WORD, SENTENCE, PARAGRAPH,
 	CurrencyTag, AmountTag, AmountWithCurrencyTag, SKIP, Length, SliceLength, Language, BoundaryStart, BoundaryEnd, ONEOF, BloodTypeTag,
 	UserAgentTag,
@@ -167,6 +170,7 @@ func initDefaultTag() {
 	defaultTag.Store(ChineseFirstNameTag, ChineseFirstNameTag)
 	defaultTag.Store(ChineseLastNameTag, ChineseLastNameTag)
 	defaultTag.Store(ChineseNameTag, ChineseNameTag)
+	defaultTag.Store(ChinesePhoneNumberTag, ChinesePhoneNumberTag)
 	defaultTag.Store(GENDER, GENDER)
 	defaultTag.Store(UnixTimeTag, UnixTimeTag)
 	defaultTag.Store(DATE, DATE)
@@ -218,6 +222,7 @@ func initMapperTagDefault() {
 	mapperTag.Store(ChineseFirstNameTag, GetPerson().ChineseFirstName)
 	mapperTag.Store(ChineseLastNameTag, GetPerson().ChineseLastName)
 	mapperTag.Store(ChineseNameTag, GetPerson().ChineseName)
+	mapperTag.Store(ChinesePhoneNumberTag, GetPhoner().ChinesePhoneNumber)
 	mapperTag.Store(GENDER, GetPerson().Gender)
 	mapperTag.Store(UnixTimeTag, GetDateTimer().UnixTime)
 	mapperTag.Store(DATE, GetDateTimer().Date)
@@ -290,7 +295,27 @@ var (
 	SetRandomNumberBoundaries   = options.SetRandomNumberBoundaries
 )
 
+// mapperTagHasDefaults reports whether mapperTag currently holds the default
+// (no-option) generator functions. The common no-option case skips the
+// redundant re-store while this is true, avoiding repeated work and lock
+// contention under high volume. An option call overwrites mapperTag and clears
+// the flag, so the next no-option call restores the defaults.
+var mapperTagHasDefaults atomic.Bool
+
 func initMapperTagWithOption(opts ...options.OptionFunc) {
+	if len(opts) == 0 {
+		if mapperTagHasDefaults.Load() {
+			return
+		}
+		storeMapperTagWithOption()
+		mapperTagHasDefaults.Store(true)
+		return
+	}
+	storeMapperTagWithOption(opts...)
+	mapperTagHasDefaults.Store(false)
+}
+
+func storeMapperTagWithOption(opts ...options.OptionFunc) {
 	mapperTag.Store(EmailTag, GetNetworker(opts...).Email)
 	mapperTag.Store(MacAddressTag, GetNetworker(opts...).MacAddress)
 	mapperTag.Store(DomainNameTag, GetNetworker(opts...).DomainName)
@@ -565,6 +590,8 @@ func getFakedValueForStruct(item any, t reflect.Type, opts *options.Options) (re
 	}
 	originalDataVal := reflect.ValueOf(item)
 	v := reflect.New(t).Elem()
+	// collect template fields to evaluate in a second pass
+	var templateFields []int
 	if opts.MaxFieldDepthOption == 0 {
 		return v, nil
 	} else if opts.MaxFieldDepthOption > 0 {
@@ -596,6 +623,27 @@ func getFakedValueForStruct(item any, t reflect.Type, opts *options.Options) (re
 		}
 
 		tags := decodeTags(t, i, opts.TagName)
+		// A template field is derived from other fields, so it is deferred to a
+		// second pass that runs once every other field has been generated.
+		if tags.isTemplate {
+			if tags.unique {
+				// A template over fixed inputs is deterministic, so the retry loop
+				// could never produce a different value. Fail loudly instead.
+				return reflect.Value{}, fmt.Errorf(fakerErrors.ErrTemplateWithUnique, t.Field(i).Name)
+			}
+			if tags.keepOriginal {
+				zero, err := isZero(originalDataVal.Field(i))
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				if !zero {
+					v.Field(i).Set(originalDataVal.Field(i))
+					continue
+				}
+			}
+			templateFields = append(templateFields, i)
+			continue
+		}
 		switch {
 		case tags.keepOriginal:
 			zero, err := isZero(reflect.ValueOf(item).Field(i))
@@ -654,6 +702,10 @@ func getFakedValueForStruct(item any, t reflect.Type, opts *options.Options) (re
 		}
 
 	}
+	// second pass: evaluate template fields using values generated above
+	if err := evaluateTemplateFields(t, v, templateFields, opts.TagName); err != nil {
+		return reflect.Value{}, err
+	}
 	return v, nil
 }
 
@@ -678,6 +730,10 @@ func decodeTags(typ reflect.Type, i int, tagName string) structTag {
 	uni := false
 	res := make([]string, 0)
 	pMap := make(map[string]string)
+	// body collects the template body once a "template:" chunk is seen. Everything
+	// after that chunk belongs to the body, so a template may contain commas; only
+	// the standalone "keep" and "unique" chunks keep their usual meaning.
+	var body []string
 	for _, tag := range tags {
 		if tag == keep {
 			keepOriginal = true
@@ -686,11 +742,29 @@ func decodeTags(typ reflect.Type, i int, tagName string) structTag {
 			uni = true
 			continue
 		}
+		if body != nil {
+			body = append(body, tag)
+			continue
+		}
+		if hasTemplatePrefix(strings.TrimSpace(tag)) {
+			body = append(body, strings.TrimSpace(tag)[len(TemplateTag)+1:])
+			continue
+		}
 		// res = append(res, tag)
 		ptag := strings.ToLower(strings.Trim(strings.Split(tag, "=")[0], " "))
 		pMap[ptag] = tag
 		ptag = strings.ToLower(strings.Trim(strings.Split(tag, ":")[0], " "))
 		pMap[ptag] = tag
+	}
+	if body != nil {
+		// A template body is opaque: it must never reach the priority scanner, which
+		// would otherwise hijack a chunk such as ", email: {{.X}}" as the email tag.
+		return structTag{
+			template:     strings.Join(body, comma),
+			isTemplate:   true,
+			unique:       uni,
+			keepOriginal: keepOriginal,
+		}
 	}
 	// Priority
 	for _, ptag := range PriorityTags {
@@ -718,9 +792,22 @@ func decodeTags(typ reflect.Type, i int, tagName string) structTag {
 }
 
 type structTag struct {
-	fieldType    string
+	fieldType string
+	// template holds the verbatim template body when isTemplate is set. It is kept
+	// out of fieldType because a template body is not a tag and must not be parsed
+	// as one.
+	template     string
 	unique       bool
 	keepOriginal bool
+	isTemplate   bool
+}
+
+// hasTemplatePrefix reports whether s starts with "template:" (case-insensitive).
+// The colon is required, so `faker:"template"` and `faker:"templated"` stay with
+// the normal tag pipeline.
+func hasTemplatePrefix(s string) bool {
+	const n = len(TemplateTag) + 1
+	return len(s) >= n && strings.EqualFold(s[:n], TemplateTag+colon)
 }
 
 func setDataWithTag(v reflect.Value, tag string, opt options.Options) error {

@@ -26,7 +26,7 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v9"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v12"
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/mock/gomock"
@@ -98,6 +98,51 @@ func TestDeletePublicIP(t *testing.T) {
 
 	err := az.DeletePublicIP(&v1.Service{}, az.ResourceGroup, "pip")
 	assert.Contains(t, err.Error(), "UNAVAILABLE")
+}
+
+func TestPIPCacheResourceGroupCasing(t *testing.T) {
+	const (
+		mixedCaseResourceGroup     = "Frontend-RG"
+		alternateResourceGroupCase = "FRONTEND-rg"
+		cacheResourceGroup         = "frontend-rg"
+		pipName                    = "pip"
+	)
+	ctrl := gomock.NewController(t)
+	az := GetTestCloud(ctrl)
+	pip := &armnetwork.PublicIPAddress{
+		Name: ptr.To(pipName),
+		Properties: &armnetwork.PublicIPAddressPropertiesFormat{
+			IPAddress: ptr.To("198.51.100.10"),
+		},
+	}
+	client := az.NetworkClientFactory.GetPublicIPAddressClient().(*mock_publicipaddressclient.MockInterface)
+	gomock.InOrder(
+		client.EXPECT().List(gomock.Any(), cacheResourceGroup).Return([]*armnetwork.PublicIPAddress{pip}, nil),
+		client.EXPECT().CreateOrUpdate(gomock.Any(), mixedCaseResourceGroup, pipName, gomock.Any()).Return(pip, nil),
+		client.EXPECT().List(gomock.Any(), cacheResourceGroup).Return([]*armnetwork.PublicIPAddress{pip}, nil),
+		client.EXPECT().Delete(gomock.Any(), mixedCaseResourceGroup, pipName).Return(nil),
+	)
+
+	got, exists, err := az.getPublicIPAddress(context.Background(), mixedCaseResourceGroup, pipName, azcache.CacheReadTypeDefault)
+	assert.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, pip, got)
+
+	listed, err := az.listPIP(context.Background(), alternateResourceGroupCase, azcache.CacheReadTypeDefault)
+	assert.NoError(t, err)
+	assert.Equal(t, []*armnetwork.PublicIPAddress{pip}, listed)
+	assert.Equal(t, []string{cacheResourceGroup}, az.pipCache.GetStore().ListKeys())
+
+	assert.NoError(t, az.CreateOrUpdatePIP(&v1.Service{}, mixedCaseResourceGroup, pip))
+	assert.Empty(t, az.pipCache.GetStore().ListKeys())
+
+	_, exists, err = az.getPublicIPAddress(context.Background(), alternateResourceGroupCase, pipName, azcache.CacheReadTypeDefault)
+	assert.NoError(t, err)
+	assert.True(t, exists)
+	assert.Equal(t, []string{cacheResourceGroup}, az.pipCache.GetStore().ListKeys())
+
+	assert.NoError(t, az.DeletePublicIP(&v1.Service{}, mixedCaseResourceGroup, pipName))
+	assert.Empty(t, az.pipCache.GetStore().ListKeys())
 }
 
 func TestListPIP(t *testing.T) {
