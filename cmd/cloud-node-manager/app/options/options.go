@@ -41,6 +41,7 @@ import (
 	"k8s.io/klog/v2"
 
 	cloudnodeconfig "sigs.k8s.io/cloud-provider-azure/cmd/cloud-node-manager/app/config"
+	azureconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
 
 	// add the related feature gates
 	_ "k8s.io/controller-manager/pkg/features/register"
@@ -82,6 +83,10 @@ type CloudNodeManagerOptions struct {
 	WaitForRoutes bool
 
 	UseInstanceMetadata bool
+
+	// NodeIPFamilies determines which IP families are reported in a node's
+	// status.addresses and in what order. Valid entries are "ipv4" and "ipv6".
+	NodeIPFamilies []string
 
 	// WindowsService should be set to true if cloud-node-manager is running as a service on Windows.
 	// Its corresponding flag only gets registered in Windows builds
@@ -136,6 +141,7 @@ func (o *CloudNodeManagerOptions) Flags() cliflag.NamedFlagSets {
 	fs.BoolVar(&o.WaitForRoutes, "wait-routes", false, "Whether the nodes should wait for routes created on Azure route table. It should be set to true when using kubenet plugin.")
 	fs.BoolVar(&o.UseInstanceMetadata, "use-instance-metadata", true, "Should use Instance Metadata Service for fetching node information; if false will use ARM instead.")
 	fs.StringVar(&o.CloudConfigFilePath, "cloud-config", o.CloudConfigFilePath, "The path to the cloud config file to be used when using ARM to fetch node information.")
+	fs.StringSliceVar(&o.NodeIPFamilies, "node-ip-families", o.NodeIPFamilies, "Comma-separated list of IP families ('ipv4', 'ipv6') to report in a node's status.addresses, in order. The first entry becomes the node's primary address and therefore the family of its status.hostIP, which must agree with the primary family of the cluster's service CIDR. Defaults to IPv4 first.")
 	fs.BoolVar(&o.EnableDeprecatedBetaTopologyLabels, "enable-deprecated-beta-topology-labels", o.EnableDeprecatedBetaTopologyLabels, "DEPRECATED: This flag will be removed in a future release. If true, the node will apply beta topology labels.")
 	return fss
 }
@@ -196,6 +202,12 @@ func (o *CloudNodeManagerOptions) ApplyTo(c *cloudnodeconfig.Config, userAgent s
 	c.NodeStatusUpdateFrequency = o.NodeStatusUpdateFrequency
 	c.UseInstanceMetadata = o.UseInstanceMetadata
 	c.CloudConfigFilePath = o.CloudConfigFilePath
+
+	nodeIPFamilies, err := azureconfig.NormalizeNodeIPFamilies(o.NodeIPFamilies)
+	if err != nil {
+		return fmt.Errorf("invalid --node-ip-families: %w", err)
+	}
+	c.NodeIPFamilies = nodeIPFamilies
 
 	c.WindowsService = o.WindowsService
 

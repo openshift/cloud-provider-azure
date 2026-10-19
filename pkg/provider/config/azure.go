@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
@@ -183,6 +184,20 @@ type Config struct {
 	// ARM, preventing the cloud-node-lifecycle controller from deleting the node
 	// prematurely. If not set, it defaults to 0, which disables the grace period.
 	NodeInstanceNotFoundGracePeriodInSeconds int `json:"nodeInstanceNotFoundGracePeriodInSeconds,omitempty" yaml:"nodeInstanceNotFoundGracePeriodInSeconds,omitempty"`
+
+	// NodeIPFamilies determines which IP families are added to node objects and in
+	// what order. Valid entries are "ipv4" and "ipv6". The first entry becomes the
+	// node's primary address, which in turn determines the family of the node's
+	// status.hostIP. On a dual-stack cluster whose service CIDR is IPv6-primary this
+	// must be set to ["ipv6", "ipv4"], otherwise the node comes up IPv4-primary and
+	// contradicts the service CIDR.
+	//
+	// When unset, the behaviour depends on how node addresses are collected. The ARM
+	// path reports only the primary IP (the address of the NIC's primary IP
+	// configuration) rather than both families. The non-ARM instance metadata path
+	// reports both families with IPv4 first, i.e. it defaults to ["ipv4", "ipv6"],
+	// which preserves the historical ordering.
+	NodeIPFamilies []string `json:"nodeIPFamilies,omitempty" yaml:"nodeIPFamilies,omitempty"`
 }
 
 // HasExtendedLocation returns true if extendedlocation prop are specified.
@@ -236,4 +251,31 @@ func (az *Config) UseSingleStandardLoadBalancer() bool {
 
 func (az *Config) IsStackCloud() bool {
 	return strings.EqualFold(az.Cloud, consts.AzureStackCloudName) && !az.DisableAzureStackCloud
+}
+
+// NormalizeNodeIPFamilies trims, lowercases, and validates node IP family
+// entries. Valid entries are "ipv4" and "ipv6"; duplicates are rejected. An
+// empty list is valid and leaves the cloud provider's default ordering in place.
+func NormalizeNodeIPFamilies(families []string) ([]string, error) {
+	if len(families) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(families))
+	seen := make(map[string]struct{}, len(families))
+	for _, family := range families {
+		f := strings.ToLower(strings.TrimSpace(family))
+		switch f {
+		case consts.IPVersionIPv4StringLower, consts.IPVersionIPv6StringLower:
+		default:
+			return nil, fmt.Errorf("invalid node IP family %q: must be one of %q, %q", family, consts.IPVersionIPv4StringLower, consts.IPVersionIPv6StringLower)
+		}
+		if _, ok := seen[f]; ok {
+			return nil, fmt.Errorf("duplicate node IP family %q", family)
+		}
+		seen[f] = struct{}{}
+		normalized = append(normalized, f)
+	}
+
+	return normalized, nil
 }
