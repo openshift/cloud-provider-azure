@@ -36,13 +36,30 @@ Invoke both image helpers and the module-sync helper with their explicit
 `--repo` input pointing at the current worktree. Remove the temporary tooling
 snapshot during final cleanup.
 
+## Git Lock Discipline
+
+Run every orchestration-owned read-only Git inspection with command-scoped
+`GIT_OPTIONAL_LOCKS=0`. This includes status, diff, log, show, rev-parse,
+ls-files, ls-tree, and ref checks. The image-CVE and module-sync helpers enforce
+the same rule internally for their read-only Git subprocesses.
+
+Do not export this setting across the workflow or pass it to mutating Git
+commands. Fetch, checkout, branch or ref updates, staging, commits, and pushes
+must run serially with normal required locking. Before each mutation and after
+each long-running helper exits, inspect the current worktree Git directory for
+lock files. If an unexpected lock exists, stop and report its path, owner,
+size, modification time, and holder check when available. Never delete,
+rename, bypass, or work around it as part of this skill.
+
 ## Preconditions
 
 1. Require a clean worktree before changing branches. Preserve all pre-existing
    work; never reset, discard, or overwrite it.
 2. Fail fast if Git, GitHub CLI, Trivy, Docker with Buildx or Podman with native
    build support, or a local Go version compatible with the checked-out branch
-   is unavailable. Do not install or upgrade host software.
+   is unavailable. Before each CVE apply, also require an available local Go
+   version compatible with the fresh plan's Go directive actions. Do not
+   install or upgrade host software or enable automatic toolchain downloads.
 3. Require both `git var GIT_AUTHOR_IDENT` and
    `git var GIT_COMMITTER_IDENT` to succeed before any build so checkpoint
    commits cannot fail after remediation has started.
@@ -103,9 +120,12 @@ Use this order and identity in every phase:
 | health-probe-proxy | `hpp` | `local/health-probe-proxy:<tag>` | `health-probe-proxy` | `health-probe-proxy/Dockerfile` |
 
 For every build, allow concurrent builds from other worktrees. Docker builds
-share a host-level Buildx builder; Podman uses its native builder. For Docker
-only, if a build fails specifically because Buildx setup raced, retry the exact
-build once; otherwise do not retry it.
+share a host-level Buildx builder; Podman uses its native builder. Pass the
+build helper's `--retry-transient-runtime-errors` option on every build. The
+build skill owns runtime-specific failure classification, health checks,
+bounded delay, exact retry execution, and the two-attempt limit. Do not run an
+additional outer retry. If the helper still returns a failure, preserve both
+attempts in the run summary and stop.
 
 ### Baseline Phase
 
@@ -139,12 +159,17 @@ table order:
 1. Rebuild the image from the current source and resolve its canonical runtime
    reference. Run a fresh `scan` and `plan`; do not apply the saved baseline
    plan because an earlier image may already have changed a shared module.
-2. Review every fresh plan. Apply Go-module fixes through `fix-image-cves`. For
-   a fixable runtime base-image finding, automatically replace only the digest
-   of the existing registry, repository, and tag. If remediation would change
-   the image family or tag, stop for review. Stop and report any other
-   permission, judgment, or conflict-resolution requirement instead of
-   guessing.
+2. Review every fresh plan. If it contains Go directive actions, select a
+   locally installed Go version at least as new as the highest target before
+   apply, and keep `GOTOOLCHAIN=local`. Apply Go-module and directive fixes
+   through `fix-image-cves`, including compatible pinned Go builder targets
+   for every affected verification Dockerfile (both CCM and CNM for the root
+   module). Follow the fix skill's `Dockerfile:builder` target policy; keep
+   already-compatible builders unchanged. For a fixable runtime base-image
+   finding, automatically replace only the digest of the existing registry,
+   repository, and tag. If runtime base-image remediation would change the
+   image family or tag, stop for review. Stop and report any other permission, judgment, or
+   conflict-resolution requirement instead of guessing.
 3. If the fresh plan contains no Go-module or base-image actions and no
    unsupported fixable findings, record its residual risks, run `clean`, and
    continue to the next image. Skip `apply`, file verification, remediation
