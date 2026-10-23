@@ -130,15 +130,21 @@ func FromVirtualMachineScaleSetVM(vm *armcompute.VirtualMachineScaleSetVM, opt M
 }
 
 func (vm *VirtualMachine) IsVirtualMachine() bool {
+	if vm == nil {
+		return false
+	}
 	return vm.Variant == VariantVirtualMachine
 }
 
 func (vm *VirtualMachine) IsVirtualMachineScaleSetVM() bool {
+	if vm == nil {
+		return false
+	}
 	return vm.Variant == VariantVirtualMachineScaleSetVM
 }
 
 func (vm *VirtualMachine) ManagedByVMSS() bool {
-	return vm.Manage == VMSS
+	return vm != nil && vm.Manage == VMSS
 }
 
 func (vm *VirtualMachine) AsVirtualMachine() *armcompute.VirtualMachine {
