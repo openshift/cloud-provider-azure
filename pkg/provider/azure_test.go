@@ -2487,6 +2487,31 @@ func TestInitializeCloudFromConfig(t *testing.T) {
 		assert.Equal(t, fmt.Errorf("InitializeCloudFromConfig: cannot initialize from nil config"), err)
 
 	})
+	t.Run("invalid nodeIPFamilies", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		az := GetTestCloud(ctrl)
+
+		azureconfig := providerconfig.Config{
+			NodeIPFamilies: []string{"ipv4", "ipv4"},
+		}
+		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
+		assert.Contains(t, err.Error(), `duplicate node IP family "ipv4"`)
+	})
+	t.Run("normalizes nodeIPFamilies", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		az := GetTestCloud(ctrl)
+		zoneMock := az.zoneRepo.(*zone.MockRepository)
+		zoneMock.EXPECT().ListZones(gomock.Any()).Return(map[string][]string{"eastus": {"1", "2", "3"}}, nil).AnyTimes()
+
+		azureconfig := providerconfig.Config{
+			NodeIPFamilies: []string{" IPv6 ", "IPv4"},
+		}
+		err := az.InitializeCloudFromConfig(context.Background(), &azureconfig, false, true)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"ipv6", "ipv4"}, az.NodeIPFamilies)
+	})
 	t.Run("disableAvailabilitySetNodes true is only supported when vmType is 'vmss'", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()

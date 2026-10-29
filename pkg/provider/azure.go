@@ -269,6 +269,12 @@ func (az *Cloud) InitializeCloudFromConfig(ctx context.Context, config *azurecon
 		return fmt.Errorf("InitializeCloudFromConfig: cannot initialize from nil config")
 	}
 
+	nodeIPFamilies, err := azureconfig.NormalizeNodeIPFamilies(config.NodeIPFamilies)
+	if err != nil {
+		return fmt.Errorf("InitializeCloudFromConfig: invalid nodeIPFamilies: %w", err)
+	}
+	config.NodeIPFamilies = nodeIPFamilies
+
 	if config.RouteTableResourceGroup == "" {
 		config.RouteTableResourceGroup = config.ResourceGroup
 	}
