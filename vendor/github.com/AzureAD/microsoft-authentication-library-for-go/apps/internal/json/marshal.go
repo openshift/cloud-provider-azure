@@ -15,7 +15,7 @@ import (
 // as JSON into buff (sometimes with writes to buff directly, sometimes via enc).
 // This call is recursive for all fields of *struct or struct type.
 func marshalStruct(v reflect.Value, buff *bytes.Buffer, enc *json.Encoder) error {
-	if v.Kind() == reflect.Pointer {
+	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 	// We only care about custom Marshalling a struct.
@@ -79,9 +79,9 @@ func marshalStruct(v reflect.Value, buff *bytes.Buffer, enc *json.Encoder) error
 
 		// Write out the field name part.
 		jsonName := translator.jsonName(t.Field(x).Name)
-		fmt.Fprintf(buff, "%q:", jsonName)
+		buff.WriteString(fmt.Sprintf("%q:", jsonName))
 
-		if field.Kind() == reflect.Pointer {
+		if field.Kind() == reflect.Ptr {
 			field = field.Elem()
 		}
 
@@ -169,13 +169,13 @@ func (m *mapEncode) start() (stateFn, error) {
 	}
 
 	valueBaseType := m.m.Type().Elem()
-	if valueBaseType.Kind() == reflect.Pointer {
+	if valueBaseType.Kind() == reflect.Ptr {
 		valueBaseType = valueBaseType.Elem()
 	}
 	m.valueBaseType = valueBaseType
 
 	switch valueBaseType.Kind() {
-	case reflect.Pointer:
+	case reflect.Ptr:
 		return nil, fmt.Errorf("Marshal does not support **<type> or *<reference>")
 	case reflect.Struct, reflect.Map, reflect.Slice:
 		return m.encode, nil
@@ -196,7 +196,7 @@ func (m *mapEncode) encode() (stateFn, error) {
 	for iter.Next() {
 		// Write the key.
 		k := iter.Key()
-		fmt.Fprintf(m.buff, "%q:", k.String())
+		m.buff.WriteString(fmt.Sprintf("%q:", k.String()))
 
 		v := iter.Value()
 		switch m.valueBaseType.Kind() {
@@ -273,13 +273,13 @@ func (s *sliceEncode) start() (stateFn, error) {
 	}
 
 	valueBaseType := s.s.Type().Elem()
-	if valueBaseType.Kind() == reflect.Pointer {
+	if valueBaseType.Kind() == reflect.Ptr {
 		valueBaseType = valueBaseType.Elem()
 	}
 	s.valueBaseType = valueBaseType
 
 	switch valueBaseType.Kind() {
-	case reflect.Pointer:
+	case reflect.Ptr:
 		return nil, fmt.Errorf("Marshal does not support **<type> or *<reference>")
 	case reflect.Struct, reflect.Map, reflect.Slice:
 		return s.encode, nil
@@ -331,7 +331,7 @@ func writeAddFields(i interface{}, buff *bytes.Buffer, enc *json.Encoder) error 
 
 	x := 0
 	for k, v := range m {
-		fmt.Fprintf(buff, "%q:", k)
+		buff.WriteString(fmt.Sprintf("%q:", k))
 		if err := enc.Encode(v); err != nil {
 			return err
 		}

@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=linux/amd64 mcr.microsoft.com/oss/go/microsoft/golang:1.26.9-1-bookworm@sha256:216bcfa984fca3ad0a98190dc61842fe910413c0b280f0bd813c9704ba71dc9c AS builder
+FROM --platform=linux/amd64 mcr.microsoft.com/oss/go/microsoft/golang:1.27.2-1-bookworm@sha256:0848aefcec357c76b8f137e80f03cb033de8985bcf83d8b5339ca02be277606d AS builder
 
 ARG ENABLE_GIT_COMMAND=true
-ARG GOEXPERIMENT
+ARG MS_GO_NOSYSTEMCRYPTO
 ARG ARCH=amd64
-ENV GOEXPERIMENT=${GOEXPERIMENT}
+ENV MS_GO_NOSYSTEMCRYPTO=${MS_GO_NOSYSTEMCRYPTO}
 
 RUN if [ "$ARCH" = "arm64" ] ; then \
     apt-get update && apt-get install -y gcc-aarch64-linux-gnu ; \
@@ -35,7 +35,7 @@ RUN make bin/azure-cloud-node-manager ENABLE_GIT_COMMAND=${ENABLE_GIT_COMMAND} A
 
 # Use distroless base image for a lean production container.
 # Start a new build stage.
-FROM gcr.io/distroless/base:latest@sha256:389cad21f73e4c37b94ffe5b13736d5a92bd5bd3c6c6b38c2be1c881e14ba2bd
+FROM gcr.io/distroless/base:latest@sha256:9ef50bca108839d5986e4d84b7f7b2d79024c9293b7c35b162c6c55485bd5868
 
 # Create a group and user
 USER 65532:65532

@@ -22,10 +22,12 @@ import (
 type cacheEntry struct {
 	Endpoints             authority.Endpoints
 	ValidForDomainsInList map[string]bool
+	// Aliases stores host aliases from instance discovery for quick lookup
+	Aliases map[string]bool
 }
 
 func createcacheEntry(endpoints authority.Endpoints) cacheEntry {
-	return cacheEntry{endpoints, map[string]bool{}}
+	return cacheEntry{endpoints, map[string]bool{}, map[string]bool{}}
 }
 
 // AuthorityEndpoint retrieves endpoints from an authority for auth and token acquisition.
@@ -59,7 +61,7 @@ func (m *authorityEndpoint) ResolveEndpoints(ctx context.Context, authorityInfo 
 			return endpoints, nil
 		}
 
-		endpoint, metadata, err := m.openIDConfigurationEndpoint(ctx, authorityInfo)
+		endpoint, err := m.openIDConfigurationEndpoint(ctx, authorityInfo)
 		if err != nil {
 			return authority.Endpoints{}, err
 		}
@@ -75,19 +77,18 @@ func (m *authorityEndpoint) ResolveEndpoints(ctx context.Context, authorityInfo 
 		tenant := authorityInfo.Tenant
 
 		endpoints := authority.NewEndpoints(
-			strings.ReplaceAll(resp.AuthorizationEndpoint, "{tenant}", tenant),
-			strings.ReplaceAll(resp.TokenEndpoint, "{tenant}", tenant),
-			strings.ReplaceAll(resp.Issuer, "{tenant}", tenant),
+			strings.Replace(resp.AuthorizationEndpoint, "{tenant}", tenant, -1),
+			strings.Replace(resp.TokenEndpoint, "{tenant}", tenant, -1),
+			strings.Replace(resp.Issuer, "{tenant}", tenant, -1),
 			authorityInfo.Host)
 
-		aliases := aliasesFromMetadata(metadata, authorityInfo.Host)
+		aliases := m.addCachedEndpoints(authorityInfo, userPrincipalName, endpoints)
 
 		if err := resp.ValidateIssuerMatchesAuthority(authorityInfo.CanonicalAuthorityURI,
 			aliases); err != nil {
 			return authority.Endpoints{}, fmt.Errorf("ResolveEndpoints(): %w", err)
 		}
 
-		m.addCachedEndpoints(authorityInfo, userPrincipalName, endpoints)
 		return endpoints, nil
 	})
 	if err != nil {
@@ -116,22 +117,7 @@ func (m *authorityEndpoint) cachedEndpoints(authorityInfo authority.Info, userPr
 	return authority.Endpoints{}, false
 }
 
-func aliasesFromMetadata(metadata []authority.InstanceDiscoveryMetadata, authorityHost string) map[string]bool {
-	for _, entry := range metadata {
-		for _, alias := range entry.Aliases {
-			if strings.EqualFold(alias, authorityHost) {
-				aliases := make(map[string]bool, len(entry.Aliases))
-				for _, alias := range entry.Aliases {
-					aliases[alias] = true
-				}
-				return aliases
-			}
-		}
-	}
-	return map[string]bool{}
-}
-
-func (m *authorityEndpoint) addCachedEndpoints(authorityInfo authority.Info, userPrincipalName string, endpoints authority.Endpoints) {
+func (m *authorityEndpoint) addCachedEndpoints(authorityInfo authority.Info, userPrincipalName string, endpoints authority.Endpoints) map[string]bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -151,30 +137,40 @@ func (m *authorityEndpoint) addCachedEndpoints(authorityInfo authority.Info, use
 		}
 	}
 
+	// Extract aliases from instance discovery metadata and add to cache
+	for _, metadata := range authorityInfo.InstanceDiscoveryMetadata {
+		for _, alias := range metadata.Aliases {
+			updatedCacheEntry.Aliases[alias] = true
+		}
+	}
+
 	m.cache[authorityInfo.CanonicalAuthorityURI] = updatedCacheEntry
+	return updatedCacheEntry.Aliases
 }
 
-func (m *authorityEndpoint) openIDConfigurationEndpoint(ctx context.Context, authorityInfo authority.Info) (string, []authority.InstanceDiscoveryMetadata, error) {
+func (m *authorityEndpoint) openIDConfigurationEndpoint(ctx context.Context, authorityInfo authority.Info) (string, error) {
 	if authorityInfo.AuthorityType == authority.ADFS {
-		return fmt.Sprintf("https://%s/adfs/.well-known/openid-configuration", authorityInfo.Host), authorityInfo.InstanceDiscoveryMetadata, nil
+		return fmt.Sprintf("https://%s/adfs/.well-known/openid-configuration", authorityInfo.Host), nil
 	} else if authorityInfo.AuthorityType == authority.DSTS {
-		return fmt.Sprintf("https://%s/dstsv2/%s/v2.0/.well-known/openid-configuration", authorityInfo.Host, authority.DSTSTenant), authorityInfo.InstanceDiscoveryMetadata, nil
+		return fmt.Sprintf("https://%s/dstsv2/%s/v2.0/.well-known/openid-configuration", authorityInfo.Host, authority.DSTSTenant), nil
 
 	} else if authorityInfo.ValidateAuthority && !authority.TrustedHost(authorityInfo.Host) {
 		resp, err := m.rest.Authority().AADInstanceDiscovery(ctx, authorityInfo)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
-		return resp.TenantDiscoveryEndpoint, resp.Metadata, nil
+		authorityInfo.InstanceDiscoveryMetadata = resp.Metadata
+		return resp.TenantDiscoveryEndpoint, nil
 	} else if authorityInfo.Region != "" {
 		resp, err := m.rest.Authority().AADInstanceDiscovery(ctx, authorityInfo)
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
-		return resp.TenantDiscoveryEndpoint, resp.Metadata, nil
+		authorityInfo.InstanceDiscoveryMetadata = resp.Metadata
+		return resp.TenantDiscoveryEndpoint, nil
 	}
 
-	return authorityInfo.CanonicalAuthorityURI + "v2.0/.well-known/openid-configuration", authorityInfo.InstanceDiscoveryMetadata, nil
+	return authorityInfo.CanonicalAuthorityURI + "v2.0/.well-known/openid-configuration", nil
 }
 
 func adfsDomainFromUpn(userPrincipalName string) (string, error) {

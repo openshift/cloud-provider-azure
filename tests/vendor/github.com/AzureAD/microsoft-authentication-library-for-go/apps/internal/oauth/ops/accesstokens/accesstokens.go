@@ -387,7 +387,7 @@ func (c Client) DeviceCodeResult(ctx context.Context, authParameters authority.A
 	qv.Set(clientID, authParameters.ClientID)
 	addScopeQueryParam(qv, authParameters)
 
-	endpoint := strings.ReplaceAll(authParameters.Endpoints.TokenEndpoint, "token", "devicecode")
+	endpoint := strings.Replace(authParameters.Endpoints.TokenEndpoint, "token", "devicecode", -1)
 
 	resp := DeviceCodeResponse{}
 	err := c.Comm.URLFormCall(ctx, endpoint, qv, &resp)
