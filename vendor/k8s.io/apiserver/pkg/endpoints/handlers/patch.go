@@ -18,13 +18,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	jsonpatch "github.com/evanphx/json-patch"
 	"go.opentelemetry.io/otel/attribute"
+	jsonpatch "gopkg.in/evanphx/json-patch.v4"
 	kjson "sigs.k8s.io/json"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,9 +36,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	cbor "k8s.io/apimachinery/pkg/runtime/serializer/cbor/direct"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/managedfields"
 	"k8s.io/apimachinery/pkg/util/mergepatch"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -50,8 +53,10 @@ import (
 	requestmetrics "k8s.io/apiserver/pkg/endpoints/handlers/metrics"
 	"k8s.io/apiserver/pkg/endpoints/handlers/negotiation"
 	"k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/apiserver/pkg/util/dryrun"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/tracing"
 )
 
@@ -66,6 +71,7 @@ func PatchResource(r rest.Patcher, scope *RequestScope, admit admission.Interfac
 		ctx := req.Context()
 		// For performance tracking purposes.
 		ctx, span := tracing.Start(ctx, "Patch", traceFields(req)...)
+		req = req.WithContext(ctx)
 		defer span.End(500 * time.Millisecond)
 
 		// Do this first, otherwise name extraction can fail for unrecognized content types
@@ -102,7 +108,7 @@ func PatchResource(r rest.Patcher, scope *RequestScope, admit admission.Interfac
 			return
 		}
 
-		patchBytes, err := limitedReadBodyWithRecordMetric(ctx, req, scope.MaxRequestBodyBytes, scope.Resource.GroupResource().String(), requestmetrics.Patch)
+		patchBytes, err := limitedReadBodyWithRecordMetric(ctx, req, scope.MaxRequestBodyBytes, scope.Resource.GroupResource(), requestmetrics.Patch)
 		if err != nil {
 			span.AddEvent("limitedReadBody failed", attribute.Int("len", len(patchBytes)), attribute.String("err", err.Error()))
 			scope.err(err, w, req)
@@ -125,13 +131,38 @@ func PatchResource(r rest.Patcher, scope *RequestScope, admit admission.Interfac
 
 		admit = admission.WithAudit(admit)
 
-		audit.LogRequestPatch(req.Context(), patchBytes)
+		// Decode and convert the patch payload to JSON for storage into audit.
+		// the decision to reject the request for failure to decode before we record the request for audit.
+		//
+		// This guarantees that the audit event contains valid JSON, or the request is rejected.
+		patchForAudit, err := validateAndTranscodePatch(patchBytes, patchType)
+		if err != nil {
+			scope.err(err, w, req)
+			return
+		}
+
+		audit.LogRequestPatch(req.Context(), patchForAudit)
 		span.AddEvent("Recorded the audit event")
 
-		baseContentType := runtime.ContentTypeJSON
-		if patchType == types.ApplyPatchType {
+		var baseContentType string
+		switch patchType {
+		case types.ApplyYAMLPatchType:
 			baseContentType = runtime.ContentTypeYAML
+		case types.ApplyCBORPatchType:
+			if !utilfeature.DefaultFeatureGate.Enabled(features.CBORServingAndStorage) {
+				// This request should have already been rejected by the
+				// Content-Type allowlist check. Return 500 because assumptions are
+				// already broken and the feature is not GA.
+				utilruntime.HandleErrorWithContext(req.Context(), nil, "The patch content-type allowlist check should have made this unreachable.")
+				scope.err(errors.NewInternalError(errors.NewInternalError(fmt.Errorf("unexpected patch type: %v", patchType))), w, req)
+				return
+			}
+
+			baseContentType = runtime.ContentTypeCBOR
+		default:
+			baseContentType = runtime.ContentTypeJSON
 		}
+
 		s, ok := runtime.SerializerInfoForMediaType(scope.Serializer.SupportedMediaTypes(), baseContentType)
 		if !ok {
 			scope.err(fmt.Errorf("no serializer defined for %v", baseContentType), w, req)
@@ -396,7 +427,7 @@ func (p *jsonPatcher) applyJSPatch(versionedJS []byte) (patchedJS []byte, strict
 		return patchedJS, strictErrors, nil
 	case types.MergePatchType:
 		if p.validationDirective == metav1.FieldValidationStrict || p.validationDirective == metav1.FieldValidationWarn {
-			v := map[string]interface{}{}
+			v := map[string]any{}
 			var err error
 			strictErrors, err = kjson.UnmarshalStrict(p.patchBytes, &v)
 			if err != nil {
@@ -451,6 +482,20 @@ func (p *smpPatcher) createNewObject(_ context.Context) (runtime.Object, error) 
 	return nil, errors.NewNotFound(p.resource.GroupResource(), p.name)
 }
 
+func newApplyPatcher(p *patcher, fieldManager *managedfields.FieldManager, unmarshalFn, unmarshalStrictFn func([]byte, interface{}) error) *applyPatcher {
+	return &applyPatcher{
+		fieldManager:        fieldManager,
+		patch:               p.patchBytes,
+		options:             p.options,
+		creater:             p.creater,
+		kind:                p.kind,
+		userAgent:           p.userAgent,
+		validationDirective: p.validationDirective,
+		unmarshalFn:         unmarshalFn,
+		unmarshalStrictFn:   unmarshalStrictFn,
+	}
+}
+
 type applyPatcher struct {
 	patch               []byte
 	options             *metav1.PatchOptions
@@ -459,6 +504,8 @@ type applyPatcher struct {
 	fieldManager        *managedfields.FieldManager
 	userAgent           string
 	validationDirective string
+	unmarshalFn         func(data []byte, v any) error
+	unmarshalStrictFn   func(data []byte, v any) error
 }
 
 func (p *applyPatcher) applyPatchToCurrentObject(requestContext context.Context, obj runtime.Object) (runtime.Object, error) {
@@ -470,9 +517,9 @@ func (p *applyPatcher) applyPatchToCurrentObject(requestContext context.Context,
 		panic("FieldManager must be installed to run apply")
 	}
 
-	patchObj := &unstructured.Unstructured{Object: map[string]interface{}{}}
-	if err := yaml.Unmarshal(p.patch, &patchObj.Object); err != nil {
-		return nil, errors.NewBadRequest(fmt.Sprintf("error decoding YAML: %v", err))
+	patchObj := &unstructured.Unstructured{Object: map[string]any{}}
+	if err := p.unmarshalFn(p.patch, &patchObj.Object); err != nil {
+		return nil, errors.NewBadRequest(fmt.Sprintf("error decoding patch: %v", err))
 	}
 
 	obj, err := p.fieldManager.Apply(obj, patchObj, p.options.FieldManager, force)
@@ -483,9 +530,9 @@ func (p *applyPatcher) applyPatchToCurrentObject(requestContext context.Context,
 	// TODO: spawn something to track deciding whether a fieldValidation=Strict
 	// fatal error should return before an error from the apply operation
 	if p.validationDirective == metav1.FieldValidationStrict || p.validationDirective == metav1.FieldValidationWarn {
-		if err := yaml.UnmarshalStrict(p.patch, &map[string]interface{}{}); err != nil {
+		if err := p.unmarshalStrictFn(p.patch, &map[string]any{}); err != nil {
 			if p.validationDirective == metav1.FieldValidationStrict {
-				return nil, errors.NewBadRequest(fmt.Sprintf("error strict decoding YAML: %v", err))
+				return nil, errors.NewBadRequest(fmt.Sprintf("error strict decoding patch: %v", err))
 			}
 			addStrictDecodingWarnings(requestContext, []error{err})
 		}
@@ -633,16 +680,21 @@ func (p *patcher) patchResource(ctx context.Context, scope *RequestScope) (runti
 			fieldManager:       scope.FieldManager,
 		}
 	// this case is unreachable if ServerSideApply is not enabled because we will have already rejected the content type
-	case types.ApplyPatchType:
-		p.mechanism = &applyPatcher{
-			fieldManager:        scope.FieldManager,
-			patch:               p.patchBytes,
-			options:             p.options,
-			creater:             p.creater,
-			kind:                p.kind,
-			userAgent:           p.userAgent,
-			validationDirective: p.validationDirective,
+	case types.ApplyYAMLPatchType:
+		p.mechanism = newApplyPatcher(p, scope.FieldManager, yaml.Unmarshal, yaml.UnmarshalStrict)
+		p.forceAllowCreate = true
+	case types.ApplyCBORPatchType:
+		if !utilfeature.DefaultFeatureGate.Enabled(features.CBORServingAndStorage) {
+			utilruntime.HandleErrorWithContext(context.TODO(), nil, "CBOR apply requests should be rejected before reaching this point unless the feature gate is enabled.")
+			return nil, false, fmt.Errorf("%v: unimplemented patch type", p.patchType)
 		}
+
+		// The strict and non-strict funcs are the same here because any CBOR map with
+		// duplicate keys is invalid and always rejected outright regardless of strictness
+		// mode, and unknown field errors can't occur in practice because the type of the
+		// destination value for unmarshaling an apply configuration is always
+		// "unstructured".
+		p.mechanism = newApplyPatcher(p, scope.FieldManager, cbor.Unmarshal, cbor.Unmarshal)
 		p.forceAllowCreate = true
 	default:
 		return nil, false, fmt.Errorf("%v: unimplemented patch type", p.patchType)
@@ -669,7 +721,7 @@ func (p *patcher) patchResource(ctx context.Context, scope *RequestScope) (runti
 		result, err := requestFunc()
 		// If the object wasn't committed to storage because it's serialized size was too large,
 		// it is safe to remove managedFields (which can be large) and try again.
-		if isTooLargeError(err) && p.patchType != types.ApplyPatchType {
+		if isTooLargeError(err) && p.patchType != types.ApplyYAMLPatchType && p.patchType != types.ApplyCBORPatchType {
 			if _, accessorErr := meta.Accessor(p.restPatcher.New()); accessorErr == nil {
 				p.updatedObjectInfo = rest.DefaultUpdatedObjectInfo(nil,
 					p.applyPatch,
@@ -685,6 +737,14 @@ func (p *patcher) patchResource(ctx context.Context, scope *RequestScope) (runti
 		}
 		return result, err
 	})
+
+	// In case of a timeout error, the goroutine handling the request is still running.
+	// https://github.com/kubernetes/kubernetes/blob/d2c12afa4593e50a187075157d38748292b02733/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/finisher/finisher.go#L127-L146
+	// We cannot reliably read the variable (data race!) and have to assume that
+	// the object was not created.
+	if errors.IsTimeout(err) {
+		return result, false, err
+	}
 	return result, wasCreated, err
 }
 
@@ -783,4 +843,30 @@ func patchToCreateOptions(po *metav1.PatchOptions) *metav1.CreateOptions {
 	}
 	co.TypeMeta.SetGroupVersionKind(metav1.SchemeGroupVersion.WithKind("CreateOptions"))
 	return co
+}
+
+func validateAndTranscodePatch(patchBytes []byte, patchType types.PatchType) ([]byte, error) {
+	switch patchType {
+	case types.ApplyCBORPatchType:
+		var obj any
+		if err := cbor.Unmarshal(patchBytes, &obj); err != nil {
+			return nil, errors.NewBadRequest(fmt.Sprintf("error decoding patch: %v", err))
+		}
+		jsonBytes, err := json.Marshal(obj)
+		if err != nil {
+			return nil, errors.NewBadRequest(fmt.Sprintf("error encoding patch: %v", err))
+		}
+		return jsonBytes, nil
+	case types.ApplyYAMLPatchType:
+		jsonBytes, err := yaml.ToJSON(patchBytes)
+		if err != nil {
+			return nil, errors.NewBadRequest(fmt.Sprintf("error encoding patch: %v", err))
+		}
+		return jsonBytes, nil
+	default:
+		if !json.Valid(patchBytes) {
+			return nil, errors.NewBadRequest("invalid JSON patch")
+		}
+		return patchBytes, nil
+	}
 }

@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/pflag"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -35,6 +38,7 @@ import (
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/options/encryptionconfig"
 	encryptionconfigcontroller "k8s.io/apiserver/pkg/server/options/encryptionconfig/controller"
+	encryptionconfigmetrics "k8s.io/apiserver/pkg/server/options/encryptionconfig/metrics"
 	serverstorage "k8s.io/apiserver/pkg/server/storage"
 	"k8s.io/apiserver/pkg/storage/etcd3/metrics"
 	"k8s.io/apiserver/pkg/storage/storagebackend"
@@ -44,8 +48,6 @@ import (
 )
 
 type EtcdOptions struct {
-	// The value of Paging on StorageConfig will be overridden by the
-	// calculated feature gate value.
 	StorageConfig                           storagebackend.Config
 	EncryptionProviderConfigFilepath        string
 	EncryptionProviderConfigAutomaticReload bool
@@ -60,8 +62,6 @@ type EtcdOptions struct {
 
 	// Set EnableWatchCache to false to disable all watch caches
 	EnableWatchCache bool
-	// Set DefaultWatchCacheSize to zero to disable watch caches for those resources that have no explicit cache size set
-	DefaultWatchCacheSize int
 	// WatchCacheSizes represents override to a given resource
 	WatchCacheSizes []string
 
@@ -81,11 +81,16 @@ func NewEtcdOptions(backendConfig *storagebackend.Config) *EtcdOptions {
 		DeleteCollectionWorkers: 1,
 		EnableGarbageCollection: true,
 		EnableWatchCache:        true,
-		DefaultWatchCacheSize:   100,
 	}
 	options.StorageConfig.CountMetricPollPeriod = time.Minute
 	return options
 }
+
+var storageMediaTypes = sets.New(
+	runtime.ContentTypeJSON,
+	runtime.ContentTypeYAML,
+	runtime.ContentTypeProtobuf,
+)
 
 func (s *EtcdOptions) Validate() []error {
 	if s == nil {
@@ -101,23 +106,16 @@ func (s *EtcdOptions) Validate() []error {
 		allErrors = append(allErrors, fmt.Errorf("--storage-backend invalid, allowed values: %s. If not specified, it will default to 'etcd3'", strings.Join(storageTypes.List(), ", ")))
 	}
 
-	for _, override := range s.EtcdServersOverrides {
-		tokens := strings.Split(override, "#")
-		if len(tokens) != 2 {
-			allErrors = append(allErrors, fmt.Errorf("--etcd-servers-overrides invalid, must be of format: group/resource#servers, where servers are URLs, semicolon separated"))
-			continue
-		}
-
-		apiresource := strings.Split(tokens[0], "/")
-		if len(apiresource) != 2 {
-			allErrors = append(allErrors, fmt.Errorf("--etcd-servers-overrides invalid, must be of format: group/resource#servers, where servers are URLs, semicolon separated"))
-			continue
-		}
-
+	if _, err := ParseEtcdServersOverrides(s.EtcdServersOverrides); err != nil {
+		allErrors = append(allErrors, err)
 	}
 
 	if len(s.EncryptionProviderConfigFilepath) == 0 && s.EncryptionProviderConfigAutomaticReload {
 		allErrors = append(allErrors, fmt.Errorf("--encryption-provider-config-automatic-reload must be set with --encryption-provider-config"))
+	}
+
+	if s.DefaultStorageMediaType != "" && !storageMediaTypes.Has(s.DefaultStorageMediaType) {
+		allErrors = append(allErrors, fmt.Errorf("--storage-media-type %q invalid, allowed values: %s", s.DefaultStorageMediaType, strings.Join(sets.List(storageMediaTypes), ", ")))
 	}
 
 	return allErrors
@@ -132,7 +130,8 @@ func (s *EtcdOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringSliceVar(&s.EtcdServersOverrides, "etcd-servers-overrides", s.EtcdServersOverrides, ""+
 		"Per-resource etcd servers overrides, comma separated. The individual override "+
 		"format: group/resource#servers, where servers are URLs, semicolon separated. "+
-		"Note that this applies only to resources compiled into this server binary. ")
+		"Note that this applies only to resources compiled into this server binary. "+
+		`e.g. "/pods#http://etcd4:2379;http://etcd5:2379,/events#http://etcd6:2379"`)
 
 	fs.StringVar(&s.DefaultStorageMediaType, "storage-media-type", s.DefaultStorageMediaType, ""+
 		"The media type to use to store objects in storage. "+
@@ -148,11 +147,12 @@ func (s *EtcdOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&s.EnableWatchCache, "watch-cache", s.EnableWatchCache,
 		"Enable watch caching in the apiserver")
 
-	fs.IntVar(&s.DefaultWatchCacheSize, "default-watch-cache-size", s.DefaultWatchCacheSize,
+	defaultWatchCacheSize := 100
+	fs.IntVar(&defaultWatchCacheSize, "default-watch-cache-size", defaultWatchCacheSize,
 		"Default watch cache size. If zero, watch cache will be disabled for resources that do not have a default watch size set.")
 
 	fs.MarkDeprecated("default-watch-cache-size",
-		"watch caches are sized automatically and this flag will be removed in a future version")
+		"Watch caches are sized automatically. This flag is no-op and it will be removed in a future version.")
 
 	fs.StringSliceVar(&s.WatchCacheSizes, "watch-cache-sizes", s.WatchCacheSizes, ""+
 		"Watch cache size settings for some resources (pods, nodes, etc.), comma separated. "+
@@ -239,32 +239,100 @@ func (s *EtcdOptions) ApplyWithStorageFactoryTo(factory serverstorage.StorageFac
 		return err
 	}
 
-	metrics.SetStorageMonitorGetter(monitorGetter(factory))
+	monitorCache, err := newMonitorCache(factory, c.DrainedNotify())
+	if err != nil {
+		return err
+	}
+	metrics.SetStorageMonitorGetter(monitorCache.get)
 
 	c.RESTOptionsGetter = s.CreateRESTOptionsGetter(factory, c.ResourceTransformers)
 	return nil
 }
 
-func monitorGetter(factory serverstorage.StorageFactory) func() (monitors []metrics.Monitor, err error) {
-	return func() (monitors []metrics.Monitor, err error) {
-		defer func() {
-			if err != nil {
-				for _, m := range monitors {
-					m.Close()
-				}
-			}
-		}()
+type monitorCache struct {
+	mu          sync.RWMutex
+	initialized bool
+	closed      bool
+	monitors    []metrics.Monitor
+	factory     serverstorage.StorageFactory
+	stopCh      <-chan struct{}
+}
 
-		var m metrics.Monitor
-		for _, cfg := range factory.Configs() {
-			m, err = storagefactory.CreateMonitor(cfg)
-			if err != nil {
-				return nil, err
-			}
-			monitors = append(monitors, m)
-		}
-		return monitors, nil
+var createMonitor = storagefactory.CreateMonitor
+
+func newMonitorCache(factory serverstorage.StorageFactory, stopCh <-chan struct{}) (*monitorCache, error) {
+	if stopCh == nil {
+		return nil, fmt.Errorf("stopCh is required for monitor cache cleanup")
 	}
+	cache := &monitorCache{
+		factory: factory,
+		stopCh:  stopCh,
+	}
+	return cache, nil
+}
+
+func (c *monitorCache) get() ([]metrics.Monitor, error) {
+	// Fast path: check if already initialized with read lock
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("monitor cache is closed")
+	}
+	if c.initialized {
+		result := c.monitors
+		c.mu.RUnlock()
+		return result, nil
+	}
+	c.mu.RUnlock()
+
+	// Slow path: initialize with write lock
+	return c.initialize()
+}
+
+func (c *monitorCache) initialize() ([]metrics.Monitor, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil, fmt.Errorf("monitor cache is closed")
+	}
+	if c.initialized {
+		return c.monitors, nil
+	}
+
+	var monitors []metrics.Monitor
+	for _, cfg := range c.factory.Configs() {
+		m, err := createMonitor(cfg)
+		if err != nil {
+			for _, already := range monitors {
+				already.Close() //nolint:errcheck
+			}
+			return nil, err
+		}
+		monitors = append(monitors, m)
+	}
+	c.monitors = monitors
+	c.initialized = true
+
+	go func() {
+		<-c.stopCh
+		c.close()
+	}()
+
+	return c.monitors, nil
+}
+
+func (c *monitorCache) close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	c.closed = true
+	for _, m := range c.monitors {
+		m.Close() //nolint:errcheck
+	}
+	c.monitors = nil
 }
 
 func (s *EtcdOptions) CreateRESTOptionsGetter(factory serverstorage.StorageFactory, resourceTransformers storagevalue.ResourceTransformers) generic.RESTOptionsGetter {
@@ -294,10 +362,11 @@ func (s *EtcdOptions) maybeApplyResourceTransformers(c *server.Config) (err erro
 		}
 	}()
 
-	encryptionConfiguration, err := encryptionconfig.LoadEncryptionConfig(ctxTransformers, s.EncryptionProviderConfigFilepath, s.EncryptionProviderConfigAutomaticReload)
+	encryptionConfiguration, err := encryptionconfig.LoadEncryptionConfig(ctxTransformers, s.EncryptionProviderConfigFilepath, s.EncryptionProviderConfigAutomaticReload, c.APIServerID)
 	if err != nil {
 		return err
 	}
+	encryptionconfigmetrics.RecordEncryptionConfigLastConfigInfo(c.APIServerID, encryptionConfiguration.EncryptionFileContentHash)
 
 	if s.EncryptionProviderConfigAutomaticReload {
 		// with reload=true we will always have 1 health check
@@ -318,6 +387,7 @@ func (s *EtcdOptions) maybeApplyResourceTransformers(c *server.Config) (err erro
 					s.EncryptionProviderConfigFilepath,
 					dynamicTransformers,
 					encryptionConfiguration.EncryptionFileContentHash,
+					c.APIServerID,
 				)
 
 				go dynamicEncryptionConfigController.Run(ctxServer)
@@ -331,16 +401,21 @@ func (s *EtcdOptions) maybeApplyResourceTransformers(c *server.Config) (err erro
 
 		c.ResourceTransformers = dynamicTransformers
 		if !s.SkipHealthEndpoints {
-			c.AddHealthChecks(dynamicTransformers)
+			addHealthChecksWithoutLivez(c, dynamicTransformers)
 		}
 	} else {
 		c.ResourceTransformers = encryptionconfig.StaticTransformers(encryptionConfiguration.Transformers)
 		if !s.SkipHealthEndpoints {
-			c.AddHealthChecks(encryptionConfiguration.HealthChecks...)
+			addHealthChecksWithoutLivez(c, encryptionConfiguration.HealthChecks...)
 		}
 	}
 
 	return nil
+}
+
+func addHealthChecksWithoutLivez(c *server.Config, healthChecks ...healthz.HealthChecker) {
+	c.HealthzChecks = append(c.HealthzChecks, healthChecks...)
+	c.ReadyzChecks = append(c.ReadyzChecks, healthChecks...)
 }
 
 func (s *EtcdOptions) addEtcdHealthEndpoint(c *server.Config) error {
@@ -348,7 +423,7 @@ func (s *EtcdOptions) addEtcdHealthEndpoint(c *server.Config) error {
 	if err != nil {
 		return err
 	}
-	c.AddHealthChecks(healthz.NamedCheck("etcd", func(r *http.Request) error {
+	c.AddHealthChecks(healthz.NamedGroupedCheck("etcd", "etcd", func(r *http.Request) error {
 		return healthCheck()
 	}))
 
@@ -356,10 +431,51 @@ func (s *EtcdOptions) addEtcdHealthEndpoint(c *server.Config) error {
 	if err != nil {
 		return err
 	}
-	c.AddReadyzChecks(healthz.NamedCheck("etcd-readiness", func(r *http.Request) error {
+	c.AddReadyzChecks(healthz.NamedGroupedCheck("etcd-readiness", "etcd-readiness", func(r *http.Request) error {
 		return readyCheck()
 	}))
 
+	if len(s.EtcdServersOverrides) != 0 {
+		// multi overrides servers may in different order
+		// example: ["apps/deployments#s2.example.com;s1.example.com","apps/replicasets#s1.example.com;s2.example.com"]
+		overrides, err := ParseEtcdServersOverrides(s.EtcdServersOverrides)
+		if err != nil {
+			return err
+		}
+		// multi overrides may point to the same servers
+		// example: ["apps/deployments#s1.example.com;s2.example.com","apps/replicasets#s1.example.com;s2.example.com"]
+		serversSets := sets.NewString()
+		for _, override := range overrides {
+			sortedServers := make([]string, len(override.Servers))
+			// use a copied slice to avoid modifying the original slice for client in SetEtcdLocation
+			copy(sortedServers, override.Servers)
+			sort.Strings(sortedServers)
+			serversKeyStr := strings.Join(sortedServers, ";")
+			if serversSets.Has(serversKeyStr) {
+				continue
+			}
+			serversSets.Insert(serversKeyStr)
+
+			sc := s.StorageConfig
+			sc.Transport.ServerList = override.Servers
+
+			healthCheck, err := storagefactory.CreateHealthCheck(sc, c.DrainedNotify())
+			if err != nil {
+				return err
+			}
+			c.AddHealthChecks(healthz.NamedGroupedCheck(fmt.Sprintf("etcd-override-%d", len(serversSets)-1), "etcd", func(r *http.Request) error {
+				return healthCheck()
+			}))
+
+			readyCheck, err := storagefactory.CreateReadyCheck(sc, c.DrainedNotify())
+			if err != nil {
+				return err
+			}
+			c.AddReadyzChecks(healthz.NamedGroupedCheck(fmt.Sprintf("etcd-override-readiness-%d", len(serversSets)-1), "etcd-readiness", func(r *http.Request) error {
+				return readyCheck()
+			}))
+		}
+	}
 	return nil
 }
 
@@ -368,8 +484,8 @@ type StorageFactoryRestOptionsFactory struct {
 	StorageFactory serverstorage.StorageFactory
 }
 
-func (f *StorageFactoryRestOptionsFactory) GetRESTOptions(resource schema.GroupResource) (generic.RESTOptions, error) {
-	storageConfig, err := f.StorageFactory.NewConfig(resource)
+func (f *StorageFactoryRestOptionsFactory) GetRESTOptions(resource schema.GroupResource, example runtime.Object) (generic.RESTOptions, error) {
+	storageConfig, err := f.StorageFactory.NewConfig(resource, example)
 	if err != nil {
 		return generic.RESTOptions{}, fmt.Errorf("unable to find storage destination for %v, due to %v", resource, err.Error())
 	}
@@ -382,6 +498,10 @@ func (f *StorageFactoryRestOptionsFactory) GetRESTOptions(resource schema.GroupR
 		ResourcePrefix:            f.StorageFactory.ResourcePrefix(resource),
 		CountMetricPollPeriod:     f.Options.StorageConfig.CountMetricPollPeriod,
 		StorageObjectCountTracker: f.Options.StorageConfig.StorageObjectCountTracker,
+	}
+
+	if ret.StorageObjectCountTracker == nil {
+		ret.StorageObjectCountTracker = storageConfig.StorageObjectCountTracker
 	}
 
 	if f.Options.EnableWatchCache {
@@ -450,7 +570,7 @@ type SimpleStorageFactory struct {
 	StorageConfig storagebackend.Config
 }
 
-func (s *SimpleStorageFactory) NewConfig(resource schema.GroupResource) (*storagebackend.ConfigForResource, error) {
+func (s *SimpleStorageFactory) NewConfig(resource schema.GroupResource, example runtime.Object) (*storagebackend.ConfigForResource, error) {
 	return s.StorageConfig.ForResource(resource), nil
 }
 
@@ -474,8 +594,8 @@ type transformerStorageFactory struct {
 	resourceTransformers storagevalue.ResourceTransformers
 }
 
-func (t *transformerStorageFactory) NewConfig(resource schema.GroupResource) (*storagebackend.ConfigForResource, error) {
-	config, err := t.delegate.NewConfig(resource)
+func (t *transformerStorageFactory) NewConfig(resource schema.GroupResource, example runtime.Object) (*storagebackend.ConfigForResource, error) {
+	config, err := t.delegate.NewConfig(resource, example)
 	if err != nil {
 		return nil, err
 	}
@@ -498,4 +618,36 @@ func (t *transformerStorageFactory) Configs() []storagebackend.Config {
 
 func (t *transformerStorageFactory) Backends() []serverstorage.Backend {
 	return t.delegate.Backends()
+}
+
+type EtcdServerOverride struct {
+	GroupResource schema.GroupResource
+	Servers       []string
+}
+
+var errOverridesInvalid = fmt.Errorf("--etcd-servers-overrides invalid, must be of format: group/resource#servers, where servers are URLs, semicolon separated")
+
+func ParseEtcdServersOverrides(etcdServersOverrides []string) ([]EtcdServerOverride, error) {
+	var overrides []EtcdServerOverride
+	for _, override := range etcdServersOverrides {
+		tokens := strings.Split(override, "#")
+		if len(tokens) != 2 {
+			return nil, errOverridesInvalid
+		}
+		apiresource := strings.Split(tokens[0], "/")
+		if len(apiresource) != 2 {
+			return nil, errOverridesInvalid
+		}
+		servers := strings.Split(tokens[1], ";")
+		for _, server := range servers {
+			if len(server) == 0 {
+				return nil, errOverridesInvalid
+			}
+		}
+		overrides = append(overrides, EtcdServerOverride{
+			GroupResource: schema.GroupResource{Group: apiresource[0], Resource: apiresource[1]},
+			Servers:       servers,
+		})
+	}
+	return overrides, nil
 }

@@ -17,18 +17,13 @@ limitations under the License.
 package serviceaccount
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apiserver/pkg/authentication/user"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
-
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -36,12 +31,46 @@ const (
 	ServiceAccountUsernameSeparator = ":"
 	ServiceAccountGroupPrefix       = "system:serviceaccounts:"
 	AllServiceAccountsGroup         = "system:serviceaccounts"
+	// IssuedCredentialIDAuditAnnotationKey is the annotation key used in the audit event that is persisted to the
+	// '/token' endpoint for service accounts.
+	// This annotation indicates the generated credential identifier for the service account token being issued.
+	// This is useful when tracing back the origin of tokens that have gone on to make request that have persisted
+	// their credential-identifier into the audit log via the user's extra info stored on subsequent audit events.
+	IssuedCredentialIDAuditAnnotationKey = "authentication.kubernetes.io/issued-credential-id"
 	// PodNameKey is the key used in a user's "extra" to specify the pod name of
 	// the authenticating request.
 	PodNameKey = "authentication.kubernetes.io/pod-name"
 	// PodUIDKey is the key used in a user's "extra" to specify the pod UID of
 	// the authenticating request.
 	PodUIDKey = "authentication.kubernetes.io/pod-uid"
+	// NodeNameKey is the key used in a user's "extra" to specify the node name of
+	// the authenticating request.
+	NodeNameKey = "authentication.kubernetes.io/node-name"
+	// NodeUIDKey is the key used in a user's "extra" to specify the node UID of
+	// the authenticating request.
+	NodeUIDKey = "authentication.kubernetes.io/node-uid"
+	// ValidatingWebhookConfigurationNameKey is the key used in a user's
+	// "extra" to specify the validating webhook configuration name of
+	// the authenticating request.
+	ValidatingWebhookConfigurationNameKey = "authentication.kubernetes.io/validatingwebhookconfiguration-name"
+	// ValidatingWebhookConfigurationUIDKey is the key used in a user's
+	// "extra" to specify the validating webhook configuration UID of
+	// the authenticating request.
+	ValidatingWebhookConfigurationUIDKey = "authentication.kubernetes.io/validatingwebhookconfiguration-uid"
+	// MutatingWebhookConfigurationNameKey is the key used in a user's
+	// "extra" to specify the mutating webhook configuration name of
+	// the authenticating request.
+	MutatingWebhookConfigurationNameKey = "authentication.kubernetes.io/mutatingwebhookconfiguration-name"
+	// MutatingWebhookConfigurationUIDKey is the key used in a user's
+	// "extra" to specify the mutating webhook configuration UID of
+	// the authenticating request.
+	MutatingWebhookConfigurationUIDKey = "authentication.kubernetes.io/mutatingwebhookconfiguration-uid"
+	// AttestationKeyPrefix is the prefix for the user info extra key used to
+	// detail attestations.
+	AttestationKeyPrefix = "attestation.authentication.kubernetes.io/"
+	// AttestationAdmissionReviewAPIGroupsKey is the key used in a user's
+	// "extra" to specify the "admissionReviewAPIGroups" claim.
+	AttestationAdmissionReviewAPIGroupsKey = AttestationKeyPrefix + authenticationv1.AttestationAdmissionReviewAPIGroups
 )
 
 // MakeUsername generates a username from the given namespace and ServiceAccount name.
@@ -117,8 +146,13 @@ func UserInfo(namespace, name, uid string) user.Info {
 }
 
 type ServiceAccountInfo struct {
-	Name, Namespace, UID string
-	PodName, PodUID      string
+	Name, Namespace, UID                                                  string
+	PodName, PodUID                                                       string
+	CredentialID                                                          string
+	NodeName, NodeUID                                                     string
+	ValidatingWebhookConfigurationName, ValidatingWebhookConfigurationUID string
+	MutatingWebhookConfigurationName, MutatingWebhookConfigurationUID     string
+	AttestationAdmissionReviewAPIGroups                                   []string
 }
 
 func (sa *ServiceAccountInfo) UserInfo() user.Info {
@@ -127,12 +161,53 @@ func (sa *ServiceAccountInfo) UserInfo() user.Info {
 		UID:    sa.UID,
 		Groups: MakeGroupNames(sa.Namespace),
 	}
+
 	if sa.PodName != "" && sa.PodUID != "" {
-		info.Extra = map[string][]string{
-			PodNameKey: {sa.PodName},
-			PodUIDKey:  {sa.PodUID},
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[PodNameKey] = []string{sa.PodName}
+		info.Extra[PodUIDKey] = []string{sa.PodUID}
+	}
+	if sa.CredentialID != "" {
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[user.CredentialIDKey] = []string{sa.CredentialID}
+	}
+	if sa.NodeName != "" {
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[NodeNameKey] = []string{sa.NodeName}
+		// node UID is optional and will only be set if the node name is set
+		if sa.NodeUID != "" {
+			info.Extra[NodeUIDKey] = []string{sa.NodeUID}
 		}
 	}
+	if sa.ValidatingWebhookConfigurationName != "" && sa.ValidatingWebhookConfigurationUID != "" {
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[ValidatingWebhookConfigurationNameKey] = []string{sa.ValidatingWebhookConfigurationName}
+		info.Extra[ValidatingWebhookConfigurationUIDKey] = []string{sa.ValidatingWebhookConfigurationUID}
+	}
+
+	if sa.MutatingWebhookConfigurationName != "" && sa.MutatingWebhookConfigurationUID != "" {
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[MutatingWebhookConfigurationNameKey] = []string{sa.MutatingWebhookConfigurationName}
+		info.Extra[MutatingWebhookConfigurationUIDKey] = []string{sa.MutatingWebhookConfigurationUID}
+	}
+
+	if len(sa.AttestationAdmissionReviewAPIGroups) > 0 {
+		if info.Extra == nil {
+			info.Extra = make(map[string][]string)
+		}
+		info.Extra[AttestationAdmissionReviewAPIGroupsKey] = sa.AttestationAdmissionReviewAPIGroups
+	}
+
 	return info
 }
 
@@ -154,30 +229,4 @@ func IsServiceAccountToken(secret *v1.Secret, sa *v1.ServiceAccount) bool {
 	}
 
 	return true
-}
-
-func GetOrCreateServiceAccount(coreClient v1core.CoreV1Interface, namespace, name string) (*v1.ServiceAccount, error) {
-	sa, err := coreClient.ServiceAccounts(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	if err == nil {
-		return sa, nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return nil, err
-	}
-
-	// Create the namespace if we can't verify it exists.
-	// Tolerate errors, since we don't know whether this component has namespace creation permissions.
-	if _, err := coreClient.Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-		if _, err = coreClient.Namespaces().Create(context.TODO(), &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-			klog.Warningf("create non-exist namespace %s failed:%v", namespace, err)
-		}
-	}
-
-	// Create the service account
-	sa, err = coreClient.ServiceAccounts(namespace).Create(context.TODO(), &v1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name}}, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		// If we're racing to init and someone else already created it, re-fetch
-		return coreClient.ServiceAccounts(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	}
-	return sa, err
 }

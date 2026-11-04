@@ -1,20 +1,9 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package trace // import "go.opentelemetry.io/otel/sdk/trace"
 
-import "go.opentelemetry.io/otel/sdk/internal/env"
+import "go.opentelemetry.io/otel/sdk/trace/internal/env"
 
 const (
 	// DefaultAttributeValueLengthLimit is the default maximum allowed
@@ -46,8 +35,10 @@ const (
 type SpanLimits struct {
 	// AttributeValueLengthLimit is the maximum allowed attribute value length.
 	//
-	// This limit only applies to string and string slice attribute values.
-	// Any string longer than this value will be truncated to this length.
+	// This limit only applies to string, string slice, byte slice, and slice attribute
+	// values. Any string and byte slice longer than this value will be truncated to this
+	// length. For slice attribute values, the limit is applied to each string and byte slice
+	// element recursively.
 	//
 	// Setting this to a negative value means no limit is applied.
 	AttributeValueLengthLimit int

@@ -26,12 +26,24 @@ import (
 // Kubelet will pass this request object to the plugin via stdin. In general, plugins should
 // prefer responding with the same apiVersion they were sent.
 type CredentialProviderRequest struct {
-	metav1.TypeMeta `json:",inline"`
+	metav1.TypeMeta `json:""`
 
 	// image is the container image that is being pulled as part of the
 	// credential provider plugin request. Plugins may optionally parse the image
 	// to extract any information required to fetch credentials.
 	Image string `json:"image"`
+
+	// serviceAccountToken is the service account token bound to the pod for which
+	// the image is being pulled. This token is only sent to the plugin if the
+	// tokenAttributes.serviceAccountTokenAudience field is configured in the kubelet's credential
+	// provider configuration.
+	ServiceAccountToken string `json:"serviceAccountToken,omitempty" datapolicy:"token"`
+
+	// serviceAccountAnnotations is a map of annotations on the service account bound to the
+	// pod for which the image is being pulled. The list of annotations in the service account
+	// that need to be passed to the plugin is configured in the kubelet's credential provider
+	// configuration.
+	ServiceAccountAnnotations map[string]string `json:"serviceAccountAnnotations,omitempty"`
 }
 
 type PluginCacheKeyType string
@@ -56,7 +68,7 @@ const (
 // image provided in the original request. Kubelet will read the response from the plugin via stdout.
 // This response should be set to the same apiVersion as CredentialProviderRequest.
 type CredentialProviderResponse struct {
-	metav1.TypeMeta `json:",inline"`
+	metav1.TypeMeta `json:""`
 
 	// cacheKeyType indiciates the type of caching key to use based on the image provided
 	// in the request. There are three valid values for the cache key type: Image, Registry, and

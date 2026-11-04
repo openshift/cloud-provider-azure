@@ -21,15 +21,28 @@ import (
 	"sync"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatalister"
 	"k8s.io/client-go/tools/cache"
 )
+
+// SharedInformerOption defines the functional option type for metadataSharedInformerFactory.
+type SharedInformerOption func(*metadataSharedInformerFactory) *metadataSharedInformerFactory
+
+// WithTransform sets a transform on all informers.
+func WithTransform(transform cache.TransformFunc) SharedInformerOption {
+	return func(factory *metadataSharedInformerFactory) *metadataSharedInformerFactory {
+		factory.transform = transform
+		return factory
+	}
+}
 
 // NewSharedInformerFactory constructs a new instance of metadataSharedInformerFactory for all namespaces.
 func NewSharedInformerFactory(client metadata.Interface, defaultResync time.Duration) SharedInformerFactory {
@@ -49,10 +62,29 @@ func NewFilteredSharedInformerFactory(client metadata.Interface, defaultResync t
 	}
 }
 
+// NewSharedInformerFactoryWithOptions constructs a new instance of metadataSharedInformerFactory with additional options.
+func NewSharedInformerFactoryWithOptions(client metadata.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
+	factory := &metadataSharedInformerFactory{
+		client:           client,
+		namespace:        v1.NamespaceAll,
+		defaultResync:    defaultResync,
+		informers:        map[schema.GroupVersionResource]informers.GenericInformer{},
+		startedInformers: make(map[schema.GroupVersionResource]bool),
+	}
+
+	// Apply all options
+	for _, opt := range options {
+		factory = opt(factory)
+	}
+
+	return factory
+}
+
 type metadataSharedInformerFactory struct {
 	client        metadata.Interface
 	defaultResync time.Duration
 	namespace     string
+	transform     cache.TransformFunc
 
 	lock      sync.Mutex
 	informers map[schema.GroupVersionResource]informers.GenericInformer
@@ -80,13 +112,21 @@ func (f *metadataSharedInformerFactory) ForResource(gvr schema.GroupVersionResou
 	}
 
 	informer = NewFilteredMetadataInformer(f.client, gvr, f.namespace, f.defaultResync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	informer.Informer().SetTransform(f.transform)
 	f.informers[key] = informer
 
 	return informer
 }
 
-// Start initializes all requested informers.
+// Start is a legacy wrapper that initializes all requested informers.
+//
+//logcheck:context // StartWithContext should be used instead of Start in code which supports contextual logging.
 func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
+	f.StartWithContext(wait.ContextForChannel(stopCh))
+}
+
+// StartWithContext initializes all requested informers.
+func (f *metadataSharedInformerFactory) StartWithContext(ctx context.Context) {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
@@ -103,7 +143,7 @@ func (f *metadataSharedInformerFactory) Start(stopCh <-chan struct{}) {
 			informer := informer.Informer()
 			go func() {
 				defer f.wg.Done()
-				informer.Run(stopCh)
+				informer.RunWithContext(ctx)
 			}()
 			f.startedInformers[informerType] = true
 		}
@@ -146,20 +186,32 @@ func NewFilteredMetadataInformer(client metadata.Interface, gvr schema.GroupVers
 	return &metadataInformer{
 		gvr: gvr,
 		informer: cache.NewSharedIndexInformer(
-			&cache.ListWatch{
+			cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 				ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 					if tweakListOptions != nil {
 						tweakListOptions(&options)
 					}
-					return client.Resource(gvr).Namespace(namespace).List(context.TODO(), options)
+					return client.Resource(gvr).Namespace(namespace).List(context.Background(), options)
 				},
 				WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 					if tweakListOptions != nil {
 						tweakListOptions(&options)
 					}
-					return client.Resource(gvr).Namespace(namespace).Watch(context.TODO(), options)
+					return client.Resource(gvr).Namespace(namespace).Watch(context.Background(), options)
 				},
-			},
+				ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+					if tweakListOptions != nil {
+						tweakListOptions(&options)
+					}
+					return client.Resource(gvr).Namespace(namespace).List(ctx, options)
+				},
+				WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
+					if tweakListOptions != nil {
+						tweakListOptions(&options)
+					}
+					return client.Resource(gvr).Namespace(namespace).Watch(ctx, options)
+				},
+			}, client),
 			&metav1.PartialObjectMetadata{},
 			resyncPeriod,
 			indexers,

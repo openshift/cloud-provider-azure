@@ -17,44 +17,14 @@ limitations under the License.
 package cacher
 
 import (
-	"strings"
+	"math"
+	"time"
 )
 
-// hasPathPrefix returns true if the string matches pathPrefix exactly, or if is prefixed with pathPrefix at a path segment boundary
-func hasPathPrefix(s, pathPrefix string) bool {
-	// Short circuit if s doesn't contain the prefix at all
-	if !strings.HasPrefix(s, pathPrefix) {
-		return false
-	}
-
-	pathPrefixLength := len(pathPrefix)
-
-	if len(s) == pathPrefixLength {
-		// Exact match
-		return true
-	}
-	if strings.HasSuffix(pathPrefix, "/") {
-		// pathPrefix already ensured a path segment boundary
-		return true
-	}
-	if s[pathPrefixLength:pathPrefixLength+1] == "/" {
-		// The next character in s is a path segment boundary
-		// Check this instead of normalizing pathPrefix to avoid allocating on every call
-		return true
-	}
-	return false
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+// calculateRetryAfterForUnreadyCache calculates the retry duration based on the cache downtime.
+func calculateRetryAfterForUnreadyCache(downtime time.Duration) int {
+	factor := 0.06
+	result := math.Exp(factor * downtime.Seconds())
+	result = math.Min(30, math.Max(1, result))
+	return int(result)
 }

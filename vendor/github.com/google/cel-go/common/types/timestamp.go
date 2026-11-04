@@ -23,7 +23,6 @@ import (
 
 	"github.com/google/cel-go/common/overloads"
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -51,15 +50,6 @@ const (
 	minUnixTime int64 = -62135596800
 	// Number of seconds between `9999-12-31T23:59:59.999999999Z` and the Unix epoch.
 	maxUnixTime int64 = 253402300799
-)
-
-var (
-	// TimestampType singleton.
-	TimestampType = NewTypeValue("google.protobuf.Timestamp",
-		traits.AdderType,
-		traits.ComparerType,
-		traits.ReceiverType,
-		traits.SubtractorType)
 )
 
 // Add implements traits.Adder.Add.
@@ -101,7 +91,7 @@ func (t Timestamp) ConvertToNative(typeDesc reflect.Type) (any, error) {
 	case anyValueType:
 		// Pack the underlying time as a tpb.Timestamp into an Any value.
 		return anypb.New(tpb.New(t.Time))
-	case jsonValueType:
+	case JSONValueType:
 		// CEL follows the proto3 to JSON conversion which formats as an RFC 3339 encoded JSON
 		// string.
 		v := t.ConvertToType(StringType)
@@ -187,6 +177,10 @@ func (t Timestamp) Type() ref.Type {
 // Value implements ref.Val.Value.
 func (t Timestamp) Value() any {
 	return t.Time
+}
+
+func (t Timestamp) format(sb *strings.Builder) {
+	fmt.Fprintf(sb, `timestamp("%s")`, t.Time.UTC().Format(time.RFC3339Nano))
 }
 
 var (
@@ -307,6 +301,9 @@ func timeZone(tz ref.Val, visitor timestampVisitor) timestampVisitor {
 		min, err := strconv.Atoi(string(val[ind+1:]))
 		if err != nil {
 			return WrapErr(err)
+		}
+		if min < 0 || min > 59 {
+			return WrapErr(fmt.Errorf("timezone offset minutes out of range [0, 59]: %s", val))
 		}
 		var offset int
 		if string(val[0]) == "-" {

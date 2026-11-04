@@ -17,18 +17,24 @@ limitations under the License.
 package x509
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	asn1util "k8s.io/apimachinery/pkg/apis/asn1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/features"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/metrics"
 	"k8s.io/component-base/metrics/legacyregistry"
 )
@@ -67,8 +73,15 @@ var clientCertificateExpirationHistogram = metrics.NewHistogram(
 	},
 )
 
-func init() {
-	legacyregistry.MustRegister(clientCertificateExpirationHistogram)
+var registerMetricsOnce sync.Once
+
+// registerMetrics registers the x509 authentication metrics with the legacy
+// registry. Do not use an init() function because feature gates (e.g., NativeHistograms)
+// must be parsed before the histogram metric is created and registered.
+func registerMetrics() {
+	registerMetricsOnce.Do(func() {
+		legacyregistry.MustRegister(clientCertificateExpirationHistogram)
+	})
 }
 
 // UserConversion defines an interface for extracting user info from a client certificate chain
@@ -126,6 +139,7 @@ func New(opts x509.VerifyOptions, user UserConversion) *Authenticator {
 // NewDynamic returns a request.Authenticator that verifies client certificates using the provided
 // VerifyOptionFunc (which may be dynamic), and converts valid certificate chains into user.Info using the provided UserConversion
 func NewDynamic(verifyOptionsFn VerifyOptionFunc, user UserConversion) *Authenticator {
+	registerMetrics()
 	return &Authenticator{verifyOptionsFn, user}
 }
 
@@ -147,6 +161,33 @@ func (a *Authenticator) AuthenticateRequest(req *http.Request) (*authenticator.R
 			optsCopy.Intermediates.AddCert(intermediate)
 		}
 	}
+
+	/*
+			kubernetes mutual (2-way) x509 between client and apiserver:
+
+				1. apiserver sending its apiserver certificate along with its publickey to client
+				2. client verifies the apiserver certificate sent against its cluster certificate authority data
+				3. client sending its client certificate along with its public key to the apiserver
+				>4. apiserver verifies the client certificate sent against its cluster certificate authority data
+
+		    	description:
+					here, with this function,
+					client certificate and pub key sent during the handshake process
+					are verified by apiserver against its cluster certificate authority data
+
+				normal args related to this stage:
+					--client-ca-file string   If set, any request presenting a client certificate signed by
+						one of the authorities in the client-ca-file is authenticated with an identity
+						corresponding to the CommonName of the client certificate.
+
+					(retrievable from "kube-apiserver --help" command)
+					(suggested by @deads2k)
+
+				see also:
+					- for the step 1, see: staging/src/k8s.io/apiserver/pkg/server/options/serving.go
+					- for the step 2, see: staging/src/k8s.io/client-go/transport/transport.go
+					- for the step 3, see: staging/src/k8s.io/client-go/transport/transport.go
+	*/
 
 	remaining := req.TLS.PeerCertificates[0].NotAfter.Sub(time.Now())
 	clientCertificateExpirationHistogram.WithContext(req.Context()).Observe(remaining.Seconds())
@@ -249,10 +290,52 @@ var CommonNameUserConversion = UserConversionFunc(func(chain []*x509.Certificate
 	if len(chain[0].Subject.CommonName) == 0 {
 		return nil, false, nil
 	}
+
+	fp := sha256.Sum256(chain[0].Raw)
+	id := "X509SHA256=" + hex.EncodeToString(fp[:])
+
+	uid, err := parseUIDFromCert(chain[0])
+	if err != nil {
+		return nil, false, err
+	}
 	return &authenticator.Response{
 		User: &user.DefaultInfo{
 			Name:   chain[0].Subject.CommonName,
+			UID:    uid,
 			Groups: chain[0].Subject.Organization,
+			Extra: map[string][]string{
+				user.CredentialIDKey: {id},
+			},
 		},
 	}, true, nil
 })
+
+var uidOID = asn1util.X509UID()
+
+func parseUIDFromCert(cert *x509.Certificate) (string, error) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.AllowParsingUserUIDFromCertAuth) {
+		return "", nil
+	}
+
+	uids := []string{}
+	for _, name := range cert.Subject.Names {
+		if !name.Type.Equal(uidOID) {
+			continue
+		}
+		uid, ok := name.Value.(string)
+		if !ok {
+			return "", fmt.Errorf("unable to parse UID into a string")
+		}
+		uids = append(uids, uid)
+	}
+	if len(uids) == 0 {
+		return "", nil
+	}
+	if len(uids) != 1 {
+		return "", fmt.Errorf("expected 1 UID, but found multiple: %v", uids)
+	}
+	if uids[0] == "" {
+		return "", errors.New("UID cannot be an empty string")
+	}
+	return uids[0], nil
+}

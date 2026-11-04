@@ -19,8 +19,9 @@ package containers
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
-	exprpb "google.golang.org/genproto/googleapis/api/expr/v1alpha1"
+	"github.com/google/cel-go/common/ast"
 )
 
 var (
@@ -62,9 +63,9 @@ func (c *Container) Extend(opts ...ContainerOption) (*Container, error) {
 	}
 	// Copy the name and aliases of the existing container.
 	ext := &Container{name: c.Name()}
-	if len(c.aliasSet()) > 0 {
-		aliasSet := make(map[string]string, len(c.aliasSet()))
-		for k, v := range c.aliasSet() {
+	if len(c.AliasSet()) > 0 {
+		aliasSet := make(map[string]string, len(c.AliasSet()))
+		for k, v := range c.AliasSet() {
 			aliasSet[k] = v
 		}
 		ext.aliases = aliasSet
@@ -132,8 +133,8 @@ func (c *Container) ResolveCandidateNames(name string) []string {
 	return append(candidates, name)
 }
 
-// aliasSet returns the alias to fully-qualified name mapping stored in the container.
-func (c *Container) aliasSet() map[string]string {
+// AliasSet returns the alias to fully-qualified name mapping stored in the container.
+func (c *Container) AliasSet() map[string]string {
 	if c == nil || c.aliases == nil {
 		return noAliases
 	}
@@ -159,7 +160,7 @@ func (c *Container) findAlias(name string) (string, bool) {
 		simple = name[0:dot]
 		qualifier = name[dot:]
 	}
-	alias, found := c.aliasSet()[simple]
+	alias, found := c.AliasSet()[simple]
 	if !found {
 		return "", false
 	}
@@ -212,6 +213,13 @@ type ContainerOption func(*Container) (*Container, error)
 func Abbrevs(qualifiedNames ...string) ContainerOption {
 	return func(c *Container) (*Container, error) {
 		for _, qn := range qualifiedNames {
+			qn = strings.TrimSpace(qn)
+			for _, r := range qn {
+				if !isIdentifierChar(r) {
+					return nil, fmt.Errorf(
+						"invalid qualified name: %s, wanted name of the form 'qualified.name'", qn)
+				}
+			}
 			ind := strings.LastIndex(qn, ".")
 			if ind <= 0 || ind >= len(qn)-1 {
 				return nil, fmt.Errorf(
@@ -219,7 +227,7 @@ func Abbrevs(qualifiedNames ...string) ContainerOption {
 			}
 			alias := qn[ind+1:]
 			var err error
-			c, err = aliasAs("abbreviation", qn, alias)(c)
+			c, err = aliasAs("abbreviation", qn, alias, true)(c)
 			if err != nil {
 				return nil, err
 			}
@@ -228,35 +236,36 @@ func Abbrevs(qualifiedNames ...string) ContainerOption {
 	}
 }
 
-// Alias associates a fully-qualified name with a user-defined alias.
+// Alias associates a name with a user-defined alias.
 //
 // In general, Abbrevs is preferred to Alias since the names generated from the Abbrevs option
 // are more easily traced back to source code. The Alias option is useful for propagating alias
 // configuration from one Container instance to another, and may also be useful for remapping
 // poorly chosen protobuf message / package names.
-//
-// Note: all of the rules that apply to Abbrevs also apply to Alias.
 func Alias(qualifiedName, alias string) ContainerOption {
-	return aliasAs("alias", qualifiedName, alias)
+	return aliasAs("alias", qualifiedName, alias, false)
 }
 
-func aliasAs(kind, qualifiedName, alias string) ContainerOption {
+func aliasAs(kind, qualifiedName, alias string, requireQualified bool) ContainerOption {
 	return func(c *Container) (*Container, error) {
 		if len(alias) == 0 || strings.Contains(alias, ".") {
 			return nil, fmt.Errorf(
 				"%s must be non-empty and simple (not qualified): %s=%s", kind, kind, alias)
 		}
 
+		if len(qualifiedName) == 0 {
+			return nil, fmt.Errorf("%s must refer to a valid name: %s", kind, qualifiedName)
+		}
 		if qualifiedName[0:1] == "." {
 			return nil, fmt.Errorf("qualified name must not begin with a leading '.': %s",
 				qualifiedName)
 		}
 		ind := strings.LastIndex(qualifiedName, ".")
-		if ind <= 0 || ind == len(qualifiedName)-1 {
+		if ind == len(qualifiedName)-1 || (requireQualified && ind <= 0) {
 			return nil, fmt.Errorf("%s must refer to a valid qualified name: %s",
 				kind, qualifiedName)
 		}
-		aliasRef, found := c.aliasSet()[alias]
+		aliasRef, found := c.AliasSet()[alias]
 		if found {
 			return nil, fmt.Errorf(
 				"%s collides with existing reference: name=%s, %s=%s, existing=%s",
@@ -278,6 +287,10 @@ func aliasAs(kind, qualifiedName, alias string) ContainerOption {
 	}
 }
 
+func isIdentifierChar(r rune) bool {
+	return r <= unicode.MaxASCII && (r == '.' || r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r))
+}
+
 // Name sets the fully-qualified name of the Container.
 func Name(name string) ContainerOption {
 	return func(c *Container) (*Container, error) {
@@ -297,19 +310,19 @@ func Name(name string) ContainerOption {
 
 // ToQualifiedName converts an expression AST into a qualified name if possible, with a boolean
 // 'found' value that indicates if the conversion is successful.
-func ToQualifiedName(e *exprpb.Expr) (string, bool) {
-	switch e.GetExprKind().(type) {
-	case *exprpb.Expr_IdentExpr:
-		id := e.GetIdentExpr()
-		return id.GetName(), true
-	case *exprpb.Expr_SelectExpr:
-		sel := e.GetSelectExpr()
+func ToQualifiedName(e ast.Expr) (string, bool) {
+	switch e.Kind() {
+	case ast.IdentKind:
+		id := e.AsIdent()
+		return id, true
+	case ast.SelectKind:
+		sel := e.AsSelect()
 		// Test only expressions are not valid as qualified names.
-		if sel.GetTestOnly() {
+		if sel.IsTestOnly() {
 			return "", false
 		}
-		if qual, found := ToQualifiedName(sel.GetOperand()); found {
-			return qual + "." + sel.GetField(), true
+		if qual, found := ToQualifiedName(sel.Operand()); found {
+			return qual + "." + sel.FieldName(), true
 		}
 	}
 	return "", false

@@ -71,8 +71,7 @@ func RegisterConversions(s *runtime.Scheme) error {
 }
 
 func autoConvert_v1_AuthConfig_To_credentialprovider_AuthConfig(in *AuthConfig, out *credentialprovider.AuthConfig, s conversion.Scope) error {
-	out.Username = in.Username
-	out.Password = in.Password
+	*out = *(*credentialprovider.AuthConfig)(unsafe.Pointer(in))
 	return nil
 }
 
@@ -82,8 +81,7 @@ func Convert_v1_AuthConfig_To_credentialprovider_AuthConfig(in *AuthConfig, out 
 }
 
 func autoConvert_credentialprovider_AuthConfig_To_v1_AuthConfig(in *credentialprovider.AuthConfig, out *AuthConfig, s conversion.Scope) error {
-	out.Username = in.Username
-	out.Password = in.Password
+	*out = *(*AuthConfig)(unsafe.Pointer(in))
 	return nil
 }
 
@@ -94,6 +92,8 @@ func Convert_credentialprovider_AuthConfig_To_v1_AuthConfig(in *credentialprovid
 
 func autoConvert_v1_CredentialProviderRequest_To_credentialprovider_CredentialProviderRequest(in *CredentialProviderRequest, out *credentialprovider.CredentialProviderRequest, s conversion.Scope) error {
 	out.Image = in.Image
+	out.ServiceAccountToken = in.ServiceAccountToken
+	out.ServiceAccountAnnotations = *(*map[string]string)(unsafe.Pointer(&in.ServiceAccountAnnotations))
 	return nil
 }
 
@@ -104,6 +104,8 @@ func Convert_v1_CredentialProviderRequest_To_credentialprovider_CredentialProvid
 
 func autoConvert_credentialprovider_CredentialProviderRequest_To_v1_CredentialProviderRequest(in *credentialprovider.CredentialProviderRequest, out *CredentialProviderRequest, s conversion.Scope) error {
 	out.Image = in.Image
+	out.ServiceAccountToken = in.ServiceAccountToken
+	out.ServiceAccountAnnotations = *(*map[string]string)(unsafe.Pointer(&in.ServiceAccountAnnotations))
 	return nil
 }
 
