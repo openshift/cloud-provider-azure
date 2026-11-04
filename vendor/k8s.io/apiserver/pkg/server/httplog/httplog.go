@@ -31,6 +31,7 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/metrics"
 	"k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/endpoints/responsewriter"
+	"k8s.io/apiserver/pkg/server/routine"
 	"k8s.io/klog/v2"
 )
 
@@ -69,9 +70,10 @@ type respLogger struct {
 
 	captureErrorOutput bool
 
-	req       *http.Request
-	userAgent string
-	w         http.ResponseWriter
+	req         *http.Request
+	userAgent   string
+	contentType string
+	w           http.ResponseWriter
 
 	logStacktracePred StacktracePred
 }
@@ -125,10 +127,26 @@ func withLogging(handler http.Handler, stackTracePred StacktracePred, shouldLogR
 		rl := newLoggedWithStartTime(req, w, startTime)
 		rl.StacktraceWhen(stackTracePred)
 		req = req.WithContext(context.WithValue(ctx, respLoggerContextKey, rl))
-		defer rl.Log()
+
+		var logFunc func()
+		logFunc = rl.Log
+		defer func() {
+			if logFunc != nil {
+				logFunc()
+			}
+		}()
 
 		w = responsewriter.WrapForHTTP1Or2(rl)
 		handler.ServeHTTP(w, req)
+
+		// We need to ensure that the request is logged after it is processed.
+		// In case the request is executed in a separate goroutine created via
+		// WithRoutine handler in the handler chain (i.e. above handler.ServeHTTP()
+		// would return request is completely responsed), we want the logging to
+		// happen in that goroutine too, so we append it to the task.
+		if routine.AppendTask(ctx, &routine.Task{Func: rl.Log}) {
+			logFunc = nil
+		}
 	})
 }
 
@@ -150,6 +168,7 @@ func newLoggedWithStartTime(req *http.Request, w http.ResponseWriter, startTime 
 		startTime:         startTime,
 		req:               req,
 		userAgent:         req.UserAgent(),
+		contentType:       req.Header.Get("Content-Type"),
 		w:                 w,
 		logStacktracePred: DefaultStacktracePred,
 	}
@@ -205,7 +224,6 @@ func StatusIsNot(statuses ...int) StacktracePred {
 func (rl *respLogger) Addf(format string, data ...interface{}) {
 	rl.mutex.Lock()
 	defer rl.mutex.Unlock()
-	rl.addedInfo.WriteString("\n")
 	rl.addedInfo.WriteString(fmt.Sprintf(format, data...))
 }
 
@@ -255,6 +273,7 @@ func (rl *respLogger) Log() {
 		// This can cause apiserver to crash with unrecoverable fatal error.
 		// More info about concurrent read and write for maps: https://golang.org/doc/go1.6#runtime
 		"userAgent", rl.userAgent,
+		"contentType", rl.contentType,
 		"audit-ID", auditID,
 		"srcIP", rl.req.RemoteAddr,
 	}

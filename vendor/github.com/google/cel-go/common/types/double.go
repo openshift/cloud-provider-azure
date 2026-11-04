@@ -18,9 +18,10 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -32,15 +33,6 @@ import (
 type Double float64
 
 var (
-	// DoubleType singleton.
-	DoubleType = NewTypeValue("double",
-		traits.AdderType,
-		traits.ComparerType,
-		traits.DividerType,
-		traits.MultiplierType,
-		traits.NegatorType,
-		traits.SubtractorType)
-
 	// doubleWrapperType reflected type for protobuf double wrapper type.
 	doubleWrapperType = reflect.TypeOf(&wrapperspb.DoubleValue{})
 
@@ -97,7 +89,7 @@ func (d Double) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		case floatWrapperType:
 			// Convert to a wrapperspb.FloatValue (with truncation).
 			return wrapperspb.Float(float32(d)), nil
-		case jsonValueType:
+		case JSONValueType:
 			// Note, there are special cases for proto3 to json conversion that
 			// expect the floating point value to be converted to a NaN,
 			// Infinity, or -Infinity string values, but the jsonpb string
@@ -218,4 +210,24 @@ func (d Double) Type() ref.Type {
 // Value implements ref.Val.Value.
 func (d Double) Value() any {
 	return float64(d)
+}
+
+func (d Double) format(sb *strings.Builder) {
+	if math.IsNaN(float64(d)) {
+		sb.WriteString(`double("NaN")`)
+		return
+	}
+	if math.IsInf(float64(d), -1) {
+		sb.WriteString(`double("-Infinity")`)
+		return
+	}
+	if math.IsInf(float64(d), 1) {
+		sb.WriteString(`double("Infinity")`)
+		return
+	}
+	s := strconv.FormatFloat(float64(d), 'f', -1, 64)
+	sb.WriteString(s)
+	if !strings.ContainsRune(s, '.') {
+		sb.WriteString(".0")
+	}
 }

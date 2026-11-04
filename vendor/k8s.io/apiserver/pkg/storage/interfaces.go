@@ -19,7 +19,10 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -28,6 +31,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 )
+
+// Feature is the name of each feature in storage that we check in feature_support_checker.
+type Feature = string
+
+// RequestWatchProgress is an etcd feature for progress notification requests.
+// Default: false.
+var RequestWatchProgress Feature = "RequestWatchProgress"
+
+// RangeStream is an etcd feature (etcd 3.7+) for the streaming list RPC.
+// Default: true. MarkUnsupported flips it to false on an Unimplemented response,
+// reverting to true after a recheck interval.
+var RangeStream Feature = "RangeStream"
 
 // Versioner abstracts setting and retrieving metadata fields from database response
 // onto the object ot list. It is required to maintain storage invariants - updating an
@@ -102,6 +117,8 @@ type UpdateFunc func(input runtime.Object, res ResponseMeta) (output runtime.Obj
 // ValidateObjectFunc is a function to act on a given object. An error may be returned
 // if the hook cannot be completed. The function may NOT transform the provided
 // object.
+// NOTE: the object in obj may be nil if it cannot be read from the
+// storage, due to transformation or decode error.
 type ValidateObjectFunc func(ctx context.Context, obj runtime.Object) error
 
 // ValidateAllObjectFunc is a "admit everything" instance of ValidateObjectFunc.
@@ -131,11 +148,11 @@ func (p *Preconditions) Check(key string, obj runtime.Object) error {
 	}
 	objMeta, err := meta.Accessor(obj)
 	if err != nil {
-		return NewInternalErrorf(
-			"can't enforce preconditions %v on un-introspectable object %v, got error: %v",
-			*p,
-			obj,
-			err)
+		return NewInternalError(
+			fmt.Errorf("can't enforce preconditions %v on un-introspectable object %v, got error: %w",
+				*p,
+				obj,
+				err))
 	}
 	if p.UID != nil && *p.UID != objMeta.GetUID() {
 		err := fmt.Sprintf(
@@ -172,7 +189,7 @@ type Interface interface {
 	// However, the implementations have to retry in case suggestion is stale.
 	Delete(
 		ctx context.Context, key string, out runtime.Object, preconditions *Preconditions,
-		validateDeletion ValidateObjectFunc, cachedExistingObject runtime.Object) error
+		validateDeletion ValidateObjectFunc, cachedExistingObject runtime.Object, opts DeleteOptions) error
 
 	// Watch begins watching the specified key. Events are decoded into API objects,
 	// and any items selected by 'p' are sent down to returned watch.Interface.
@@ -234,8 +251,11 @@ type Interface interface {
 		ctx context.Context, key string, destination runtime.Object, ignoreNotFound bool,
 		preconditions *Preconditions, tryUpdate UpdateFunc, cachedExistingObject runtime.Object) error
 
-	// Count returns number of different entries under the key (generally being path prefix).
-	Count(key string) (int64, error)
+	// Stats returns storage stats.
+	Stats(ctx context.Context) (Stats, error)
+
+	// ReadinessCheck checks if the storage is ready for accepting requests.
+	ReadinessCheck() error
 
 	// RequestWatchProgress requests the a watch stream progress status be sent in the
 	// watch response stream as soon as possible.
@@ -251,7 +271,22 @@ type Interface interface {
 	// TODO: Remove when storage.Interface will be separate from etc3.store.
 	// Deprecated: Added temporarily to simplify exposing RequestProgress for watch cache.
 	RequestWatchProgress(ctx context.Context) error
+
+	// GetCurrentResourceVersion gets the current resource version from etcd.
+	// This method issues an empty list request and reads only the ResourceVersion from the object metadata
+	GetCurrentResourceVersion(ctx context.Context) (uint64, error)
+
+	// EnableResourceSizeEstimation enables estimating resource size by providing function get keys from storage.
+	EnableResourceSizeEstimation(KeysFunc) error
+
+	// CompactRevision returns latest observed revision that was compacted.
+	// Without ListFromCacheSnapshot enabled only locally executed compaction will be observed.
+	// Returns 0 if no compaction was yet observed.
+	CompactRevision() int64
 }
+
+// KeysFunc is a function prototype to fetch keys from storage.
+type KeysFunc func(context.Context) ([]string, error)
 
 // GetOptions provides the options that may be provided for storage get operations.
 type GetOptions struct {
@@ -282,6 +317,19 @@ type ListOptions struct {
 	Recursive bool
 	// ProgressNotify determines whether storage-originated bookmark (progress notify) events should
 	// be delivered to the users. The option is ignored for non-watch requests.
+	//
+	// Firstly, note that this field is different from the Predicate.AllowWatchBookmarks field.
+	// Secondly, this field is intended for internal clients only such as the watch cache.
+	//
+	// This means that external clients do not have the ability to set this field directly.
+	// For example by setting the allowWatchBookmarks query parameter.
+	//
+	// The motivation for this approach is the fact that the frequency
+	// of bookmark events from a storage like etcd might be very high.
+	// As the number of watch requests increases, the server load would also increase.
+	//
+	// Furthermore, the server is not obligated to provide bookmark events at all,
+	// as described in https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/956-watch-bookmark#proposal
 	ProgressNotify bool
 	// SendInitialEvents, when set together with Watch option,
 	// begin the watch stream with synthetic init events to build the
@@ -289,4 +337,111 @@ type ListOptions struct {
 	// event containing a ResourceVersion after which the server
 	// continues streaming events.
 	SendInitialEvents *bool
+	// RecordTimestamps requests that the storage layer wrap each emitted watch
+	// object in a WatchEventWithRecordTime carrying its decode timestamp, for dispatch
+	// latency telemetry. This is intended for internal clients only (the watch
+	// cache); external clients cannot set it. The watch cache strips the wrapper
+	// before storing or serializing the object, so it never reaches other watchers.
+	RecordTimestamps bool
+}
+
+// WatchEventWithRecordTime wraps a runtime.Object with the timestamp at which the
+// storage layer decoded the corresponding watch event. It is produced by the
+// storage layer only when ListOptions.RecordTimestamps is set, and is consumed
+// and stripped by the watch cache before the underlying object is stored or
+// serialized. It is never sent to watch clients.
+type WatchEventWithRecordTime interface {
+	runtime.Object
+	// RecordTime returns the decode timestamp of the wrapped event.
+	RecordTime() time.Time
+	// Unwrap returns the underlying object.
+	Unwrap() runtime.Object
+}
+
+// DeleteOptions provides the options that may be provided for storage delete operations.
+type DeleteOptions struct {
+	// ExpectTransformOrDecodeError, if enabled, will return an error if the object can be
+	// transformed and decoded.
+	// NOTE: for normal deletion flow it should always be false, it may be
+	// enabled by the caller only to facilitate unsafe deletion of corrupt
+	// object which otherwise can not be deleted using the normal flow
+	ExpectTransformOrDecodeError bool
+}
+
+func ValidateListOptions(keyPrefix string, versioner Versioner, opts ListOptions) (withRev int64, continueKey string, err error) {
+	if opts.Recursive && len(opts.Predicate.Continue) > 0 {
+		continueKey, continueRV, err := DecodeContinue(opts.Predicate.Continue, keyPrefix)
+		if err != nil {
+			return 0, "", apierrors.NewBadRequest(fmt.Sprintf("invalid continue token: %v", err))
+		}
+		if len(opts.ResourceVersion) > 0 && opts.ResourceVersion != "0" {
+			return 0, "", apierrors.NewBadRequest("specifying resource version is not allowed when using continue")
+		}
+		// If continueRV > 0, the LIST request needs a specific resource version.
+		// continueRV==0 is invalid.
+		// If continueRV < 0, the request is for the latest resource version.
+		if continueRV > 0 {
+			withRev = continueRV
+		}
+		return withRev, continueKey, nil
+	}
+	if len(opts.ResourceVersion) == 0 {
+		return withRev, "", nil
+	}
+	parsedRV, err := versioner.ParseResourceVersion(opts.ResourceVersion)
+	if err != nil {
+		return withRev, "", apierrors.NewBadRequest(fmt.Sprintf("invalid resource version: %v", err))
+	}
+	switch opts.ResourceVersionMatch {
+	case metav1.ResourceVersionMatchNotOlderThan:
+		// The not older than constraint is checked after we get a response from etcd,
+		// and returnedRV is then set to the revision we get from the etcd response.
+	case metav1.ResourceVersionMatchExact:
+		withRev = int64(parsedRV)
+	case "": // legacy case
+		if opts.Recursive && opts.Predicate.Limit > 0 && parsedRV > 0 {
+			withRev = int64(parsedRV)
+		}
+	default:
+		return withRev, "", fmt.Errorf("unknown ResourceVersionMatch value: %v", opts.ResourceVersionMatch)
+	}
+	return withRev, "", nil
+}
+
+// Stats provides statistics information about storage.
+type Stats struct {
+	// ObjectCount informs about number of objects stored in the storage.
+	ObjectCount int64
+	// EstimatedAverageObjectSizeBytes informs about size of objects stored in the storage, based on size of serialized values.
+	// Value is an estimate, meaning it doesn't need to provide accurate nor consistent.
+	EstimatedAverageObjectSizeBytes int64
+}
+
+func PrepareKey(resourcePrefix, key string, recursive bool) (string, error) {
+	if key == ".." ||
+		strings.HasPrefix(key, "../") ||
+		strings.HasSuffix(key, "/..") ||
+		strings.Contains(key, "/../") {
+		return "", fmt.Errorf("invalid key: %q", key)
+	}
+	if key == "." ||
+		strings.HasPrefix(key, "./") ||
+		strings.HasSuffix(key, "/.") ||
+		strings.Contains(key, "/./") {
+		return "", fmt.Errorf("invalid key: %q", key)
+	}
+	if key == "" || key == "/" {
+		return "", fmt.Errorf("empty key: %q", key)
+	}
+	// For recursive requests, we need to make sure the key ended with "/" so that we only
+	// get children "directories". e.g. if we have key "/a", "/a/b", "/ab", getting keys
+	// with prefix "/a" will return all three, while with prefix "/a/" will return only
+	// "/a/b" which is the correct answer.
+	if recursive && !strings.HasSuffix(key, "/") {
+		key += "/"
+	}
+	if !strings.HasPrefix(key, resourcePrefix) {
+		return "", fmt.Errorf("invalid key: %q lacks resource prefix: %q", key, resourcePrefix)
+	}
+	return key, nil
 }

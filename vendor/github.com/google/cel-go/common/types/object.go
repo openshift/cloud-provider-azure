@@ -17,9 +17,12 @@ package types
 import (
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/google/cel-go/common/types/pb"
 	"github.com/google/cel-go/common/types/ref"
@@ -29,10 +32,10 @@ import (
 )
 
 type protoObj struct {
-	ref.TypeAdapter
+	Adapter
 	value     proto.Message
 	typeDesc  *pb.TypeDescription
-	typeValue *TypeValue
+	typeValue ref.Val
 }
 
 // NewObject returns an object based on a proto.Message value which handles
@@ -42,15 +45,15 @@ type protoObj struct {
 // Note: the type value is pulled from the list of registered types within the
 // type provider. If the proto type is not registered within the type provider,
 // then this will result in an error within the type adapter / provider.
-func NewObject(adapter ref.TypeAdapter,
+func NewObject(adapter Adapter,
 	typeDesc *pb.TypeDescription,
-	typeValue *TypeValue,
+	typeValue ref.Val,
 	value proto.Message) ref.Val {
 	return &protoObj{
-		TypeAdapter: adapter,
-		value:       value,
-		typeDesc:    typeDesc,
-		typeValue:   typeValue}
+		Adapter:   adapter,
+		value:     value,
+		typeDesc:  typeDesc,
+		typeValue: typeValue}
 }
 
 func (o *protoObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
@@ -68,7 +71,7 @@ func (o *protoObj) ConvertToNative(typeDesc reflect.Type) (any, error) {
 			return srcPB, nil
 		}
 		return anypb.New(srcPB)
-	case jsonValueType:
+	case JSONValueType:
 		// Marshal the proto to JSON first, and then rehydrate as protobuf.Value as there is no
 		// support for direct conversion from proto.Message to protobuf.Value.
 		bytes, err := protojson.Marshal(srcPB)
@@ -151,15 +154,47 @@ func (o *protoObj) Get(index ref.Val) ref.Val {
 	}
 	fv, err := fd.GetFrom(o.value)
 	if err != nil {
-		return NewErr(err.Error())
+		return NewErrFromString(err.Error())
 	}
 	return o.NativeToValue(fv)
 }
 
 func (o *protoObj) Type() ref.Type {
-	return o.typeValue
+	return o.typeValue.(ref.Type)
 }
 
 func (o *protoObj) Value() any {
 	return o.value
+}
+
+type protoObjField struct {
+	fd protoreflect.FieldDescriptor
+	v  protoreflect.Value
+}
+
+func (o *protoObj) format(sb *strings.Builder) {
+	var fields []protoreflect.FieldDescriptor
+	o.value.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		fields = append(fields, fd)
+		return true
+	})
+	sort.SliceStable(fields, func(i, j int) bool {
+		return fields[i].Number() < fields[j].Number()
+	})
+	sb.WriteString(o.Type().TypeName())
+	sb.WriteString("{")
+	for i, field := range fields {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		name := String(field.Name())
+		if field.IsExtension() {
+			name = String(field.FullName())
+			fmt.Fprintf(sb, "`%s`: ", name)
+		} else {
+			fmt.Fprintf(sb, "%s: ", name)
+		}
+		formatTo(sb, o.Get(name))
+	}
+	sb.WriteString("}")
 }

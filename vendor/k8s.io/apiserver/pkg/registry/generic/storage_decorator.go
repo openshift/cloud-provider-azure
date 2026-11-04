@@ -25,11 +25,12 @@ import (
 )
 
 // StorageDecorator is a function signature for producing a storage.Interface
-// and an associated DestroyFunc from given parameters.
+// and an associated DestroyFunc from given parameters. cacheKeyFunc is used by
+// cache layers to compute resource keys from objects.
 type StorageDecorator func(
 	config *storagebackend.ConfigForResource,
 	resourcePrefix string,
-	keyFunc func(obj runtime.Object) (string, error),
+	cacheKeyFunc func(obj runtime.Object) (string, error),
 	newFunc func() runtime.Object,
 	newListFunc func() runtime.Object,
 	getAttrsFunc storage.AttrFunc,
@@ -41,18 +42,18 @@ type StorageDecorator func(
 func UndecoratedStorage(
 	config *storagebackend.ConfigForResource,
 	resourcePrefix string,
-	keyFunc func(obj runtime.Object) (string, error),
+	cacheKeyFunc func(obj runtime.Object) (string, error),
 	newFunc func() runtime.Object,
 	newListFunc func() runtime.Object,
 	getAttrsFunc storage.AttrFunc,
 	trigger storage.IndexerFuncs,
 	indexers *cache.Indexers) (storage.Interface, factory.DestroyFunc, error) {
-	return NewRawStorage(config, newFunc)
+	return NewRawStorage(config, newFunc, newListFunc, resourcePrefix)
 }
 
 // NewRawStorage creates the low level kv storage. This is a work-around for current
 // two layer of same storage interface.
 // TODO: Once cacher is enabled on all registries (event registry is special), we will remove this method.
-func NewRawStorage(config *storagebackend.ConfigForResource, newFunc func() runtime.Object) (storage.Interface, factory.DestroyFunc, error) {
-	return factory.Create(*config, newFunc)
+func NewRawStorage(config *storagebackend.ConfigForResource, newFunc, newListFunc func() runtime.Object, resourcePrefix string) (storage.Interface, factory.DestroyFunc, error) {
+	return factory.Create(*config, newFunc, newListFunc, resourcePrefix)
 }

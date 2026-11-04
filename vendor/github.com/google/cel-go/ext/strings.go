@@ -21,15 +21,15 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker"
+	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
@@ -46,6 +46,8 @@ const (
 //
 // # CharAt
 //
+// Introduced at version: 0 (cost support in version 5)
+//
 // Returns the character at the given position. If the position is negative, or greater than
 // the length of the string, the function will produce an error:
 //
@@ -59,7 +61,7 @@ const (
 //
 // # Format
 //
-// Introduced at version: 1
+// Introduced at version: 1 (cost at version 5)
 //
 // Returns a new string with substitutions being performed, printf-style.
 // The valid formatting clauses are:
@@ -99,12 +101,14 @@ const (
 //	"a map inside a list: %s".format([[1, 2, 3, {"a": "x", "b": "y", "c": "z"}]]) // returns "a map inside a list: [1, 2, 3, {"a":"x", "b":"y", "c":"d"}]"
 //	"true bool: %s - false bool: %s\nbinary bool: %b".format([true, false, true]) // returns "true bool: true - false bool: false\nbinary bool: 1"
 //
-// Passing an incorrect type (an integer to `%s`) is considered an error, as well as attempting
+// Passing an incorrect type (a string to `%b`) is considered an error, as well as attempting
 // to use more formatting clauses than there are arguments (`%d %d %d` while passing two ints, for instance).
 // If compile-time checking is enabled, and the formatting string is a constant, and the argument list is a literal,
 // then letting any arguments go unused/unformatted is also considered an error.
 //
 // # IndexOf
+//
+// Introduced at version: 0 (cost support in version 5)
 //
 // Returns the integer index of the first occurrence of the search string. If the search string is
 // not found the function returns -1.
@@ -122,9 +126,12 @@ const (
 //	'hello mellow'.indexOf('jello')    // returns -1
 //	'hello mellow'.indexOf('', 2)      // returns 2
 //	'hello mellow'.indexOf('ello', 2)  // returns 7
-//	'hello mellow'.indexOf('ello', 20) // error
+//	'hello mellow'.indexOf('ello', 20) // returns -1
+//	'hello mellow'.indexOf('ello', -1) // error
 //
 // # Join
+//
+// Introduced at version: 0 (cost support in version 5)
 //
 // Returns a new string where the elements of string list are concatenated.
 //
@@ -142,6 +149,8 @@ const (
 //
 // # LastIndexOf
 //
+// Introduced at version: 0 (cost support in version 5)
+//
 // Returns the integer index at the start of the last occurrence of the search string. If the
 // search string is not found the function returns -1.
 //
@@ -158,9 +167,12 @@ const (
 //	'hello mellow'.lastIndexOf('ello')     // returns 7
 //	'hello mellow'.lastIndexOf('jello')    // returns -1
 //	'hello mellow'.lastIndexOf('ello', 6)  // returns 1
+//	'hello mellow'.lastIndexOf('ello', 20) // returns -1
 //	'hello mellow'.lastIndexOf('ello', -1) // error
 //
 // # LowerAscii
+//
+// Introduced at version: 0 (cost support in version 5)
 //
 // Returns a new string where all ASCII characters are lower-cased.
 //
@@ -173,9 +185,9 @@ const (
 //	'TacoCat'.lowerAscii()      // returns 'tacocat'
 //	'TacoCÆt Xii'.lowerAscii()  // returns 'tacocÆt xii'
 //
-// # Quote
+// # Strings.Quote
 //
-// Introduced in version: 1
+// Introduced in version: 1 (cost support in version 5)
 //
 // Takes the given string and makes it safe to print (without any formatting due to escape sequences).
 // If any invalid UTF-8 characters are encountered, they are replaced with \uFFFD.
@@ -188,6 +200,8 @@ const (
 // strings.quote("two escape sequences \a\n") // returns '"two escape sequences \\a\\n"'
 //
 // # Replace
+//
+// Introduced at version: 0 (cost support in version 5)
 //
 // Returns a new string based on the target, which replaces the occurrences of a search string
 // with a replacement string if present. The function accepts an optional limit on the number of
@@ -205,8 +219,12 @@ const (
 //	'hello hello'.replace('he', 'we', -1) // returns 'wello wello'
 //	'hello hello'.replace('he', 'we', 1)  // returns 'wello hello'
 //	'hello hello'.replace('he', 'we', 0)  // returns 'hello hello'
+//	'hello hello'.replace('', '_')  // returns '_h_e_l_l_o_ _h_e_l_l_o_'
+//	'hello hello'.replace('h', '')  // returns 'ello ello'
 //
 // # Split
+//
+// Introduced at version: 0 (cost support in version 5)
 //
 // Returns a list of strings split from the input by the given separator. The function accepts
 // an optional argument specifying a limit on the number of substrings produced by the split.
@@ -228,6 +246,8 @@ const (
 //
 // # Substring
 //
+// Introduced at version: 0 (cost support in version 5)
+//
 // Returns the substring given a numeric range corresponding to character positions. Optionally
 // may omit the trailing range for a substring from a given character position until the end of
 // a string.
@@ -248,6 +268,8 @@ const (
 //
 // # Trim
 //
+// Introduced at version: 0 (cost support in version 5)
+//
 // Returns a new string which removes the leading and trailing whitespace in the target string.
 // The trim function uses the Unicode definition of whitespace which does not include the
 // zero-width spaces. See: https://en.wikipedia.org/wiki/Whitespace_character#Unicode
@@ -260,6 +282,8 @@ const (
 //
 // # UpperAscii
 //
+// Introduced at version: 0 (cost support in version 5)
+//
 // Returns a new string where all ASCII characters are upper-cased.
 //
 // This function does not perform Unicode case-mapping for characters outside the ASCII range.
@@ -270,8 +294,31 @@ const (
 //
 //	'TacoCat'.upperAscii()      // returns 'TACOCAT'
 //	'TacoCÆt Xii'.upperAscii()  // returns 'TACOCÆT XII'
+//
+// # Reverse
+//
+// Introduced at version: 3 (cost support in version 5)
+//
+// Returns a new string whose characters are the same as the target string, only formatted in
+// reverse order.
+// This function relies on converting strings to rune arrays in order to reverse
+//
+//	<string>.reverse() -> <string>
+//
+// Examples:
+//
+//	'gums'.reverse() // returns 'smug'
+//	'John Smith'.reverse() // returns 'htimS nhoJ'
+//
+// Introduced at version: 4 (cost support in version 5)
+//
+// Formatting updated to adhere to https://github.com/google/cel-spec/blob/master/doc/extensions/strings.md.
+//
+// <string>.format(<list>) -> <string>
 func Strings(options ...StringsOption) cel.EnvOption {
-	s := &stringLib{version: math.MaxUint32}
+	s := &stringLib{
+		version: math.MaxUint32,
+	}
 	for _, o := range options {
 		s = o(s)
 	}
@@ -279,8 +326,9 @@ func Strings(options ...StringsOption) cel.EnvOption {
 }
 
 type stringLib struct {
-	locale  string
-	version uint32
+	locale       string
+	version      uint32
+	maxPrecision int
 }
 
 // LibraryName implements the SingletonLibrary interface method.
@@ -294,6 +342,8 @@ type StringsOption func(*stringLib) *stringLib
 // StringsLocale configures the library with the given locale. The locale tag will
 // be checked for validity at the time that EnvOptions are configured. If this option
 // is not passed, string.format will behave as if en_US was passed as the locale.
+//
+// If StringsVersion is greater than or equal to 4, this option is ignored.
 func StringsLocale(locale string) StringsOption {
 	return func(sl *stringLib) *stringLib {
 		sl.locale = locale
@@ -301,26 +351,48 @@ func StringsLocale(locale string) StringsOption {
 	}
 }
 
-// StringsVersion configures the version of the string library. The version limits which
-// functions are available. Only functions introduced below or equal to the given
-// version included in the library. See the library documentation to determine
-// which version a function was introduced at. If the documentation does not
-// state which version a function was introduced at, it can be assumed to be
-// introduced at version 0, when the library was first created.
-// If this option is not set, all functions are available.
-func StringsVersion(version uint32) func(lib *stringLib) *stringLib {
-	return func(sl *stringLib) *stringLib {
-		sl.version = version
-		return sl
+// StringsVersion configures the version of the string library.
+//
+// The version limits which functions are available. Only functions introduced
+// below or equal to the given version included in the library. If this option
+// is not set, all functions are available.
+//
+// See the library documentation to determine which version a function was introduced.
+// If the documentation does not state which version a function was introduced, it can
+// be assumed to be introduced at version 0, when the library was first created.
+func StringsVersion(version uint32) StringsOption {
+	return func(lib *stringLib) *stringLib {
+		lib.version = version
+		return lib
+	}
+}
+
+// StringsValidateFormatCalls validates type-checked ASTs to ensure that string.format() calls have
+// valid formatting clauses and valid argument types for each clause.
+//
+// Deprecated
+func StringsValidateFormatCalls(value bool) StringsOption {
+	return func(s *stringLib) *stringLib {
+		return s
+	}
+}
+
+// StringsMaxPrecision configures the maximum precision for floating-point format clauses.
+//
+// If not set, the default is 100 for version >= 5, and no limit for earlier versions.
+func StringsMaxPrecision(limit int) StringsOption {
+	return func(lib *stringLib) *stringLib {
+		lib.maxPrecision = limit
+		return lib
 	}
 }
 
 // CompileOptions implements the Library interface method.
-func (sl *stringLib) CompileOptions() []cel.EnvOption {
+func (lib *stringLib) CompileOptions() []cel.EnvOption {
 	formatLocale := "en_US"
-	if sl.locale != "" {
+	if lib.version < 4 && lib.locale != "" {
 		// ensure locale is properly-formed if set
-		_, err := language.Parse(sl.locale)
+		_, err := language.Parse(lib.locale)
 		if err != nil {
 			return []cel.EnvOption{
 				func(e *cel.Env) (*cel.Env, error) {
@@ -328,7 +400,7 @@ func (sl *stringLib) CompileOptions() []cel.EnvOption {
 				},
 			}
 		}
-		formatLocale = sl.locale
+		formatLocale = lib.locale
 	}
 
 	opts := []cel.EnvOption{
@@ -432,22 +504,39 @@ func (sl *stringLib) CompileOptions() []cel.EnvOption {
 					return stringOrError(upperASCII(string(s)))
 				}))),
 	}
-	if sl.version >= 1 {
-		opts = append(opts, cel.Function("format",
-			cel.MemberOverload("string_format", []*cel.Type{cel.StringType, cel.ListType(cel.DynType)}, cel.StringType,
-				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-					s := string(args[0].(types.String))
-					formatArgs := args[1].(traits.Lister)
-					return stringOrError(interpreter.ParseFormatString(s, &stringFormatter{}, &stringArgList{formatArgs}, formatLocale))
-				}))),
+	// maxPrecision is unbounded (0) for versions < 5 to maintain backward
+	// compatibility. For version >= 5, the default is 100 if not explicitly
+	// configured via StringsMaxPrecision().
+	maxPrecision := lib.maxPrecision
+	if maxPrecision == 0 && lib.version >= 5 {
+		maxPrecision = 100
+	}
+	if lib.version >= 1 {
+		if lib.version >= 4 {
+			opts = append(opts, cel.Function("format",
+				cel.MemberOverload("string_format", []*cel.Type{cel.StringType, cel.ListType(cel.DynType)}, cel.StringType,
+					cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+						s := string(args[0].(types.String))
+						formatArgs := args[1].(traits.Lister)
+						return stringOrError(parseFormatStringV2(s, &stringFormatterV2{}, &stringArgList{formatArgs}, maxPrecision))
+					}))))
+		} else {
+			opts = append(opts, cel.Function("format",
+				cel.MemberOverload("string_format", []*cel.Type{cel.StringType, cel.ListType(cel.DynType)}, cel.StringType,
+					cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+						s := string(args[0].(types.String))
+						formatArgs := args[1].(traits.Lister)
+						return stringOrError(parseFormatString(s, &stringFormatter{}, &stringArgList{formatArgs}, formatLocale, maxPrecision))
+					}))))
+		}
+		opts = append(opts,
 			cel.Function("strings.quote", cel.Overload("strings_quote", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(str ref.Val) ref.Val {
 					s := str.(types.String)
 					return stringOrError(quote(string(s)))
 				}))))
-
 	}
-	if sl.version >= 2 {
+	if lib.version >= 2 {
 		opts = append(opts,
 			cel.Function("join",
 				cel.MemberOverload("list_join", []*cel.Type{cel.ListType(cel.StringType)}, cel.StringType,
@@ -469,7 +558,7 @@ func (sl *stringLib) CompileOptions() []cel.EnvOption {
 					cel.UnaryBinding(func(list ref.Val) ref.Val {
 						l, err := list.ConvertToNative(stringListType)
 						if err != nil {
-							return types.NewErr(err.Error())
+							return types.WrapErr(err)
 						}
 						return stringOrError(join(l.([]string)))
 					})),
@@ -477,18 +566,83 @@ func (sl *stringLib) CompileOptions() []cel.EnvOption {
 					cel.BinaryBinding(func(list, delim ref.Val) ref.Val {
 						l, err := list.ConvertToNative(stringListType)
 						if err != nil {
-							return types.NewErr(err.Error())
+							return types.WrapErr(err)
 						}
 						d := delim.(types.String)
 						return stringOrError(joinSeparator(l.([]string), string(d)))
 					}))),
 		)
 	}
+	if lib.version >= 3 {
+		opts = append(opts,
+			cel.Function("reverse",
+				cel.MemberOverload("string_reverse", []*cel.Type{cel.StringType}, cel.StringType,
+					cel.UnaryBinding(func(str ref.Val) ref.Val {
+						s := str.(types.String)
+						return stringOrError(reverse(string(s)))
+					}))),
+		)
+	}
+	if lib.version >= 1 {
+		if lib.version >= 4 {
+			opts = append(opts, cel.ASTValidators(stringFormatValidatorV2{maxPrecision: maxPrecision}))
+		} else {
+			opts = append(opts, cel.ASTValidators(stringFormatValidator{maxPrecision: maxPrecision}))
+		}
+	}
+
+	if lib.version >= 5 {
+		// Cost estimators for string extension functions.
+		estimators := []checker.CostOption{
+			// Format is captured in the core cost estimator logic and needs to be extracted out.
+			checker.OverloadCostEstimate("string_char_at_int", estimateStringCharAtCost),
+			checker.OverloadCostEstimate("string_index_of_string", estimateStringSearchCost),
+			checker.OverloadCostEstimate("string_index_of_string_int", estimateStringSearchCost),
+			checker.OverloadCostEstimate("string_last_index_of_string", estimateStringSearchCost),
+			checker.OverloadCostEstimate("string_last_index_of_string_int", estimateStringSearchCost),
+			checker.OverloadCostEstimate("string_lower_ascii", estimateStringFixedTransformCost),
+			checker.OverloadCostEstimate("string_upper_ascii", estimateStringFixedTransformCost),
+			checker.OverloadCostEstimate("string_replace_string_string", estimateStringReplaceCost),
+			checker.OverloadCostEstimate("string_replace_string_string_int", estimateStringReplaceCost),
+			checker.OverloadCostEstimate("string_split_string", estimateStringSplitCost),
+			checker.OverloadCostEstimate("string_split_string_int", estimateStringSplitCost),
+			checker.OverloadCostEstimate("string_substring_int", estimateSubstringCost),
+			checker.OverloadCostEstimate("string_substring_int_int", estimateSubstringCost),
+			checker.OverloadCostEstimate("string_trim", estimateStringVariableTransformCost),
+			checker.OverloadCostEstimate("string_reverse", estimateStringFixedTransformCost),
+			checker.OverloadCostEstimate("list_join", estimateStringJoinCost),
+			checker.OverloadCostEstimate("list_join_string", estimateStringJoinCost),
+		}
+		opts = append(opts, cel.CostEstimatorOptions(estimators...))
+	}
 	return opts
 }
 
 // ProgramOptions implements the Library interface method.
-func (*stringLib) ProgramOptions() []cel.ProgramOption {
+func (lib *stringLib) ProgramOptions() []cel.ProgramOption {
+	if lib.version >= 5 {
+		return []cel.ProgramOption{
+			cel.CostTrackerOptions(
+				interpreter.OverloadCostTracker("string_char_at_int", trackStringCharAtCost),
+				interpreter.OverloadCostTracker("string_index_of_string", trackStringSearchCost),
+				interpreter.OverloadCostTracker("string_index_of_string_int", trackStringSearchCost),
+				interpreter.OverloadCostTracker("string_last_index_of_string", trackStringSearchCost),
+				interpreter.OverloadCostTracker("string_last_index_of_string_int", trackStringSearchCost),
+				interpreter.OverloadCostTracker("string_lower_ascii", trackStringTransformCost),
+				interpreter.OverloadCostTracker("string_upper_ascii", trackStringTransformCost),
+				interpreter.OverloadCostTracker("string_replace_string_string", trackStringReplaceCost),
+				interpreter.OverloadCostTracker("string_replace_string_string_int", trackStringReplaceCost),
+				interpreter.OverloadCostTracker("string_split_string", trackStringSplitCost),
+				interpreter.OverloadCostTracker("string_split_string_int", trackStringSplitCost),
+				interpreter.OverloadCostTracker("string_substring_int", trackStringTransformCost),
+				interpreter.OverloadCostTracker("string_substring_int_int", trackStringTransformCost),
+				interpreter.OverloadCostTracker("string_trim", trackStringTransformCost),
+				interpreter.OverloadCostTracker("string_reverse", trackStringTransformCost),
+				interpreter.OverloadCostTracker("list_join", trackStringJoinCost),
+				interpreter.OverloadCostTracker("list_join_string", trackStringJoinCost),
+			),
+		}
+	}
 	return []cel.ProgramOption{}
 }
 
@@ -509,14 +663,22 @@ func indexOf(str, substr string) (int64, error) {
 }
 
 func indexOfOffset(str, substr string, offset int64) (int64, error) {
+	off := int(offset)
+	if off < 0 {
+		return -1, fmt.Errorf("index out of range: %d", off)
+	}
+	runes := []rune(str)
 	if substr == "" {
+		// The empty string matches at the search offset, clamped to the end of the string.
+		if off > len(runes) {
+			return int64(len(runes)), nil
+		}
 		return offset, nil
 	}
-	off := int(offset)
-	runes := []rune(str)
 	subrunes := []rune(substr)
-	if off < 0 || off >= len(runes) {
-		return -1, fmt.Errorf("index out of range: %d", off)
+	// If the offset exceeds the length, return -1 rather than error.
+	if off >= len(runes) {
+		return -1, nil
 	}
 	for i := off; i < len(runes)-(len(subrunes)-1); i++ {
 		found := true
@@ -538,18 +700,30 @@ func lastIndexOf(str, substr string) (int64, error) {
 	if substr == "" {
 		return int64(len(runes)), nil
 	}
+
+	if len(str) < len(substr) {
+		return -1, nil
+	}
 	return lastIndexOfOffset(str, substr, int64(len(runes)-1))
 }
 
 func lastIndexOfOffset(str, substr string, offset int64) (int64, error) {
+	off := int(offset)
+	if off < 0 {
+		return -1, fmt.Errorf("index out of range: %d", off)
+	}
+	runes := []rune(str)
 	if substr == "" {
+		// The empty string matches at the search offset, clamped to the end of the string.
+		if off > len(runes) {
+			return int64(len(runes)), nil
+		}
 		return offset, nil
 	}
-	off := int(offset)
-	runes := []rune(str)
 	subrunes := []rune(substr)
-	if off < 0 || off >= len(runes) {
-		return -1, fmt.Errorf("index out of range: %d", off)
+	// If the offset is far greater than the length return -1
+	if off >= len(runes) {
+		return -1, nil
 	}
 	if off > len(runes)-len(subrunes) {
 		off = len(runes) - len(subrunes)
@@ -634,6 +808,14 @@ func upperASCII(str string) (string, error) {
 	return string(runes), nil
 }
 
+func reverse(str string) (string, error) {
+	chars := []rune(str)
+	for i, j := 0, len(chars)-1; i < j; i, j = i+1, j-1 {
+		chars[i], chars[j] = chars[j], chars[i]
+	}
+	return string(chars), nil
+}
+
 func joinSeparator(strs []string, separator string) (string, error) {
 	return strings.Join(strs, separator), nil
 }
@@ -657,238 +839,6 @@ func joinValSeparator(strs traits.Lister, separator string) (string, error) {
 		sb.WriteString(string(str))
 	}
 	return sb.String(), nil
-}
-
-type clauseImpl func(ref.Val, string) (string, error)
-
-func clauseForType(argType ref.Type) (clauseImpl, error) {
-	switch argType {
-	case types.IntType, types.UintType:
-		return formatDecimal, nil
-	case types.StringType, types.BytesType, types.BoolType, types.NullType, types.TypeType:
-		return FormatString, nil
-	case types.TimestampType, types.DurationType:
-		// special case to ensure timestamps/durations get printed as CEL literals
-		return func(arg ref.Val, locale string) (string, error) {
-			argStrVal := arg.ConvertToType(types.StringType)
-			argStr := argStrVal.Value().(string)
-			if arg.Type() == types.TimestampType {
-				return fmt.Sprintf("timestamp(%q)", argStr), nil
-			}
-			if arg.Type() == types.DurationType {
-				return fmt.Sprintf("duration(%q)", argStr), nil
-			}
-			return "", fmt.Errorf("cannot convert argument of type %s to timestamp/duration", arg.Type().TypeName())
-		}, nil
-	case types.ListType:
-		return formatList, nil
-	case types.MapType:
-		return formatMap, nil
-	case types.DoubleType:
-		// avoid formatFixed so we can output a period as the decimal separator in order
-		// to always be a valid CEL literal
-		return func(arg ref.Val, locale string) (string, error) {
-			argDouble, ok := arg.Value().(float64)
-			if !ok {
-				return "", fmt.Errorf("couldn't convert %s to float64", arg.Type().TypeName())
-			}
-			fmtStr := fmt.Sprintf("%%.%df", defaultPrecision)
-			return fmt.Sprintf(fmtStr, argDouble), nil
-		}, nil
-	case types.TypeType:
-		return func(arg ref.Val, locale string) (string, error) {
-			return fmt.Sprintf("type(%s)", arg.Value().(string)), nil
-		}, nil
-	default:
-		return nil, fmt.Errorf("no formatting function for %s", argType.TypeName())
-	}
-}
-
-func formatList(arg ref.Val, locale string) (string, error) {
-	argList := arg.(traits.Lister)
-	argIterator := argList.Iterator()
-	var listStrBuilder strings.Builder
-	_, err := listStrBuilder.WriteRune('[')
-	if err != nil {
-		return "", fmt.Errorf("error writing to list string: %w", err)
-	}
-	for argIterator.HasNext() == types.True {
-		member := argIterator.Next()
-		memberFormat, err := clauseForType(member.Type())
-		if err != nil {
-			return "", err
-		}
-		unquotedStr, err := memberFormat(member, locale)
-		if err != nil {
-			return "", err
-		}
-		str := quoteForCEL(member, unquotedStr)
-		_, err = listStrBuilder.WriteString(str)
-		if err != nil {
-			return "", fmt.Errorf("error writing to list string: %w", err)
-		}
-		if argIterator.HasNext() == types.True {
-			_, err = listStrBuilder.WriteString(", ")
-			if err != nil {
-				return "", fmt.Errorf("error writing to list string: %w", err)
-			}
-		}
-	}
-	_, err = listStrBuilder.WriteRune(']')
-	if err != nil {
-		return "", fmt.Errorf("error writing to list string: %w", err)
-	}
-	return listStrBuilder.String(), nil
-}
-
-func formatMap(arg ref.Val, locale string) (string, error) {
-	argMap := arg.(traits.Mapper)
-	argIterator := argMap.Iterator()
-	type mapPair struct {
-		key   string
-		value string
-	}
-	argPairs := make([]mapPair, argMap.Size().Value().(int64))
-	i := 0
-	for argIterator.HasNext() == types.True {
-		key := argIterator.Next()
-		var keyFormat clauseImpl
-		switch key.Type() {
-		case types.StringType, types.BoolType:
-			keyFormat = FormatString
-		case types.IntType, types.UintType:
-			keyFormat = formatDecimal
-		default:
-			return "", fmt.Errorf("no formatting function for map key of type %s", key.Type().TypeName())
-		}
-		unquotedKeyStr, err := keyFormat(key, locale)
-		if err != nil {
-			return "", err
-		}
-		keyStr := quoteForCEL(key, unquotedKeyStr)
-		value, found := argMap.Find(key)
-		if !found {
-			return "", fmt.Errorf("could not find key: %q", key)
-		}
-		valueFormat, err := clauseForType(value.Type())
-		if err != nil {
-			return "", err
-		}
-		unquotedValueStr, err := valueFormat(value, locale)
-		if err != nil {
-			return "", err
-		}
-		valueStr := quoteForCEL(value, unquotedValueStr)
-		argPairs[i] = mapPair{keyStr, valueStr}
-		i++
-	}
-	sort.SliceStable(argPairs, func(x, y int) bool {
-		return argPairs[x].key < argPairs[y].key
-	})
-	var mapStrBuilder strings.Builder
-	_, err := mapStrBuilder.WriteRune('{')
-	if err != nil {
-		return "", fmt.Errorf("error writing to map string: %w", err)
-	}
-	for i, entry := range argPairs {
-		_, err = mapStrBuilder.WriteString(fmt.Sprintf("%s:%s", entry.key, entry.value))
-		if err != nil {
-			return "", fmt.Errorf("error writing to map string: %w", err)
-		}
-		if i < len(argPairs)-1 {
-			_, err = mapStrBuilder.WriteString(", ")
-			if err != nil {
-				return "", fmt.Errorf("error writing to map string: %w", err)
-			}
-		}
-	}
-	_, err = mapStrBuilder.WriteRune('}')
-	if err != nil {
-		return "", fmt.Errorf("error writing to map string: %w", err)
-	}
-	return mapStrBuilder.String(), nil
-}
-
-// quoteForCEL takes a formatted, unquoted value and quotes it in a manner
-// suitable for embedding directly in CEL.
-func quoteForCEL(refVal ref.Val, unquotedValue string) string {
-	switch refVal.Type() {
-	case types.StringType:
-		return fmt.Sprintf("%q", unquotedValue)
-	case types.BytesType:
-		return fmt.Sprintf("b%q", unquotedValue)
-	case types.DoubleType:
-		// special case to handle infinity/NaN
-		num := refVal.Value().(float64)
-		if math.IsInf(num, 1) || math.IsInf(num, -1) || math.IsNaN(num) {
-			return fmt.Sprintf("%q", unquotedValue)
-		}
-		return unquotedValue
-	default:
-		return unquotedValue
-	}
-}
-
-// FormatString returns the string representation of a CEL value.
-// It is used to implement the %s specifier in the (string).format() extension
-// function.
-func FormatString(arg ref.Val, locale string) (string, error) {
-	switch arg.Type() {
-	case types.ListType:
-		return formatList(arg, locale)
-	case types.MapType:
-		return formatMap(arg, locale)
-	case types.IntType, types.UintType, types.DoubleType,
-		types.BoolType, types.StringType, types.TimestampType, types.BytesType, types.DurationType, types.TypeType:
-		argStrVal := arg.ConvertToType(types.StringType)
-		argStr, ok := argStrVal.Value().(string)
-		if !ok {
-			return "", fmt.Errorf("could not convert argument %q to string", argStrVal)
-		}
-		return argStr, nil
-	case types.NullType:
-		return "null", nil
-	default:
-		return "", fmt.Errorf("string clause can only be used on strings, bools, bytes, ints, doubles, maps, lists, types, durations, and timestamps, was given %s", arg.Type().TypeName())
-	}
-}
-
-func formatDecimal(arg ref.Val, locale string) (string, error) {
-	switch arg.Type() {
-	case types.IntType:
-		argInt, ok := arg.ConvertToType(types.IntType).Value().(int64)
-		if !ok {
-			return "", fmt.Errorf("could not convert \"%s\" to int64", arg.Value())
-		}
-		return fmt.Sprintf("%d", argInt), nil
-	case types.UintType:
-		argInt, ok := arg.ConvertToType(types.UintType).Value().(uint64)
-		if !ok {
-			return "", fmt.Errorf("could not convert \"%s\" to uint64", arg.Value())
-		}
-		return fmt.Sprintf("%d", argInt), nil
-	default:
-		return "", fmt.Errorf("decimal clause can only be used on integers, was given %s", arg.Type().TypeName())
-	}
-}
-
-func matchLanguage(locale string) (language.Tag, error) {
-	matcher, err := makeMatcher(locale)
-	if err != nil {
-		return language.Und, err
-	}
-	tag, _ := language.MatchStrings(matcher, locale)
-	return tag, nil
-}
-
-func makeMatcher(locale string) (language.Matcher, error) {
-	tags := make([]language.Tag, 0)
-	tag, err := language.Parse(locale)
-	if err != nil {
-		return nil, err
-	}
-	tags = append(tags, tag)
-	return language.NewMatcher(tags), nil
 }
 
 // quote implements a string quoting function. The string will be wrapped in
@@ -938,156 +888,197 @@ func sanitize(s string) string {
 	return sanitizedStringBuilder.String()
 }
 
-type stringFormatter struct{}
-
-func (c *stringFormatter) String(arg ref.Val, locale string) (string, error) {
-	return FormatString(arg, locale)
-}
-
-func (c *stringFormatter) Decimal(arg ref.Val, locale string) (string, error) {
-	return formatDecimal(arg, locale)
-}
-
-func (c *stringFormatter) Fixed(precision *int) func(ref.Val, string) (string, error) {
-	if precision == nil {
-		precision = new(int)
-		*precision = defaultPrecision
-	}
-	return func(arg ref.Val, locale string) (string, error) {
-		strException := false
-		if arg.Type() == types.StringType {
-			argStr := arg.Value().(string)
-			if argStr == "NaN" || argStr == "Infinity" || argStr == "-Infinity" {
-				strException = true
-			}
-		}
-		if arg.Type() != types.DoubleType && !strException {
-			return "", fmt.Errorf("fixed-point clause can only be used on doubles, was given %s", arg.Type().TypeName())
-		}
-		argFloatVal := arg.ConvertToType(types.DoubleType)
-		argFloat, ok := argFloatVal.Value().(float64)
-		if !ok {
-			return "", fmt.Errorf("could not convert \"%s\" to float64", argFloatVal.Value())
-		}
-		fmtStr := fmt.Sprintf("%%.%df", *precision)
-
-		matchedLocale, err := matchLanguage(locale)
-		if err != nil {
-			return "", fmt.Errorf("error matching locale: %w", err)
-		}
-		return message.NewPrinter(matchedLocale).Sprintf(fmtStr, argFloat), nil
-	}
-}
-
-func (c *stringFormatter) Scientific(precision *int) func(ref.Val, string) (string, error) {
-	if precision == nil {
-		precision = new(int)
-		*precision = defaultPrecision
-	}
-	return func(arg ref.Val, locale string) (string, error) {
-		strException := false
-		if arg.Type() == types.StringType {
-			argStr := arg.Value().(string)
-			if argStr == "NaN" || argStr == "Infinity" || argStr == "-Infinity" {
-				strException = true
-			}
-		}
-		if arg.Type() != types.DoubleType && !strException {
-			return "", fmt.Errorf("scientific clause can only be used on doubles, was given %s", arg.Type().TypeName())
-		}
-		argFloatVal := arg.ConvertToType(types.DoubleType)
-		argFloat, ok := argFloatVal.Value().(float64)
-		if !ok {
-			return "", fmt.Errorf("could not convert \"%s\" to float64", argFloatVal.Value())
-		}
-		matchedLocale, err := matchLanguage(locale)
-		if err != nil {
-			return "", fmt.Errorf("error matching locale: %w", err)
-		}
-		fmtStr := fmt.Sprintf("%%%de", *precision)
-		return message.NewPrinter(matchedLocale).Sprintf(fmtStr, argFloat), nil
-	}
-}
-
-func (c *stringFormatter) Binary(arg ref.Val, locale string) (string, error) {
-	switch arg.Type() {
-	case types.IntType:
-		argInt := arg.Value().(int64)
-		// locale is intentionally unused as integers formatted as binary
-		// strings are locale-independent
-		return fmt.Sprintf("%b", argInt), nil
-	case types.UintType:
-		argInt := arg.Value().(uint64)
-		return fmt.Sprintf("%b", argInt), nil
-	case types.BoolType:
-		argBool := arg.Value().(bool)
-		if argBool {
-			return "1", nil
-		}
-		return "0", nil
-	default:
-		return "", fmt.Errorf("only integers and bools can be formatted as binary, was given %s", arg.Type().TypeName())
-	}
-}
-
-func (c *stringFormatter) Hex(useUpper bool) func(ref.Val, string) (string, error) {
-	return func(arg ref.Val, locale string) (string, error) {
-		fmtStr := "%x"
-		if useUpper {
-			fmtStr = "%X"
-		}
-		switch arg.Type() {
-		case types.StringType, types.BytesType:
-			if arg.Type() == types.BytesType {
-				return fmt.Sprintf(fmtStr, arg.Value().([]byte)), nil
-			}
-			return fmt.Sprintf(fmtStr, arg.Value().(string)), nil
-		case types.IntType:
-			argInt, ok := arg.Value().(int64)
-			if !ok {
-				return "", fmt.Errorf("could not convert \"%s\" to int64", arg.Value())
-			}
-			return fmt.Sprintf(fmtStr, argInt), nil
-		case types.UintType:
-			argInt, ok := arg.Value().(uint64)
-			if !ok {
-				return "", fmt.Errorf("could not convert \"%s\" to uint64", arg.Value())
-			}
-			return fmt.Sprintf(fmtStr, argInt), nil
-		default:
-			return "", fmt.Errorf("only integers, byte buffers, and strings can be formatted as hex, was given %s", arg.Type().TypeName())
-		}
-	}
-}
-
-func (c *stringFormatter) Octal(arg ref.Val, locale string) (string, error) {
-	switch arg.Type() {
-	case types.IntType:
-		argInt := arg.Value().(int64)
-		return fmt.Sprintf("%o", argInt), nil
-	case types.UintType:
-		argInt := arg.Value().(uint64)
-		return fmt.Sprintf("%o", argInt), nil
-	default:
-		return "", fmt.Errorf("octal clause can only be used on integers, was given %s", arg.Type().TypeName())
-	}
-}
-
-type stringArgList struct {
-	args traits.Lister
-}
-
-func (c *stringArgList) Arg(index int64) (ref.Val, error) {
-	if index >= c.args.Size().Value().(int64) {
-		return nil, fmt.Errorf("index %d out of range", index)
-	}
-	return c.args.Get(types.Int(index)), nil
-}
-
-func (c *stringArgList) ArgSize() int64 {
-	return c.args.Size().Value().(int64)
-}
-
 var (
-	stringListType = reflect.TypeOf([]string{})
+	stringListType = reflect.TypeFor[[]string]()
 )
+
+// Cost estimation functions for string extensions.
+//
+// These functions provide compile-time cost estimates proportional to the size of
+// the input string(s), ensuring that the CEL cost system accurately reflects the
+// computational work performed by string operations.
+
+// estimateStringFixedTransformCost estimates cost for O(n) string operations such as
+// lowerAscii, upperAsciil, reverse and quote.
+func estimateStringFixedTransformCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil {
+		return nil
+	}
+	cost, size := estimateStringScan(estimateSize(estimator, *target))
+	return callEstimate(cost.Add(callCostEstimate).Add(size.AsCost()), size)
+}
+
+// estimateStringVariableTransformCost estimates cost for O(n) string operations that result
+// in a variable sized string which may be empty to the exact input string.
+func estimateStringVariableTransformCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil {
+		return nil
+	}
+	cost, size := estimateStringScan(estimateSize(estimator, *target))
+	transformSize := rangedSizeEstimate(0, size.Max)
+	return callEstimate(cost.Add(callCostEstimate).Add(transformSize.AsCost()), &transformSize)
+}
+
+// estimateStringCharAtCost includes a cost of 1 for the allocation, plus the string traversal cost.
+func estimateStringCharAtCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) != 1 {
+		return nil
+	}
+	cost, _ := estimateStringScan(estimateSize(estimator, *target))
+	resultSize := rangedSizeEstimate(0, 1)
+	return callEstimate(cost.Add(callCostEstimate).Add(callCostEstimate), &resultSize)
+}
+
+// estimateSubstringCost estimates the cost for an O(n) traversal and allocation.
+func estimateSubstringCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) < 1 || len(args) > 2 {
+		return nil
+	}
+	targetSize := estimateSize(estimator, *target)
+	cost, _ := estimateStringScan(targetSize)
+
+	start := nodeAsUintValue(args[0], 0)
+	end := targetSize.Max
+	if len(args) == 2 {
+		end = nodeAsUintValue(args[1], end)
+	}
+	resultSize := fixedSizeEstimate(end - start)
+	return callEstimate(cost.Add(callCostEstimate).Add(resultSize.AsCost()), &resultSize)
+}
+
+// estimateStringSearchCost estimates cost for O(n*m) string search operations
+// such as indexOf and lastIndexOf.
+func estimateStringSearchCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) < 1 {
+		return nil
+	}
+	targetSize := estimateSize(estimator, *target)
+	needleSize := estimateSize(estimator, args[0])
+	searchSize := targetSize.Multiply(needleSize)
+	searchCost, _ := estimateStringScan(searchSize)
+	// Search cost is proportional to target size * substring size.
+	return callEstimate(searchCost.Add(callCostEstimate), nil)
+}
+
+// estimateStringReplaceCost estimates cost for string replace operations.
+// The cost accounts for search (O(n*m)) and potential output size growth.
+func estimateStringReplaceCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) < 2 {
+		return nil
+	}
+	// Compute the search for the replacement string, by 'm' times
+	targetSize := estimateSize(estimator, *target)
+	needleSize := atLeastOne(estimateSize(estimator, args[0]))
+	searchCost := atLeastOne(targetSize).Multiply(needleSize).MultiplyByCostFactor(stringCostFactor)
+
+	replacementSize := estimateSize(estimator, args[1]).Add(fixedSizeEstimate(1))
+	allReplacedSize := safeMul(safeAdd(targetSize.Max, 1), replacementSize.Max)
+	resultMinSize := targetSize.Min
+	if resultMinSize > replacementSize.Min {
+		resultMinSize = replacementSize.Min
+	}
+	resultSize := rangedSizeEstimate(resultMinSize, allReplacedSize)
+	return callEstimate(
+		searchCost.Add(resultSize.AsCost()).Add(callCostEstimate), &resultSize,
+	)
+}
+
+// estimateStringSplitCost estimates cost for string split operations.
+// Split creates a list of substrings, so cost includes both traversal and
+// list allocation proportional to the input size.
+func estimateStringSplitCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil || len(args) < 1 {
+		return nil
+	}
+	targetSize := estimateSize(estimator, *target)
+	// Traversal cost proportional to input size.
+	traversalCost := targetSize.Add(fixedSizeEstimate(1)).MultiplyByCostFactor(stringCostFactor)
+	// Worst case: split("") produces N elements for a string of size N.
+	resultSize := rangedSizeEstimate(0, targetSize.Max)
+	// Include list creation base cost plus allocation for each element.
+	allocationCost := resultSize.MultiplyByCostFactor(1).Add(checker.FixedCostEstimate(common.ListCreateBaseCost))
+	cost := traversalCost.Add(allocationCost).Add(callCostEstimate)
+	return callEstimate(cost, &resultSize)
+}
+
+// estimateStringJoinCost estimates cost for string join operations.
+// Join iterates over all list elements and concatenates them, so cost is
+// proportional to the total size of all elements plus separator overhead.
+func estimateStringJoinCost(estimator checker.CostEstimator, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {
+	if target == nil {
+		return nil
+	}
+	targetSize := estimateSize(estimator, *target)
+	sepSize := fixedSizeEstimate(0)
+	if len(args) >= 1 {
+		sepSize = estimateSize(estimator, args[0])
+	}
+	// Traversal cost proportional to the number of list elements.
+	traversalCost := targetSize.Add(fixedSizeEstimate(1)).MultiplyByCostFactor(stringCostFactor)
+	// Result size: sum of element sizes + (n-1) * separator size.
+	// Worst case estimate: use list size * max element size + list size * separator size.
+	maxResultSize := safeAdd(safeMul(targetSize.Max, (safeAdd(1, sepSize.Max))), sepSize.Max)
+	resultSize := rangedSizeEstimate(0, maxResultSize)
+	cost := traversalCost.Add(resultSize.MultiplyByCostFactor(1)).Add(callCostEstimate)
+	return callEstimate(cost, &resultSize)
+}
+
+// Runtime cost tracking functions for string extensions.
+//
+// These functions compute the actual cost of string operations after evaluation,
+// using the real sizes of the inputs and outputs.
+
+// trackStringCharAtCost tracks runtime cost for O(n) string operations.
+func trackStringCharAtCost(args []ref.Val, result ref.Val) *uint64 {
+	size := float64(actualSize(args[0])) * stringCostFactor
+	cost := safeAdd(callCost, uint64(math.Ceil(size)), 1)
+	return &cost
+}
+
+// trackStringTransformCost tracks runtime cost for O(n) string operations.
+func trackStringTransformCost(args []ref.Val, result ref.Val) *uint64 {
+	transformCost := math.Ceil(float64(actualSize(args[0])) * stringCostFactor)
+	resultSize := actualSize(result)
+	cost := safeAdd(callCost, uint64(transformCost), resultSize)
+	return &cost
+}
+
+// trackStringSearchCost tracks runtime cost for O(n*m) string search operations.
+func trackStringSearchCost(args []ref.Val, _ ref.Val) *uint64 {
+	searchCost := float64(actualSize(args[0])*actualSize(args[1])) * stringCostFactor
+	cost := safeAdd(uint64(math.Ceil(searchCost)), callCost)
+	return &cost
+}
+
+// trackStringReplaceCost tracks runtime cost for string replace operations,
+// accounting for search cost and the size of the result.
+func trackStringReplaceCost(args []ref.Val, result ref.Val) *uint64 {
+	targetSize := actualSize(args[0])
+	if targetSize == 0 {
+		targetSize = 1
+	}
+	needleSize := actualSize(args[1])
+	if needleSize == 0 {
+		needleSize = 1
+	}
+	searchCost := uint64(math.Ceil(float64(targetSize*needleSize) * stringCostFactor))
+	cost := safeAdd(callCost, searchCost, actualSize(result))
+	return &cost
+}
+
+// trackStringSplitCost tracks runtime cost for string split operations,
+// accounting for traversal and list allocation.
+func trackStringSplitCost(args []ref.Val, result ref.Val) *uint64 {
+	traversalCost := float64(safeAdd(actualSize(args[0]), 1)) * stringCostFactor
+	resultSize := actualSize(result)
+	cost := safeAdd(callCost, uint64(math.Ceil(traversalCost)), resultSize, common.ListCreateBaseCost)
+	return &cost
+}
+
+// trackStringJoinCost tracks runtime cost for string join operations,
+// accounting for traversal and the size of the result.
+func trackStringJoinCost(args []ref.Val, result ref.Val) *uint64 {
+	traversalCost := float64(safeAdd(actualSize(args[0]), 1)) * stringCostFactor
+	cost := safeAdd(callCost, uint64(math.Ceil(traversalCost)), actualSize(result))
+	return &cost
+}

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -60,11 +59,11 @@ func ReadAdmissionConfiguration(pluginNames []string, configFilePath string, con
 		return configProvider{config: &apiserver.AdmissionConfiguration{}}, nil
 	}
 	// a file was provided, so we just read it.
-	data, err := ioutil.ReadFile(configFilePath)
+	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read admission control configuration from %q [%v]", configFilePath, err)
 	}
-	codecs := serializer.NewCodecFactory(configScheme)
+	codecs := serializer.NewCodecFactory(configScheme, serializer.EnableStrict)
 	decoder := codecs.UniversalDecoder()
 	decodedObj, err := runtime.Decode(decoder, data)
 	// we were able to decode the file successfully
@@ -109,7 +108,7 @@ func ReadAdmissionConfiguration(pluginNames []string, configFilePath string, con
 	// in order to preserve backwards compatibility, we set plugins that
 	// previously read input from a non-versioned file configuration to the
 	// current input file.
-	legacyPluginsWithUnversionedConfig := sets.NewString("ImagePolicyWebhook", "PodNodeSelector")
+	legacyPluginsWithUnversionedConfig := sets.New[string]("ImagePolicyWebhook", "PodNodeSelector")
 	externalConfig := &apiserverv1.AdmissionConfiguration{}
 	for _, pluginName := range pluginNames {
 		if legacyPluginsWithUnversionedConfig.Has(pluginName) {
@@ -141,7 +140,7 @@ func GetAdmissionPluginConfigurationFor(pluginCfg apiserver.AdmissionPluginConfi
 	}
 	// there is nothing nested, so we delegate to path
 	if pluginCfg.Path != "" {
-		content, err := ioutil.ReadFile(pluginCfg.Path)
+		content, err := os.ReadFile(pluginCfg.Path)
 		if err != nil {
 			klog.Fatalf("Couldn't open admission plugin configuration %s: %#v", pluginCfg.Path, err)
 			return nil, err

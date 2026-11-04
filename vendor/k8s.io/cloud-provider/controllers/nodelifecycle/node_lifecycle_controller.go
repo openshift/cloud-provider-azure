@@ -14,14 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cloud
+package nodelifecycle
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -33,6 +34,7 @@ import (
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	v1lister "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	cloudprovider "k8s.io/cloud-provider"
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	cloudnodeutil "k8s.io/cloud-provider/node/helpers"
@@ -42,7 +44,12 @@ import (
 )
 
 const (
-	deleteNodeEvent = "DeletingNode"
+	deleteNodeEvent       = "DeletingNode"
+	deleteNodeFailedEvent = "DeletingNodeFailed"
+
+	instanceExistsOp   = "instance_exists"
+	instanceShutdownOp = "instance_shutdown"
+	instanceMetadataOp = "instance_metadata"
 )
 
 var ShutdownTaint = &v1.Taint{
@@ -65,16 +72,19 @@ type CloudNodeLifecycleController struct {
 	// check node status posted from kubelet. This value should be lower than nodeMonitorGracePeriod
 	// set in controller-manager
 	nodeMonitorPeriod time.Duration
+
+	// Value controlling NodeController monitoring loop worker number.
+	concurrentNodeLifecycleSyncs int
 }
 
 func NewCloudNodeLifecycleController(
 	nodeInformer coreinformers.NodeInformer,
 	kubeClient clientset.Interface,
 	cloud cloudprovider.Interface,
-	nodeMonitorPeriod time.Duration) (*CloudNodeLifecycleController, error) {
+	nodeMonitorPeriod time.Duration,
+	concurrentNodeLifecycleSyncs int) (*CloudNodeLifecycleController, error) {
 
-	eventBroadcaster := record.NewBroadcaster()
-	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "cloud-node-lifecycle-controller"})
+	registerMetrics()
 
 	if kubeClient == nil {
 		return nil, errors.New("kubernetes client is nil")
@@ -90,13 +100,16 @@ func NewCloudNodeLifecycleController(
 		return nil, errors.New("cloud provider does not support instances")
 	}
 
+	if concurrentNodeLifecycleSyncs < 1 {
+		return nil, fmt.Errorf("concurrentNodeLifecycleSyncs must be >= 1, got %d", concurrentNodeLifecycleSyncs)
+	}
+
 	c := &CloudNodeLifecycleController{
-		kubeClient:        kubeClient,
-		nodeLister:        nodeInformer.Lister(),
-		broadcaster:       eventBroadcaster,
-		recorder:          recorder,
-		cloud:             cloud,
-		nodeMonitorPeriod: nodeMonitorPeriod,
+		kubeClient:                   kubeClient,
+		nodeLister:                   nodeInformer.Lister(),
+		cloud:                        cloud,
+		nodeMonitorPeriod:            nodeMonitorPeriod,
+		concurrentNodeLifecycleSyncs: concurrentNodeLifecycleSyncs,
 	}
 
 	return c, nil
@@ -105,6 +118,9 @@ func NewCloudNodeLifecycleController(
 // Run starts the main loop for this controller. Run is blocking so should
 // be called via a goroutine
 func (c *CloudNodeLifecycleController) Run(ctx context.Context, controllerManagerMetrics *controllersmetrics.ControllerManagerMetrics) {
+	c.broadcaster = record.NewBroadcaster(record.WithContext(ctx))
+	c.recorder = c.broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "cloud-node-lifecycle-controller"})
+
 	defer utilruntime.HandleCrash()
 	controllerManagerMetrics.ControllerStarted("cloud-node-lifecycle")
 	defer controllerManagerMetrics.ControllerStopped("cloud-node-lifecycle")
@@ -128,13 +144,16 @@ func (c *CloudNodeLifecycleController) Run(ctx context.Context, controllerManage
 // or shutdown. If deleted, it deletes the node resource. If shutdown it
 // applies a shutdown taint to the node
 func (c *CloudNodeLifecycleController) MonitorNodes(ctx context.Context) {
+	startTime := time.Now()
+
 	nodes, err := c.nodeLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("error listing nodes from cache: %s", err)
 		return
 	}
 
-	for _, node := range nodes {
+	processNode := func(piece int) {
+		node := nodes[piece].DeepCopy()
 		// Default NodeReady status to v1.ConditionUnknown
 		status := v1.ConditionUnknown
 		if _, c := nodeutil.GetNodeCondition(&node.Status, v1.NodeReady); c != nil {
@@ -143,19 +162,18 @@ func (c *CloudNodeLifecycleController) MonitorNodes(ctx context.Context) {
 
 		if status == v1.ConditionTrue {
 			// if taint exist remove taint
-			err = cloudnodeutil.RemoveTaintOffNode(c.kubeClient, node.Name, node, ShutdownTaint)
-			if err != nil {
+			if err := cloudnodeutil.RemoveTaintOffNode(c.kubeClient, node.Name, node, ShutdownTaint); err != nil {
 				klog.Errorf("error patching node taints: %v", err)
 			}
-			continue
+			return
 		}
 
 		// At this point the node has NotReady status, we need to check if the node has been removed
 		// from the cloud provider. If node cannot be found in cloudprovider, then delete the node
-		exists, err := ensureNodeExistsByProviderID(ctx, c.cloud, node)
+		exists, err := c.ensureNodeExistsByProviderID(ctx, node)
 		if err != nil {
 			klog.Errorf("error checking if node %s exists: %v", node.Name, err)
-			continue
+			return
 		}
 
 		if !exists {
@@ -164,10 +182,11 @@ func (c *CloudNodeLifecycleController) MonitorNodes(ctx context.Context) {
 			klog.V(2).Infof("deleting node since it is no longer present in cloud provider: %s", node.Name)
 
 			ref := &v1.ObjectReference{
-				Kind:      "Node",
-				Name:      node.Name,
-				UID:       types.UID(node.UID),
-				Namespace: "",
+				APIVersion: "v1",
+				Kind:       "Node",
+				Name:       node.Name,
+				UID:        node.UID,
+				Namespace:  "",
 			}
 
 			c.recorder.Eventf(ref, v1.EventTypeNormal, deleteNodeEvent,
@@ -175,40 +194,82 @@ func (c *CloudNodeLifecycleController) MonitorNodes(ctx context.Context) {
 
 			if err := c.kubeClient.CoreV1().Nodes().Delete(ctx, node.Name, metav1.DeleteOptions{}); err != nil {
 				klog.Errorf("unable to delete node %q: %v", node.Name, err)
+				c.recorder.Eventf(ref, v1.EventTypeWarning, deleteNodeFailedEvent,
+					"Failed deleting node %s: %v", node.Name, err)
 			}
 		} else {
 			// Node exists. We need to check this to get taint working in similar in all cloudproviders
 			// current problem is that shutdown nodes are not working in similar way ie. all cloudproviders
 			// does not delete node from kubernetes cluster when instance it is shutdown see issue #46442
-			shutdown, err := shutdownInCloudProvider(ctx, c.cloud, node)
+			shutdown, err := c.shutdownInCloudProvider(ctx, node)
 			if err != nil {
 				klog.Errorf("error checking if node %s is shutdown: %v", node.Name, err)
+				return
 			}
 
-			if shutdown && err == nil {
+			if shutdown {
 				// if node is shutdown add shutdown taint
-				err = cloudnodeutil.AddOrUpdateTaintOnNode(c.kubeClient, node.Name, ShutdownTaint)
-				if err != nil {
+				if err := cloudnodeutil.AddOrUpdateTaintOnNode(c.kubeClient, node.Name, ShutdownTaint); err != nil {
 					klog.Errorf("failed to apply shutdown taint to node %s, it may have been deleted.", node.Name)
 				}
 			}
 		}
 	}
+
+	workqueue.ParallelizeUntil(ctx, c.concurrentNodeLifecycleSyncs, len(nodes), processNode)
+
+	duration := time.Since(startTime).Seconds()
+	monitorNodesDuration.Observe(duration)
+}
+
+// getProviderID returns the provider ID for the node. If Node CR has no provider ID,
+// it will be the one from the cloud provider.
+func (c *CloudNodeLifecycleController) getProviderID(ctx context.Context, node *v1.Node) (string, error) {
+	if node.Spec.ProviderID != "" {
+		return node.Spec.ProviderID, nil
+	}
+
+	if instanceV2, ok := c.cloud.InstancesV2(); ok {
+		metadata, err := instanceV2.InstanceMetadata(ctx, node)
+		observeInstanceOp(instanceMetadataOp, err)
+		if err != nil {
+			return "", err
+		}
+		return metadata.ProviderID, nil
+	}
+
+	providerID, err := cloudprovider.GetInstanceProviderID(ctx, c.cloud, types.NodeName(node.Name))
+	observeInstanceOp(instanceMetadataOp, err)
+	if err != nil {
+		return "", err
+	}
+	return providerID, nil
 }
 
 // shutdownInCloudProvider returns true if the node is shutdown on the cloud provider
-func shutdownInCloudProvider(ctx context.Context, cloud cloudprovider.Interface, node *v1.Node) (bool, error) {
-	if instanceV2, ok := cloud.InstancesV2(); ok {
-		return instanceV2.InstanceShutdown(ctx, node)
+func (c *CloudNodeLifecycleController) shutdownInCloudProvider(ctx context.Context, node *v1.Node) (bool, error) {
+	if instanceV2, ok := c.cloud.InstancesV2(); ok {
+		shutdown, err := instanceV2.InstanceShutdown(ctx, node)
+		observeInstanceOp(instanceShutdownOp, err)
+		return shutdown, err
 	}
 
-	instances, ok := cloud.Instances()
+	instances, ok := c.cloud.Instances()
 	if !ok {
 		return false, errors.New("cloud provider does not support instances")
 	}
 
-	shutdown, err := instances.InstanceShutdownByProviderID(ctx, node.Spec.ProviderID)
-	if err == cloudprovider.NotImplemented {
+	providerID, err := c.getProviderID(ctx, node)
+	if err != nil {
+		if errors.Is(err, cloudprovider.InstanceNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	shutdown, err := instances.InstanceShutdownByProviderID(ctx, providerID)
+	observeInstanceOp(instanceShutdownOp, err)
+	if errors.Is(err, cloudprovider.NotImplemented) {
 		return false, nil
 	}
 
@@ -216,33 +277,50 @@ func shutdownInCloudProvider(ctx context.Context, cloud cloudprovider.Interface,
 }
 
 // ensureNodeExistsByProviderID checks if the instance exists by the provider id,
-// If provider id in spec is empty it calls instanceId with node name to get provider id
-func ensureNodeExistsByProviderID(ctx context.Context, cloud cloudprovider.Interface, node *v1.Node) (bool, error) {
-	if instanceV2, ok := cloud.InstancesV2(); ok {
-		return instanceV2.InstanceExists(ctx, node)
+func (c *CloudNodeLifecycleController) ensureNodeExistsByProviderID(ctx context.Context, node *v1.Node) (bool, error) {
+	if instanceV2, ok := c.cloud.InstancesV2(); ok {
+		exists, err := instanceV2.InstanceExists(ctx, node)
+		if err == nil && !exists {
+			observeInstanceOp(instanceExistsOp, cloudprovider.InstanceNotFound)
+		} else {
+			observeInstanceOp(instanceExistsOp, err)
+		}
+		return exists, err
 	}
 
-	instances, ok := cloud.Instances()
+	instances, ok := c.cloud.Instances()
 	if !ok {
 		return false, errors.New("instances interface not supported in the cloud provider")
 	}
 
-	providerID := node.Spec.ProviderID
-	if providerID == "" {
-		var err error
-		providerID, err = instances.InstanceID(ctx, types.NodeName(node.Name))
-		if err != nil {
-			if err == cloudprovider.InstanceNotFound {
-				return false, nil
-			}
-			return false, err
-		}
-
-		if providerID == "" {
-			klog.Warningf("Cannot find valid providerID for node name %q, assuming non existence", node.Name)
+	providerID, err := c.getProviderID(ctx, node)
+	if err != nil {
+		if errors.Is(err, cloudprovider.InstanceNotFound) {
 			return false, nil
 		}
+		return false, err
 	}
 
-	return instances.InstanceExistsByProviderID(ctx, providerID)
+	exists, err := instances.InstanceExistsByProviderID(ctx, providerID)
+	if err == nil && !exists {
+		observeInstanceOp(instanceExistsOp, cloudprovider.InstanceNotFound)
+	} else {
+		observeInstanceOp(instanceExistsOp, err)
+	}
+	return exists, err
+}
+
+func observeInstanceOp(operation string, err error) {
+	result := "success"
+	switch {
+	case errors.Is(err, cloudprovider.NotImplemented):
+		result = "not_implemented"
+	case errors.Is(err, cloudprovider.InstanceNotFound):
+		result = "instance_not_found"
+	case errors.Is(err, context.Canceled):
+		result = "canceled"
+	case err != nil:
+		result = "error"
+	}
+	cloudProviderCalls.WithLabelValues(operation, result).Inc()
 }

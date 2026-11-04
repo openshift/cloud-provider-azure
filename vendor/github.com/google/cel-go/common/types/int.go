@@ -19,10 +19,10 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
 
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -41,16 +41,6 @@ const (
 )
 
 var (
-	// IntType singleton.
-	IntType = NewTypeValue("int",
-		traits.AdderType,
-		traits.ComparerType,
-		traits.DividerType,
-		traits.ModderType,
-		traits.MultiplierType,
-		traits.NegatorType,
-		traits.SubtractorType)
-
 	// int32WrapperType reflected type for protobuf int32 wrapper type.
 	int32WrapperType = reflect.TypeOf(&wrapperspb.Int32Value{})
 
@@ -101,6 +91,18 @@ func (i Int) ConvertToNative(typeDesc reflect.Type) (any, error) {
 			return nil, err
 		}
 		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
+	case reflect.Int8:
+		v, err := int64ToInt8Checked(int64(i))
+		if err != nil {
+			return nil, err
+		}
+		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
+	case reflect.Int16:
+		v, err := int64ToInt16Checked(int64(i))
+		if err != nil {
+			return nil, err
+		}
+		return reflect.ValueOf(v).Convert(typeDesc).Interface(), nil
 	case reflect.Int64:
 		return reflect.ValueOf(i).Convert(typeDesc).Interface(), nil
 	case reflect.Ptr:
@@ -118,7 +120,7 @@ func (i Int) ConvertToNative(typeDesc reflect.Type) (any, error) {
 		case int64WrapperType:
 			// Convert the value to a wrapperspb.Int64Value.
 			return wrapperspb.Int64(int64(i)), nil
-		case jsonValueType:
+		case JSONValueType:
 			// The proto-to-JSON conversion rules would convert all 64-bit integer values to JSON
 			// decimal strings. Because CEL ints might come from the automatic widening of 32-bit
 			// values in protos, the JSON type is chosen dynamically based on the value.
@@ -287,6 +289,10 @@ func (i Int) Type() ref.Type {
 // Value implements ref.Val.Value.
 func (i Int) Value() any {
 	return int64(i)
+}
+
+func (i Int) format(sb *strings.Builder) {
+	sb.WriteString(strconv.FormatInt(int64(i), 10))
 }
 
 // isJSONSafe indicates whether the int is safely representable as a floating point value in JSON.

@@ -40,68 +40,92 @@ type description interface {
 
 // newTypeDescription produces a TypeDescription value for the fully-qualified proto type name
 // with a given descriptor.
-func newTypeDescription(typeName string, desc protoreflect.MessageDescriptor, extensions extensionMap) *TypeDescription {
+func newTypeDescription(typeName string, desc protoreflect.MessageDescriptor, pbdb *Db) *TypeDescription {
 	msgType := dynamicpb.NewMessageType(desc)
 	msgZero := dynamicpb.NewMessage(desc)
 	fieldMap := map[string]*FieldDescription{}
+	jsonFieldMap := map[string]*FieldDescription{}
 	fields := desc.Fields()
 	for i := 0; i < fields.Len(); i++ {
 		f := fields.Get(i)
-		fieldMap[string(f.Name())] = newFieldDescription(f)
+		fd := newFieldDescription(f, pbdb.jsonFieldNames)
+		fieldMap[fd.Name()] = fd
+		if pbdb.jsonFieldNames {
+			jsonFieldMap[fd.JSONName()] = fd
+		}
 	}
 	return &TypeDescription{
-		typeName:    typeName,
-		desc:        desc,
-		msgType:     msgType,
-		fieldMap:    fieldMap,
-		extensions:  extensions,
-		reflectType: reflectTypeOf(msgZero),
-		zeroMsg:     zeroValueOf(msgZero),
+		typeName:       typeName,
+		desc:           desc,
+		msgType:        msgType,
+		fieldMap:       fieldMap,
+		jsonFieldMap:   jsonFieldMap,
+		extensions:     pbdb.extensions,
+		reflectType:    reflectTypeOf(msgZero),
+		zeroMsg:        zeroValueOf(msgZero),
+		jsonFieldNames: pbdb.jsonFieldNames,
 	}
 }
 
 // TypeDescription is a collection of type metadata relevant to expression
 // checking and evaluation.
 type TypeDescription struct {
-	typeName    string
-	desc        protoreflect.MessageDescriptor
-	msgType     protoreflect.MessageType
-	fieldMap    map[string]*FieldDescription
-	extensions  extensionMap
-	reflectType reflect.Type
-	zeroMsg     proto.Message
+	typeName     string
+	desc         protoreflect.MessageDescriptor
+	msgType      protoreflect.MessageType
+	fieldMap     map[string]*FieldDescription
+	jsonFieldMap map[string]*FieldDescription
+	extensions   extensionMap
+	reflectType  reflect.Type
+	zeroMsg      proto.Message
+	// jsonFieldNames indicates if the type's fields are accessible via their JSON names.
+	jsonFieldNames bool
 }
 
 // Copy copies the type description with updated references to the Db.
 func (td *TypeDescription) Copy(pbdb *Db) *TypeDescription {
 	return &TypeDescription{
-		typeName:    td.typeName,
-		desc:        td.desc,
-		msgType:     td.msgType,
-		fieldMap:    td.fieldMap,
-		extensions:  pbdb.extensions,
-		reflectType: td.reflectType,
-		zeroMsg:     td.zeroMsg,
+		typeName:       td.typeName,
+		desc:           td.desc,
+		msgType:        td.msgType,
+		fieldMap:       td.fieldMap,
+		jsonFieldMap:   td.jsonFieldMap,
+		extensions:     pbdb.extensions,
+		reflectType:    td.reflectType,
+		zeroMsg:        td.zeroMsg,
+		jsonFieldNames: td.jsonFieldNames,
 	}
 }
 
 // FieldMap returns a string field name to FieldDescription map.
 func (td *TypeDescription) FieldMap() map[string]*FieldDescription {
+	if td.jsonFieldNames {
+		return td.jsonFieldMap
+	}
 	return td.fieldMap
 }
 
 // FieldByName returns (FieldDescription, true) if the field name is declared within the type.
 func (td *TypeDescription) FieldByName(name string) (*FieldDescription, bool) {
+	if td.jsonFieldNames {
+		fd, found := td.jsonFieldMap[name]
+		if found {
+			return fd, true
+		}
+	}
+
 	fd, found := td.fieldMap[name]
 	if found {
 		return fd, true
 	}
+
 	extFieldMap, found := td.extensions[td.typeName]
-	if !found {
-		return nil, false
+	if found {
+		fd, found = extFieldMap[name]
+		return fd, found
 	}
-	fd, found = extFieldMap[name]
-	return fd, found
+
+	return nil, false
 }
 
 // MaybeUnwrap accepts a proto message as input and unwraps it to a primitive CEL type if possible.
@@ -132,7 +156,7 @@ func (td *TypeDescription) Zero() proto.Message {
 }
 
 // newFieldDescription creates a new field description from a protoreflect.FieldDescriptor.
-func newFieldDescription(fieldDesc protoreflect.FieldDescriptor) *FieldDescription {
+func newFieldDescription(fieldDesc protoreflect.FieldDescriptor, jsonFieldNames bool) *FieldDescription {
 	var reflectType reflect.Type
 	var zeroMsg proto.Message
 	switch fieldDesc.Kind() {
@@ -168,15 +192,16 @@ func newFieldDescription(fieldDesc protoreflect.FieldDescriptor) *FieldDescripti
 	}
 	var keyType, valType *FieldDescription
 	if fieldDesc.IsMap() {
-		keyType = newFieldDescription(fieldDesc.MapKey())
-		valType = newFieldDescription(fieldDesc.MapValue())
+		keyType = newFieldDescription(fieldDesc.MapKey(), jsonFieldNames)
+		valType = newFieldDescription(fieldDesc.MapValue(), jsonFieldNames)
 	}
 	return &FieldDescription{
-		desc:        fieldDesc,
-		KeyType:     keyType,
-		ValueType:   valType,
-		reflectType: reflectType,
-		zeroMsg:     zeroValueOf(zeroMsg),
+		desc:          fieldDesc,
+		KeyType:       keyType,
+		ValueType:     valType,
+		reflectType:   reflectType,
+		zeroMsg:       zeroValueOf(zeroMsg),
+		jsonFieldName: jsonFieldNames,
 	}
 }
 
@@ -187,9 +212,10 @@ type FieldDescription struct {
 	// ValueType holds the value FieldDescription for map fields.
 	ValueType *FieldDescription
 
-	desc        protoreflect.FieldDescriptor
-	reflectType reflect.Type
-	zeroMsg     proto.Message
+	desc          protoreflect.FieldDescriptor
+	reflectType   reflect.Type
+	zeroMsg       proto.Message
+	jsonFieldName bool
 }
 
 // CheckedType returns the type-definition used at type-check time.
@@ -216,6 +242,14 @@ func (fd *FieldDescription) CheckedType() *exprpb.Type {
 // Descriptor returns the protoreflect.FieldDescriptor for this type.
 func (fd *FieldDescription) Descriptor() protoreflect.FieldDescriptor {
 	return fd.desc
+}
+
+// Documentation returns the documentation for the field.
+func (fd *FieldDescription) Documentation() string {
+	if parentFile := fd.desc.ParentFile(); parentFile != nil {
+		return parentFile.SourceLocations().ByDescriptor(fd.desc).LeadingComments
+	}
+	return ""
 }
 
 // IsSet returns whether the field is set on the target value, per the proto presence conventions
@@ -285,7 +319,7 @@ func (fd *FieldDescription) GetFrom(target any) (any, error) {
 
 // IsEnum returns true if the field type refers to an enum value.
 func (fd *FieldDescription) IsEnum() bool {
-	return fd.desc.Kind() == protoreflect.EnumKind
+	return fd.ProtoKind() == protoreflect.EnumKind
 }
 
 // IsMap returns true if the field is of map type.
@@ -295,7 +329,7 @@ func (fd *FieldDescription) IsMap() bool {
 
 // IsMessage returns true if the field is of message type.
 func (fd *FieldDescription) IsMessage() bool {
-	kind := fd.desc.Kind()
+	kind := fd.ProtoKind()
 	return kind == protoreflect.MessageKind || kind == protoreflect.GroupKind
 }
 
@@ -321,9 +355,23 @@ func (fd *FieldDescription) MaybeUnwrapDynamic(msg protoreflect.Message) (any, b
 	return unwrapDynamic(fd, msg)
 }
 
-// Name returns the CamelCase name of the field within the proto-based struct.
+// Name returns the snake_case name of the field within the proto-based struct.
 func (fd *FieldDescription) Name() string {
 	return string(fd.desc.Name())
+}
+
+// JSONName returns the JSON name of the field, if present.
+func (fd *FieldDescription) JSONName() string {
+	jsonName := fd.desc.JSONName()
+	if len(jsonName) != 0 {
+		return jsonName
+	}
+	return string(fd.desc.Name())
+}
+
+// ProtoKind returns the protobuf reflected kind of the field.
+func (fd *FieldDescription) ProtoKind() protoreflect.Kind {
+	return fd.desc.Kind()
 }
 
 // ReflectType returns the Golang reflect.Type for this field.
@@ -345,17 +393,17 @@ func (fd *FieldDescription) Zero() proto.Message {
 }
 
 func (fd *FieldDescription) typeDefToType() *exprpb.Type {
-	if fd.desc.Kind() == protoreflect.MessageKind || fd.desc.Kind() == protoreflect.GroupKind {
+	if fd.IsMessage() {
 		msgType := string(fd.desc.Message().FullName())
 		if wk, found := CheckedWellKnowns[msgType]; found {
 			return wk
 		}
 		return checkedMessageType(msgType)
 	}
-	if fd.desc.Kind() == protoreflect.EnumKind {
+	if fd.IsEnum() {
 		return checkedInt
 	}
-	return CheckedPrimitives[fd.desc.Kind()]
+	return CheckedPrimitives[fd.ProtoKind()]
 }
 
 // Map wraps the protoreflect.Map object with a key and value FieldDescription for use in
@@ -422,25 +470,52 @@ func unwrap(desc description, msg proto.Message) (any, bool, error) {
 			return structpb.NullValue_NULL_VALUE, true, nil
 		}
 	case *wrapperspb.BoolValue:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	case *wrapperspb.BytesValue:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	case *wrapperspb.DoubleValue:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	case *wrapperspb.FloatValue:
+		if v == nil {
+			return nil, true, nil
+		}
 		return float64(v.GetValue()), true, nil
 	case *wrapperspb.Int32Value:
+		if v == nil {
+			return nil, true, nil
+		}
 		return int64(v.GetValue()), true, nil
 	case *wrapperspb.Int64Value:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	case *wrapperspb.StringValue:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	case *wrapperspb.UInt32Value:
+		if v == nil {
+			return nil, true, nil
+		}
 		return uint64(v.GetValue()), true, nil
 	case *wrapperspb.UInt64Value:
+		if v == nil {
+			return nil, true, nil
+		}
 		return v.GetValue(), true, nil
 	}
-	return msg, false, nil
+	return unwrapDynamic(desc, msg.ProtoReflect())
 }
 
 // unwrapDynamic unwraps a reflected protobuf Message value.
@@ -463,13 +538,13 @@ func unwrapDynamic(desc description, refMsg protoreflect.Message) (any, bool, er
 		unwrappedAny := &anypb.Any{}
 		err := Merge(unwrappedAny, msg)
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("unwrap dynamic field failed: %v", err)
 		}
 		dynMsg, err := unwrappedAny.UnmarshalNew()
 		if err != nil {
 			// Allow the error to move further up the stack as it should result in an type
 			// conversion error if the caller does not recover it somehow.
-			return nil, false, err
+			return nil, false, fmt.Errorf("unmarshal dynamic any failed: %v", err)
 		}
 		// Attempt to unwrap the dynamic type, otherwise return the dynamic message.
 		unwrapped, nested, err := unwrapDynamic(desc, dynMsg.ProtoReflect())
@@ -560,8 +635,10 @@ func zeroValueOf(msg proto.Message) proto.Message {
 }
 
 var (
+	jsonValueTypeURL = "types.googleapis.com/google.protobuf.Value"
+
 	zeroValueMap = map[string]proto.Message{
-		"google.protobuf.Any":         &anypb.Any{},
+		"google.protobuf.Any":         &anypb.Any{TypeUrl: jsonValueTypeURL},
 		"google.protobuf.Duration":    &dpb.Duration{},
 		"google.protobuf.ListValue":   &structpb.ListValue{},
 		"google.protobuf.Struct":      &structpb.Struct{},
