@@ -163,7 +163,7 @@ build-ccm-image: buildx-setup ## Build controller-manager image.
 		$(OUTPUT_FLAG) \
 		--platform linux/$(ARCH) \
 		--build-arg ENABLE_GIT_COMMAND="$(ENABLE_GIT_COMMAND)" \
-		--build-arg GOEXPERIMENT="$(GOEXPERIMENT)" \
+		--build-arg MS_GO_NOSYSTEMCRYPTO="$(MS_GO_NOSYSTEMCRYPTO)" \
 		--build-arg ARCH="$(ARCH)" \
 		--build-arg VERSION="$(VERSION)" \
 		--file Dockerfile \
@@ -177,7 +177,7 @@ build-node-image-linux: buildx-setup ## Build node-manager image.
 		$(OUTPUT_FLAG) \
 		--platform linux/$(ARCH) \
 		--build-arg ENABLE_GIT_COMMAND="$(ENABLE_GIT_COMMAND)" \
-		--build-arg GOEXPERIMENT="$(GOEXPERIMENT)" \
+		--build-arg MS_GO_NOSYSTEMCRYPTO="$(MS_GO_NOSYSTEMCRYPTO)" \
 		--build-arg ARCH="$(ARCH)" \
 		--build-arg VERSION="$(VERSION)" \
 		--file cloud-node-manager.Dockerfile \
@@ -437,10 +437,7 @@ test-e2e: ## Run k8s e2e tests.
 test-e2e-capz: ## Run k8s e2e tests with capz
 	hack/test_k8s_e2e_capz.sh $(TEST_E2E_ARGS)
 
-ensure-azcli: ## Ensure az CLI is installed.
-	hack/ensure-azcli.sh
-
-test-ccm-e2e: ensure-azcli ## Run cloud provider e2e tests.
+test-ccm-e2e: ## Run cloud provider e2e tests.
 	hack/test-ccm-e2e.sh
 
 .PHONY: clean

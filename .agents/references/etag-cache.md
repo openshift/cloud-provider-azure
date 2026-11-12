@@ -73,14 +73,14 @@ if fipChanged && !requiresInternalLoadBalancer(service) {
 
 **Pattern (VMSS VM → VMSS):**
 ```go
-hasVMUpdates := false
+var hasVMUpdates atomic.Bool
 defer func() {
-    if hasVMUpdates {
+    if hasVMUpdates.Load() {
         _ = ss.vmssCache.Delete(consts.VMSSKey)
     }
 }()
 // ... after VM batch updates succeed:
-hasVMUpdates = true
+hasVMUpdates.Store(true)
 ```
 
 ### Strategy 3: Reactive — Invalidate cache on operation cancellation
@@ -118,6 +118,36 @@ if strings.Contains(strings.ToLower(retryErrorMessage), consts.OperationCanceled
 2. **`*_repo.go`** files: read from cache for operations, invalidate on errors or cross-resource changes
 3. **azclient/policy/etag**: HTTP pipeline policy that extracts the ETag from the request body JSON and sets the `If-Match` header for optimistic concurrency
 
+## NIC Update-Only Writes
+
+CCM only updates existing node NICs. All provider NIC writes go through
+`Cloud.updateInterface` in `pkg/provider/azure_interface_repo.go`, which sets
+`If-Match: *` through the Azure SDK request context. This includes adding and
+removing backend-pool membership for standalone and VMSS Flex nodes. If a VM
+deletion removes the NIC after CCM reads it, NRP rejects the delayed PUT with
+HTTP 412 instead of recreating a VM-less NIC with stale backend membership.
+Callers propagate the error through their existing reconciliation paths.
+
+The wildcard checks existence, not the fetched resource version; it does not
+prevent lost updates between concurrent writers. The shared azclient Interface
+client remains create-capable for non-CCM consumers. Live validation against
+NIC API version `2025-05-01` confirmed successful updates to an existing NIC
+and `PreconditionFailedResourceDoesNotExist` for a deleted NIC, which remained
+absent after the rejected PUT. This does not clean up previously orphaned NICs.
+
+## Public-IP Recording Tests
+
+The generated public-IP concurrency test uses a real stale ETag rather than a
+malformed value: fetch the public IP, change its idle timeout using its current
+ETag, then attempt another change using the old ETag and require HTTP 412.
+A no-op update or malformed ETag is not a reliable concurrency check.
+
+Check that the successful update changes the ETag only during live recording.
+The recorder sanitizes ETag UUIDs to the same placeholder, so that inequality
+cannot be asserted during playback. Changes to this scenario belong in the
+client generator template as well as its generated test. Re-record both clouds
+after changing the request sequence; do not synthesize successful recordings.
+
 ## Defer Ordering Pitfall (VMSS)
 
 In `ensureHostsInPool` and `ensureBackendPoolDeleted`, there is a subtle defer
@@ -131,9 +161,9 @@ defer runs **last** — after all per-node defers have completed.
 
 ```go
 // Registered early in the function → runs LAST (after per-node defers)
-hasVMUpdates := false
+var hasVMUpdates atomic.Bool
 defer func() {
-    if hasVMUpdates {
+    if hasVMUpdates.Load() {
         _ = ss.vmssCache.Delete(consts.VMSSKey)
     }
 }()
@@ -144,8 +174,10 @@ defer func() {
 }()
 
 // ... after batch VM updates succeed:
-hasVMUpdates = true  // Signals the early defer to clean up
+hasVMUpdates.Store(true)  // Signals the early defer to clean up
 ```
 
 If you modify these functions, ensure the VMSS cache invalidation defer remains
-registered before any per-node defers.
+registered before any per-node defers. Per-VMSS update workers run concurrently,
+so their shared invalidation flag must be atomic and derived logging contexts
+must remain local to each worker.
