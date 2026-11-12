@@ -22,6 +22,11 @@ import (
 )
 
 const (
+	// IfMatchHeader is the HTTP conditional-update header.
+	IfMatchHeader = "If-Match"
+	// ETagAny requires an existing resource without matching a specific version.
+	ETagAny = "*"
+
 	// VMTypeVMSS is the vmss vm type
 	VMTypeVMSS = "vmss"
 	// VMTypeStandard is the vmas vm type
@@ -132,6 +137,13 @@ const (
 	ProvisioningStateSucceeded = "Succeeded"
 	// ProvisioningStateUnknown is the unknown provisioning state
 	ProvisioningStateUnknown = "Unknown"
+)
+
+// ARM client factory
+const (
+	// PlaceholderSubscriptionID is the subscription ID ARM client factories are created with when no
+	// subscription ID is configured, as in cloud-node-manager's default IMDS mode.
+	PlaceholderSubscriptionID = "00000000-0000-0000-0000-000000000000"
 )
 
 // cache
@@ -248,6 +260,17 @@ const (
 
 	// PodLabelServiceEgressGateway is the label used on the pod
 	PodLabelServiceEgressGateway = "kubernetes.azure.com/service-egress-gateway"
+	// PodAnnotationServiceEgressGatewayResourceGroup specifies the BYO NAT Gateway's resource group.
+	// The NAT Gateway name is the normalized value of PodLabelServiceEgressGateway.
+	PodAnnotationServiceEgressGatewayResourceGroup = "kubernetes.azure.com/service-egress-gateway-resource-group"
+
+	// ServiceGatewayManagedTagKey identifies CCM-managed Azure resources.
+	ServiceGatewayManagedTagKey      = "k8s-azure-ccm-managed"
+	ServiceGatewayManagedTagValue    = "true"
+	ServiceGatewayInboundNameSuffix  = "-lb"
+	ServiceGatewayOutboundNameSuffix = "-natgw"
+
+	ResourceGroupNamePattern = `^[\p{L}\p{Nd}_().-]{0,89}[\p{L}\p{Nd}_()-]$` // codespell:ignore nd
 
 	// ServiceAnnotationLoadBalancerInternal is the annotation used on the service
 	ServiceAnnotationLoadBalancerInternal = "service.beta.kubernetes.io/azure-load-balancer-internal"
@@ -395,6 +418,14 @@ const (
 	LoadBalancerBackendPoolConfigurationTypeNodeIP = "nodeIP"
 	// LoadBalancerBackendPoolConfigurationTypePodIP is the lb backend pool config type pod ip
 	LoadBalancerBackendPoolConfigurationTypePodIP = "podIP"
+)
+
+// Node event reasons and messages.
+const (
+	// LoadBalancerBackendNodeSkipped is the event reason for VMSS node validation failures.
+	LoadBalancerBackendNodeSkipped = "LoadBalancerBackendNodeSkipped"
+	// LoadBalancerBackendNodeSkippedMessagePrefix describes the skipped backend update.
+	LoadBalancerBackendNodeSkippedMessagePrefix = "Skipping load-balancer backend-pool updates for this node because "
 )
 
 // error messages
