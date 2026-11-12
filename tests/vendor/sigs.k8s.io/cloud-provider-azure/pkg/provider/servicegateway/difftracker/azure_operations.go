@@ -1,0 +1,777 @@
+/*
+Copyright 2026 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+// Package difftracker provides state tracking and synchronization between Kubernetes
+// resources and Azure Network Resource Provider (NRP) resources.
+//
+// Architecture:
+//   - DiffTracker: Maintains the desired state (K8s) and actual state (NRP)
+//   - ServiceUpdater: Handles service creation/deletion (LoadBalancers, NAT Gateways)
+//   - LocationsUpdater: Handles address/location synchronization
+//
+// Azure Operations:
+// All Azure SDK operations in azure_operations.go attempt their action once and return
+// errors immediately. Retry logic is the responsibility of the callers (ServiceUpdater,
+// LocationsUpdater) which implement appropriate retry strategies based on their use cases.
+//
+// Concurrency invariant:
+// ARM primitives in this file never acquire the DiffTracker mutex (dt.mu); the lock is
+// released before any I/O. Lock-guarded state lives in the in-memory files and its helpers
+// carry the "Locked" suffix, while the public snapshot methods (GetSync*) take the lock,
+// compute the diff, and return it by value so callers act on it lock-free. Enforced by
+// TestARMPrimitivesDoNotHoldStateLock.
+//
+// Error Handling:
+// Transient errors (throttling, timeouts) should be retried by callers.
+// Permanent errors (authentication, resource not found) should not be retried.
+package difftracker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"strings"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v12"
+	v1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/util/retry"
+	servicehelper "k8s.io/cloud-provider/service/helpers"
+	"k8s.io/utils/ptr"
+
+	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
+	"sigs.k8s.io/cloud-provider-azure/pkg/log"
+	"sigs.k8s.io/cloud-provider-azure/pkg/util/errutils"
+)
+
+// createOrUpdateManagedPublicIP creates or updates a Public IP and returns the Azure response.
+func (dt *DiffTracker) createOrUpdateManagedPublicIP(ctx context.Context, pip armnetwork.PublicIPAddress) (*armnetwork.PublicIPAddress, error) {
+	pipName := ptr.Deref(pip.Name, "")
+	if pipName == "" {
+		return nil, fmt.Errorf("createOrUpdateManagedPublicIP: pip name is empty")
+	}
+	serviceName, valid := identityFromPublicIPName(pipName)
+	if !valid {
+		return nil, fmt.Errorf("createOrUpdateManagedPublicIP: invalid managed Public IP name %q", pipName)
+	}
+	_, kind, _ := serviceIdentity(serviceName)
+	existing, err := dt.networkClientFactory.GetPublicIPAddressClient().Get(ctx, dt.config.ResourceGroup, pipName, nil)
+	if err != nil {
+		if exists, checkErr := errutils.CheckResourceExistsFromAzcoreError(err); checkErr != nil || exists {
+			return nil, fmt.Errorf("reading Public IP %q before creation: %w", pipName, err)
+		}
+	} else {
+		if existing == nil {
+			return nil, fmt.Errorf("reading Public IP %q before creation returned no resource", pipName)
+		}
+		if !ownsPublicIP(existing) {
+			ownershipErr := fmt.Errorf("public IP %q is not marked as CCM-managed", pipName)
+			if kind == Outbound {
+				return nil, egressRejectedError{ownershipErr}
+			}
+			return nil, ownershipErr
+		}
+		pip.Tags = existing.Tags
+		pip.Etag = existing.Etag
+	}
+	dt.logger.V(2).Info("Creating or updating public IP", "pip", pipName, "resourceGroup", dt.config.ResourceGroup)
+
+	response, err := dt.networkClientFactory.GetPublicIPAddressClient().CreateOrUpdate(ctx, dt.config.ResourceGroup, pipName, pip)
+	if err != nil {
+		return nil, fmt.Errorf("creating or updating public IP %q: %w", pipName, err)
+	}
+
+	return response, nil
+}
+
+// deletePublicIP deletes a public IP address. The caller must establish ownership first.
+func (dt *DiffTracker) deletePublicIP(ctx context.Context, pipResourceGroup string, pipName string) error {
+	if pipName == "" {
+		return fmt.Errorf("deletePublicIP: pipName is empty")
+	}
+	dt.logger.V(2).Info("Deleting public IP", "pip", pipName, "resourceGroup", pipResourceGroup)
+
+	err := dt.networkClientFactory.GetPublicIPAddressClient().Delete(ctx, pipResourceGroup, pipName)
+	if _, err := errutils.CheckResourceExistsFromAzcoreError(err); err != nil {
+		return fmt.Errorf("deleting public IP %q: %w", pipName, err)
+	}
+
+	return nil
+}
+
+// deleteOwnedPublicIP returns true only when an owned address was deleted.
+func (dt *DiffTracker) deleteOwnedPublicIP(ctx context.Context, pipName string) (bool, error) {
+	if pipName == "" {
+		return false, fmt.Errorf("deleteOwnedPublicIP: pip name is empty")
+	}
+	pip, err := dt.networkClientFactory.GetPublicIPAddressClient().Get(ctx, dt.config.ResourceGroup, pipName, nil)
+	if err != nil {
+		if exists, checkErr := errutils.CheckResourceExistsFromAzcoreError(err); checkErr == nil && !exists {
+			dt.logger.V(4).Info("Skipped absent Public IP", "publicIP", pipName)
+			return false, nil
+		}
+		return false, fmt.Errorf("reading Public IP %q to check ownership: %w", pipName, err)
+	}
+	if pip == nil {
+		return false, fmt.Errorf("reading Public IP %q to check ownership returned no resource", pipName)
+	}
+	if !ownsPublicIP(pip) {
+		dt.logger.V(2).Info("Kept Public IP without matching CCM-managed marker", "publicIP", pipName)
+		return false, nil
+	}
+	deleteCtx, err := withResourceETag(ctx, fmt.Sprintf("Public IP %q", pipName), pip.Etag)
+	if err != nil {
+		return false, err
+	}
+	if err := dt.deletePublicIP(deleteCtx, dt.config.ResourceGroup, pipName); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// createOrUpdateLB creates or updates a load balancer
+func (dt *DiffTracker) createOrUpdateLB(ctx context.Context, lb armnetwork.LoadBalancer) error {
+	lbName := ptr.Deref(lb.Name, "")
+	if lbName == "" {
+		return fmt.Errorf("createOrUpdateLB: load balancer name is empty")
+	}
+	dt.logger.V(2).Info("Creating or updating LoadBalancer", "loadBalancer", lbName)
+
+	_, err := dt.networkClientFactory.GetLoadBalancerClient().CreateOrUpdate(ctx, dt.config.ResourceGroup, lbName, lb)
+	if err != nil {
+		return fmt.Errorf("creating or updating LoadBalancer %q: %w", lbName, err)
+	}
+
+	return nil
+}
+
+// deleteLB deletes a load balancer by its ServiceGateway service name.
+func (dt *DiffTracker) deleteLB(ctx context.Context, serviceName string) error {
+	serviceName = strings.ToLower(serviceName)
+	dt.logger.V(2).Info("Deleting LoadBalancer", "loadBalancer", serviceName)
+
+	err := dt.networkClientFactory.GetLoadBalancerClient().Delete(ctx, dt.config.ResourceGroup, serviceName)
+	if _, err := errutils.CheckResourceExistsFromAzcoreError(err); err != nil {
+		return fmt.Errorf("deleteLB: failed to delete LoadBalancer (uid=%s): %w", serviceName, err)
+	}
+
+	return nil
+}
+
+func withNATGatewayETag(ctx context.Context, natGatewayName string, etag *string) (context.Context, error) {
+	// A retried PUT can hide an applied link behind a later 412.
+	ctx = policy.WithRetryOptions(ctx, policy.RetryOptions{MaxRetries: -1})
+	return withResourceETag(ctx, fmt.Sprintf("BYO NAT Gateway %q", natGatewayName), etag)
+}
+
+func withResourceETag(ctx context.Context, resource string, etag *string) (context.Context, error) {
+	version := strings.TrimSpace(ptr.Deref(etag, ""))
+	if version == "" || version == "*" {
+		return nil, fmt.Errorf("%s was read without a usable ETag", resource)
+	}
+	return policy.WithHTTPHeader(ctx, http.Header{"If-Match": {version}}), nil
+}
+
+func isResponseForMethod(respErr *azcore.ResponseError, method string) bool {
+	return respErr != nil && respErr.RawResponse != nil && respErr.RawResponse.Request != nil &&
+		respErr.RawResponse.Request.Method == method
+}
+
+// createOrUpdateNatGateway creates or updates a NAT gateway
+func (dt *DiffTracker) createOrUpdateNatGateway(ctx context.Context, natGatewayResourceGroup string, natGateway armnetwork.NatGateway) error {
+	natGatewayName := ptr.Deref(natGateway.Name, "")
+	if natGatewayName == "" {
+		return fmt.Errorf("createOrUpdateNatGateway: NAT gateway name is empty")
+	}
+	dt.logger.V(2).Info("Creating or updating NAT Gateway", "natGateway", natGatewayName, "resourceGroup", natGatewayResourceGroup)
+
+	_, err := dt.networkClientFactory.GetNatGatewayClient().CreateOrUpdate(ctx, natGatewayResourceGroup, natGatewayName, natGateway)
+	if err != nil {
+		return fmt.Errorf("creating or updating NAT Gateway %q: %w", natGatewayName, err)
+	}
+
+	return nil
+}
+
+// deleteNatGateway deletes a NAT gateway
+func (dt *DiffTracker) deleteNatGateway(ctx context.Context, natGatewayResourceGroup string, natGatewayName string) error {
+	if natGatewayName == "" {
+		return fmt.Errorf("deleteNatGateway: NAT gateway name is empty")
+	}
+	dt.logger.V(2).Info("Deleting NAT Gateway", "natGateway", natGatewayName, "resourceGroup", natGatewayResourceGroup)
+
+	err := dt.networkClientFactory.GetNatGatewayClient().Delete(ctx, natGatewayResourceGroup, natGatewayName)
+	if _, err := errutils.CheckResourceExistsFromAzcoreError(err); err != nil {
+		return fmt.Errorf("deleting NAT Gateway %q in resource group %q: %w", natGatewayName, natGatewayResourceGroup, err)
+	}
+
+	return nil
+}
+
+// getNatGateway reads a NAT Gateway. exists is false (with a nil error) when it is not found.
+func (dt *DiffTracker) getNatGateway(ctx context.Context, resourceGroup, name string) (natGateway *armnetwork.NatGateway, exists bool, err error) {
+	natGateway, err = dt.networkClientFactory.GetNatGatewayClient().Get(ctx, resourceGroup, name, nil)
+	if err != nil {
+		if found, cerr := errutils.CheckResourceExistsFromAzcoreError(err); cerr == nil && !found {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("getting NAT Gateway %q in resource group %q: %w", name, resourceGroup, err)
+	}
+	return natGateway, true, nil
+}
+
+// getNatGatewayByID reads a NAT Gateway by ARM ID.
+// Callers must validate the ID's network subscription; the client is subscription-scoped.
+func (dt *DiffTracker) getNatGatewayByID(ctx context.Context, natGatewayID string) (natGateway *armnetwork.NatGateway, exists bool, err error) {
+	parsed, err := arm.ParseResourceID(natGatewayID)
+	if err != nil {
+		return nil, false, fmt.Errorf("parsing NAT Gateway ID %q: %w", natGatewayID, err)
+	}
+	return dt.getNatGateway(ctx, parsed.ResourceGroupName, parsed.Name)
+}
+
+// unlinkNatGateway clears service references before unlinking the gateway.
+// For managed gateways, canManage distinguishes preflight errors from write errors
+// so callers retain their existing cleanup policy without repeating the reads.
+func (dt *DiffTracker) unlinkNatGateway(ctx context.Context, serviceGatewayName, serviceName, natGatewayResourceGroup, natGatewayName string) (exists, canManage bool, err error) {
+	dt.logger.V(2).Info("Disassociating NAT Gateway from Service Gateway", "natGateway", natGatewayName, "serviceGateway", serviceGatewayName, "resourceGroup", natGatewayResourceGroup)
+
+	managed := strings.EqualFold(natGatewayResourceGroup, dt.config.ResourceGroup)
+	natGateway, exists, err := dt.getNatGateway(ctx, natGatewayResourceGroup, natGatewayName)
+	if err != nil {
+		return false, false, err
+	}
+	if !exists {
+		return false, true, nil
+	}
+	if managed && !ownsNATGateway(natGateway) {
+		return true, false, nil
+	}
+
+	// Step 1: clear the ServiceGateway-side reference if it still has one.
+	services, err := dt.networkClientFactory.GetServiceGatewayClient().GetServices(ctx, dt.config.ResourceGroup, serviceGatewayName)
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) && respErr.StatusCode == http.StatusNotFound {
+		services, err = nil, nil
+	}
+	if err != nil {
+		return exists, false, fmt.Errorf("getting Service Gateway services: %w", err)
+	}
+	natGatewayID := fmt.Sprintf(consts.NatGatewayIDTemplate, dt.config.networkResourceSubscriptionID(), natGatewayResourceGroup, natGatewayName)
+	if otherServiceName := otherServiceUsingNATGateway(services, serviceName, natGatewayID); otherServiceName != "" {
+		dt.logger.V(2).Info("Skipped unlinking NAT Gateway because another service uses it", "natGateway", natGatewayName, "service", otherServiceName)
+		return exists, false, nil
+	}
+	canManage = true
+
+	var serviceToBeUpdated *armnetwork.ServiceGatewayService
+	for _, service := range services {
+		if service.Name != nil && strings.EqualFold(*service.Name, serviceName) {
+			serviceToBeUpdated = service
+			break
+		}
+	}
+
+	if serviceToBeUpdated != nil && serviceToBeUpdated.Properties != nil && serviceToBeUpdated.Properties.PublicNatGatewayID != nil {
+		// azcore.NullValue, not a plain nil: the generated marshaller drops a typed-nil pointer
+		// instead of emitting JSON null, and ARM reads an absent field as "leave unchanged".
+		serviceToBeUpdated.Properties.PublicNatGatewayID = azcore.NullValue[*string]()
+		updateServicesRequest := armnetwork.ServiceGatewayUpdateServicesRequest{
+			Action: ptr.To(armnetwork.ServiceUpdateActionPartialUpdate),
+			ServiceRequests: []*armnetwork.ServiceGatewayServiceRequest{
+				{
+					IsDelete: ptr.To(false),
+					Service:  serviceToBeUpdated,
+				},
+			},
+		}
+		if err := dt.updateNRPServices(ctx, serviceGatewayName, updateServicesRequest); err != nil {
+			return exists, canManage, fmt.Errorf("updating Service Gateway to disassociate NAT Gateway %q: %w", natGatewayName, err)
+		}
+	}
+
+	// Step 2: clear the NAT-gateway-side reference if it still points back at the
+	// Service Gateway. This runs independently of Step 1 so a retry after a
+	// partial failure still reconciles the NAT gateway.
+	if !managed && natGateway.Properties == nil {
+		return true, false, fmt.Errorf("NAT Gateway %q was read without its properties; link state is unknown", natGatewayID)
+	}
+	if linked := natGatewayServiceGatewayID(natGateway); linked != "" && strings.EqualFold(linked, dt.config.ServiceGatewayResourceID()) {
+		updateCtx := ctx
+		if !managed {
+			updateCtx, err = withNATGatewayETag(ctx, natGatewayName, natGateway.Etag)
+			if err != nil {
+				return exists, canManage, err
+			}
+		}
+		// See above: a plain nil would be omitted from the payload rather than clearing the field.
+		natGateway.Properties.ServiceGateway = azcore.NullValue[*armnetwork.SubResource]()
+		if _, err := dt.networkClientFactory.GetNatGatewayClient().CreateOrUpdate(updateCtx, natGatewayResourceGroup, natGatewayName, *natGateway); err != nil {
+			return exists, canManage, fmt.Errorf("updating NAT Gateway %q to remove Service Gateway reference: %w", natGatewayName, err)
+		}
+	}
+
+	dt.logger.V(5).Info("Disassociated NAT Gateway from Service Gateway", "natGateway", natGatewayName, "serviceGateway", serviceGatewayName, "resourceGroup", natGatewayResourceGroup)
+	return exists, canManage, nil
+}
+
+// updateNRPSGWServices updates services in the Service Gateway
+func (dt *DiffTracker) updateNRPSGWServices(ctx context.Context, serviceGatewayName string, updateServicesRequestDTO ServicesDataDTO) error {
+	if len(updateServicesRequestDTO.Services) == 0 && updateServicesRequestDTO.Action != FullUpdate {
+		dt.logger.V(5).Info("No services to update", "serviceGateway", serviceGatewayName)
+		return nil
+	}
+
+	dt.logger.V(2).Info("Updating Service Gateway services", "serviceGateway", serviceGatewayName)
+
+	// Convert DTO to ARM SDK request
+	serviceRequests, err := convertServiceDTOsToServiceRequests(updateServicesRequestDTO.Services, dt.config)
+	if err != nil {
+		return fmt.Errorf("updateNRPSGWServices(%s): %w", serviceGatewayName, err)
+	}
+	req := armnetwork.ServiceGatewayUpdateServicesRequest{
+		Action:          convertServicesUpdateActionToARM(updateServicesRequestDTO.Action),
+		ServiceRequests: serviceRequests,
+	}
+
+	err = dt.updateNRPServices(ctx, serviceGatewayName, req)
+	if err != nil {
+		return fmt.Errorf("updating Service Gateway services for %q: %w", serviceGatewayName, err)
+	}
+
+	return nil
+}
+
+// updateNRPSGWAddressLocations updates address locations in the Service Gateway
+func (dt *DiffTracker) updateNRPSGWAddressLocations(ctx context.Context, serviceGatewayName string, locationsDTO LocationsDataDTO) error {
+	dt.logger.V(2).Info("Updating Service Gateway address locations", "serviceGateway", serviceGatewayName)
+
+	// Convert DTO to ARM SDK request
+	req := armnetwork.ServiceGatewayUpdateAddressLocationsRequest{
+		Action:           convertLocationsUpdateActionToARM(locationsDTO.Action),
+		AddressLocations: convertLocationDTOsToAddressLocations(locationsDTO.Locations),
+	}
+
+	err := dt.updateNRPAddressLocations(ctx, serviceGatewayName, req)
+	if err != nil {
+		return fmt.Errorf("updating Service Gateway address locations for %q: %w", serviceGatewayName, err)
+	}
+
+	return nil
+}
+
+// getServiceBySGWName resolves a canonical inbound SGW name to its Kubernetes Service. It resolves
+// the recorded namespace/name through the cached serviceLister, an O(1) read backed by the shared
+// informer, checking the decoded Kubernetes UID so a recreated Service that reuses the same
+// namespace/name is never mistaken for the original. It falls back to a direct apiserver Get when
+// the lister is unset or its cache has not yet observed the object, and to a UID scan when the
+// namespace/name are unknown (e.g. entries recovered from NRP without a Service object).
+//
+// It matches on UID alone: the returned Service may no longer be of type LoadBalancer and may be
+// terminating. Callers that act on the result must apply their own type and deletion checks.
+func (dt *DiffTracker) getServiceBySGWName(ctx context.Context, serviceName string) (*v1.Service, error) {
+	uid, kind, ok := serviceIdentity(serviceName)
+	if !ok || kind != Inbound {
+		return nil, fmt.Errorf("getServiceBySGWName: invalid inbound ServiceGateway name %q", serviceName)
+	}
+
+	namespace, name, lister := dt.serviceLookupInfo(serviceName)
+	if namespace != "" && name != "" {
+		svc, err := dt.getServiceByNamespaceName(ctx, lister, namespace, name)
+		switch {
+		case err == nil:
+			if string(svc.UID) == uid {
+				return svc, nil
+			}
+			// A different Service now occupies this namespace/name; the original is gone.
+			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "services"}, serviceName)
+		case apierrors.IsNotFound(err):
+			return nil, err
+		default:
+			// Transient error resolving by namespace/name; fall through to a UID scan.
+			dt.logger.V(4).Info("getServiceBySGWName: namespace/name lookup failed, falling back to list",
+				"uid", serviceName, "namespace", namespace, "name", name, "error", err)
+		}
+	}
+
+	return dt.getServiceByUIDViaList(ctx, uid)
+}
+
+// serviceLookupInfo returns the recorded Kubernetes namespace/name and current serviceLister,
+// read together under mu.
+func (dt *DiffTracker) serviceLookupInfo(serviceName string) (namespace, name string, lister corelisters.ServiceLister) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+	if op, ok := dt.pendingServiceOps[serviceName]; ok {
+		namespace = op.Config.Namespace
+		name = op.Config.Name
+	}
+	return namespace, name, dt.serviceLister
+}
+
+// getServiceByNamespaceName reads a Service by namespace/name, preferring the cached lister and
+// falling back to a direct apiserver Get when the lister is unset or reports the object missing
+// (a cold cache before the informer has synced). Lister results are deep-copied because the
+// informer cache returns shared objects.
+func (dt *DiffTracker) getServiceByNamespaceName(ctx context.Context, lister corelisters.ServiceLister, namespace, name string) (*v1.Service, error) {
+	if lister != nil {
+		svc, err := lister.Services(namespace).Get(name)
+		if err == nil {
+			return svc.DeepCopy(), nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	return dt.kubeClient.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+// getServiceByUIDViaList scans all Services for a UID match. Used only when a Service's
+// namespace/name are not known to the engine.
+//
+// The scan is deliberately not narrowed by spec.type. Ownership of a Service's finalizer and Azure
+// resources outlives its type: retyping a LoadBalancer to ClusterIP is a normal way to decommission
+// it, and the deletion that follows still has to tear down the PIP/LB and strip the finalizer.
+// Filtering by type would hide such a Service, and callers read the NotFound below as "gone".
+func (dt *DiffTracker) getServiceByUIDViaList(ctx context.Context, uid string) (*v1.Service, error) {
+	if dt.kubeClient == nil {
+		return nil, fmt.Errorf("getServiceByUIDViaList: no Kubernetes client")
+	}
+	svcList, err := dt.kubeClient.CoreV1().Services(v1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("getServiceByUIDViaList: list failed: %w", err)
+	}
+	for i := range svcList.Items {
+		if string(svcList.Items[i].UID) == uid {
+			return svcList.Items[i].DeepCopy(), nil
+		}
+	}
+	// Genuinely not found (the list succeeded). Return a typed NotFound so callers can
+	// distinguish "service is gone" (safe to treat the operation as complete) from a
+	// transient list failure above (which must be retried).
+	return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "services"}, uid)
+}
+
+// updateServiceLoadBalancerStatus updates the K8s Service status with the LoadBalancer IP address.
+// EnsureLoadBalancer returns the Service's status unchanged while the difftracker engine provisions
+// the PIP, LB and ServiceGateway registration asynchronously in the background. This function
+// backfills Service.Status.LoadBalancer.Ingress once the PIP is created, since it would otherwise
+// stay empty.
+//
+// The Service is resolved by UID only, so a Service that changed type or started terminating while
+// the PIP was provisioning still gets stamped: the ingress IP is written onto a Service that is no
+// longer a LoadBalancer, and nothing clears it until that Service is edited again. The startup
+// recovery path re-applies it for the same reason.
+func (dt *DiffTracker) updateServiceLoadBalancerStatus(ctx context.Context, serviceName string, ip string) error {
+	if ip == "" {
+		return fmt.Errorf("updateServiceLoadBalancerStatus: ip is empty")
+	}
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return fmt.Errorf("updateServiceLoadBalancerStatus: invalid ip %q", ip)
+	}
+	newIsIPv4 := parsedIP.To4() != nil
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		svc, err := dt.getServiceBySGWName(ctx, serviceName)
+		if err != nil {
+			return fmt.Errorf("updateServiceLoadBalancerStatus: failed to get service: %w", err)
+		}
+
+		desired := make([]v1.LoadBalancerIngress, 0, len(svc.Status.LoadBalancer.Ingress)+1)
+		newPresent := false
+		// Rebuild the ingress list, keeping it dual-stack safe: preserve non-IP (hostname-only)
+		// entries and entries of the other IP family untouched, while replacing any stale
+		// same-family IP with the new one. If the new IP is already present we keep it and
+		// avoid appending a duplicate below.
+		for _, ingress := range svc.Status.LoadBalancer.Ingress {
+			if ingress.IP == "" {
+				desired = append(desired, ingress)
+				continue
+			}
+			ingressIP := net.ParseIP(ingress.IP)
+			if ingressIP != nil && (ingressIP.To4() != nil) == newIsIPv4 {
+				if ingress.IP == ip {
+					newPresent = true
+					desired = append(desired, ingress)
+				}
+				continue
+			}
+			desired = append(desired, ingress)
+		}
+		if !newPresent {
+			desired = append(desired, v1.LoadBalancerIngress{IP: ip})
+		}
+
+		if apiequality.Semantic.DeepEqual(svc.Status.LoadBalancer.Ingress, desired) {
+			dt.logger.V(5).Info("Service already has LoadBalancer IP", "namespace", svc.Namespace, "service", svc.Name, "ip", ip)
+			return nil
+		}
+
+		updated := svc.DeepCopy()
+		updated.Status.LoadBalancer.Ingress = desired
+		if _, err := servicehelper.PatchService(dt.kubeClient.CoreV1(), svc, updated); err != nil {
+			return fmt.Errorf("updateServiceLoadBalancerStatus: failed to patch service: %w", err)
+		}
+
+		dt.logger.V(2).Info("Updated Service with LoadBalancer IP", "namespace", svc.Namespace, "service", svc.Name, "ip", ip)
+		return nil
+	})
+}
+
+// Helper functions to convert DTOs to ARM SDK types
+
+func convertServicesUpdateActionToARM(action UpdateAction) *armnetwork.ServiceUpdateAction {
+	switch action {
+	case PartialUpdate:
+		return ptr.To(armnetwork.ServiceUpdateActionPartialUpdate)
+	case FullUpdate:
+		return ptr.To(armnetwork.ServiceUpdateActionFullUpdate)
+	default:
+		log.Background().WithName("difftracker").V(4).Info("Unknown service UpdateAction, defaulting to PartialUpdate", "action", action)
+		return ptr.To(armnetwork.ServiceUpdateActionPartialUpdate)
+	}
+}
+
+func convertLocationsUpdateActionToARM(action UpdateAction) *armnetwork.UpdateAction {
+	switch action {
+	case PartialUpdate:
+		return ptr.To(armnetwork.UpdateActionPartialUpdate)
+	case FullUpdate:
+		return ptr.To(armnetwork.UpdateActionFullUpdate)
+	default:
+		log.Background().WithName("difftracker").V(4).Info("Unknown locations UpdateAction, defaulting to PartialUpdate", "action", action)
+		return ptr.To(armnetwork.UpdateActionPartialUpdate)
+	}
+}
+
+// extractResourceChildName extracts a child resource name from an Azure resource ID.
+// Returns "" if the requested segment is not present.
+func extractResourceChildName(id, segment string) string {
+	if id == "" {
+		return ""
+	}
+	parts := strings.Split(id, "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if strings.EqualFold(parts[i], segment) && parts[i+1] != "" {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func convertServiceDTOsToServiceRequests(services []ServiceDTO, config Config) ([]*armnetwork.ServiceGatewayServiceRequest, error) {
+	serviceRequests := make([]*armnetwork.ServiceGatewayServiceRequest, 0, len(services))
+
+	// Construct VNet resource ID once for all backend pools. BYO-VNet clusters host the VNet
+	// in a separate resource group, so resolve it via VNetResourceGroupOrDefault rather than
+	// assuming the cluster ResourceGroup.
+	vnetID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/virtualNetworks/%s",
+		config.networkResourceSubscriptionID(), config.VNetResourceGroupOrDefault(), config.VNetName)
+
+	for _, svc := range services {
+		// Build backend pools with full details
+		loadBalancerBackendPools := make([]*armnetwork.BackendAddressPool, len(svc.LoadBalancerBackendPools))
+		for i := range svc.LoadBalancerBackendPools {
+			backendPoolResourceID := svc.LoadBalancerBackendPools[i].ID
+			backendPoolName := extractResourceChildName(backendPoolResourceID, "backendAddressPools")
+			loadBalancerBackendPools[i] = &armnetwork.BackendAddressPool{
+				ID:   &backendPoolResourceID,
+				Name: &backendPoolName,
+				Properties: &armnetwork.BackendAddressPoolPropertiesFormat{
+					VirtualNetwork: &armnetwork.SubResource{
+						ID: &vnetID,
+					},
+				},
+			}
+		}
+
+		// Set service type and NAT gateway based on service type
+		var serviceType armnetwork.ServiceType
+		var publicNatGatewayID *string
+		switch svc.ServiceType {
+		case Inbound:
+			serviceType = armnetwork.ServiceTypeInbound
+			publicNatGatewayID = nil
+		case Outbound:
+			serviceType = armnetwork.ServiceTypeOutbound
+			if !svc.IsDelete && svc.PublicNatGateway.ID != "" {
+				natID := svc.PublicNatGateway.ID
+				publicNatGatewayID = &natID
+			}
+		default:
+			return nil, fmt.Errorf("convertServiceDTOsToServiceRequests: unknown ServiceType %q for service %q", svc.ServiceType, svc.Service)
+		}
+
+		// Build and append the service request
+		serviceRequests = append(serviceRequests, &armnetwork.ServiceGatewayServiceRequest{
+			IsDelete: &svc.IsDelete,
+			Service: &armnetwork.ServiceGatewayService{
+				Name: &svc.Service,
+				Properties: &armnetwork.ServiceGatewayServicePropertiesFormat{
+					LoadBalancerBackendPools: loadBalancerBackendPools,
+					PublicNatGatewayID:       publicNatGatewayID,
+					ServiceType:              &serviceType,
+				},
+			},
+		})
+	}
+	return serviceRequests, nil
+}
+
+func convertLocationDTOsToAddressLocations(locations []LocationDTO) []*armnetwork.ServiceGatewayAddressLocation {
+	armLocations := make([]*armnetwork.ServiceGatewayAddressLocation, 0, len(locations))
+	// Key by canonical IP and drop duplicates: NRP rejects a request that lists the same location
+	// twice (DuplicateLocationsInRequest), which can otherwise arise from mixed IPv6 representations.
+	seen := make(map[string]struct{}, len(locations))
+	for _, loc := range locations {
+		key := canonicalIP(loc.Location)
+		if _, dup := seen[key]; dup {
+			log.Background().WithName("difftracker").V(4).Info("Skipped duplicate address location", "location", loc.Location)
+			continue
+		}
+		seen[key] = struct{}{}
+		armLoc := &armnetwork.ServiceGatewayAddressLocation{
+			AddressLocation: ptr.To(key),
+		}
+
+		// Set address update action. Mirror the service/location action converters by
+		// defaulting an unknown (e.g. unset/zero) value to PartialUpdate instead of
+		// leaving it nil, so NRP always receives an explicit action.
+		switch loc.AddressUpdateAction {
+		case PartialUpdate:
+			armLoc.AddressUpdateAction = ptr.To(armnetwork.AddressUpdateActionPartialUpdate)
+		case FullUpdate:
+			armLoc.AddressUpdateAction = ptr.To(armnetwork.AddressUpdateActionFullUpdate)
+		default:
+			log.Background().WithName("difftracker").V(4).Info("Unknown AddressUpdateAction, defaulting to PartialUpdate", "action", loc.AddressUpdateAction, "location", loc.Location)
+			armLoc.AddressUpdateAction = ptr.To(armnetwork.AddressUpdateActionPartialUpdate)
+		}
+
+		// Convert addresses - always initialize the slice to avoid null in JSON
+		armLoc.Addresses = make([]*armnetwork.ServiceGatewayAddress, 0, len(loc.Addresses))
+		for _, addr := range loc.Addresses {
+			armAddr := &armnetwork.ServiceGatewayAddress{
+				Address: ptr.To(addr.Address),
+			}
+
+			// Convert service names - always initialize the slice to avoid null in JSON
+			armAddr.Services = make([]*string, 0, addr.ServiceNames.Len())
+			for _, svcName := range addr.ServiceNames.UnsortedList() {
+				armAddr.Services = append(armAddr.Services, ptr.To(svcName))
+			}
+
+			armLoc.Addresses = append(armLoc.Addresses, armAddr)
+		}
+
+		armLocations = append(armLocations, armLoc)
+	}
+	return armLocations
+}
+
+// synchronousCompletionStatus is the HTTP status NRP returns when it completes a ServiceGateway
+// long-running operation inline instead of handing back a poller.
+const synchronousCompletionStatus = http.StatusOK
+
+// isSynchronousCompletion reports whether err is only the Azure SDK refusing an HTTP 200 response
+// to the *initial* request.
+//
+// The generated armnetwork ServiceGateways client accepts just 202 and 204 for the updateServices
+// and updateAddressLocations long-running operations, but NRP finishes both synchronously and
+// answers 200 OK. The SDK converts that into a ResponseError before a poller is ever created, so
+// the request in fact succeeded and there is nothing left to poll.
+//
+// A 200 alone is not sufficient. azcore reports a genuinely FAILED long-running operation as a
+// ResponseError built from the last poll response (pollers/async.Poller.Result), and for
+// Azure-AsyncOperation polling that terminal poll is itself HTTP 200 carrying
+// {"status":"Failed",...}. Matching on the status code alone therefore reports every async NRP
+// failure as success. The two cases separate on the request method:
+//
+//	NRP synchronous 200 : Method=POST -> tolerate
+//	failed async LRO    : Method=GET  -> propagate
+//
+// The polling headers cannot be used to tell the two apart. NRP stamps Azure-AsyncOperation and
+// Location onto the synchronous 200 it returns for updateServices even though the operation has
+// already completed, so treating their presence as "still in flight" rejects every successful
+// Service registration.
+//
+// This compensates for the vendored SDK; drop it once the generator accepts 200 for these
+// operations.
+//
+// Known side effect: the azclient wrapper records its ARM request metric before this tolerance is
+// applied, so a synchronous 200 is still counted in ARMRequestErrors with status_code=200. The
+// request did succeed; the counter is noise that disappears with the SDK fix.
+func isSynchronousCompletion(err error) bool {
+	var respErr *azcore.ResponseError
+	if !errors.As(err, &respErr) {
+		return false
+	}
+	if respErr.StatusCode != synchronousCompletionStatus {
+		return false
+	}
+	raw := respErr.RawResponse
+	if raw == nil || raw.Request == nil {
+		// Cannot prove this was the initial call, so it cannot be proven complete.
+		return false
+	}
+	// A body that names an error is NRP reporting failure inline, whatever the status code says.
+	// azcore fills ErrorCode from that body, so an empty one is the documented completion shape and
+	// stays tolerated; anything else would mark the service registered while NRP holds no entry.
+	if respErr.ErrorCode != "" {
+		return false
+	}
+	// Every LRO poll is a GET; only the initial updateServices/updateAddressLocations call is a POST.
+	return raw.Request.Method == http.MethodPost
+}
+
+// updateNRPServices calls UpdateServices, tolerating NRP's synchronous 200 OK completion.
+func (dt *DiffTracker) updateNRPServices(ctx context.Context, serviceGatewayName string, req armnetwork.ServiceGatewayUpdateServicesRequest) error {
+	err := dt.networkClientFactory.GetServiceGatewayClient().UpdateServices(ctx, dt.config.ResourceGroup, serviceGatewayName, req)
+	return dt.tolerateSynchronousCompletion(err, "UpdateServices", serviceGatewayName)
+}
+
+// updateNRPAddressLocations calls UpdateAddressLocations, tolerating NRP's synchronous 200 OK.
+func (dt *DiffTracker) updateNRPAddressLocations(ctx context.Context, serviceGatewayName string, req armnetwork.ServiceGatewayUpdateAddressLocationsRequest) error {
+	err := dt.networkClientFactory.GetServiceGatewayClient().UpdateAddressLocations(ctx, dt.config.ResourceGroup, serviceGatewayName, req)
+	return dt.tolerateSynchronousCompletion(err, "UpdateAddressLocations", serviceGatewayName)
+}
+
+func (dt *DiffTracker) tolerateSynchronousCompletion(err error, operation, serviceGatewayName string) error {
+	if isSynchronousCompletion(err) {
+		dt.logger.V(4).Info("ServiceGateway operation completed synchronously with 200 OK",
+			"operation", operation, "serviceGateway", serviceGatewayName)
+		return nil
+	}
+
+	// A 200 that is not a provable synchronous completion is an asynchronous operation that either
+	// failed or is still in flight. Reporting it as success would leave the tracker believing NRP
+	// holds state it does not, so log it as it propagates.
+	var respErr *azcore.ResponseError
+	if errors.As(err, &respErr) && respErr.StatusCode == synchronousCompletionStatus {
+		dt.logger.Error(err, "ServiceGateway operation returned 200 OK that is not a synchronous completion; propagating as a failure",
+			"operation", operation, "serviceGateway", serviceGatewayName, "errorCode", respErr.ErrorCode)
+	}
+	return err
+}
